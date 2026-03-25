@@ -15,9 +15,9 @@ func main() {
 		log.Fatalf("load config failed: %v", err)
 	}
 
-	db, err := bootstrap.InitMySQL(cfg.Database.DSN, cfg.Database.MaxIdleConns, cfg.Database.MaxOpenConns, cfg.Database.ConnMaxLifetimeMinutes)
+	db, err := bootstrap.InitPostgres(cfg.Database.DSN, cfg.Database.MaxIdleConns, cfg.Database.MaxOpenConns, cfg.Database.ConnMaxLifetimeMinutes)
 	if err != nil {
-		log.Fatalf("init mysql failed: %v", err)
+		log.Fatalf("init postgres failed: %v", err)
 	}
 
 	r := router.NewRouter(db)
