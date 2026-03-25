@@ -3,7 +3,7 @@ server:
   port: 8080
 
 database:
-  dsn: "root:123456@tcp(127.0.0.1:3306)/task_system?charset=utf8mb4&parseTime=True&loc=Local"
+  dsn: "host=127.0.0.1 port=5432 user=postgres password=123456 dbname=task_system sslmode=disable TimeZone=Asia/Shanghai"
   max_idle_conns: 10
   max_open_conns: 50
   conn_max_lifetime_minutes: 60

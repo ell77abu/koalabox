@@ -13,12 +13,12 @@
 ## What this scaffold provides
 - Project entry and startup flow.
 - Config loader (yaml + env overrides).
-- MySQL bootstrap with connection pool and ping check.
+- PostgreSQL bootstrap with connection pool and ping check.
 - Gin router with `/ping` and `/api/v1/ping` health check endpoints.
 - Unified JSON response format.
 
 ## Run commands
-1. Ensure MySQL is running and schema created from `db/schema.sql`.
+1. Ensure PostgreSQL is running and schema created from `db/schema_postgres.sql`.
 2. Update `configs/config.yaml` database dsn and jwt secret.
 3. Run commands:
 
@@ -33,5 +33,5 @@ go run ./cmd/server
 
 ## Environment variable override examples
 - `APP_SERVER_PORT=9090`
-- `APP_DATABASE_DSN=root:pwd@tcp(127.0.0.1:3306)/task_system?charset=utf8mb4&parseTime=True&loc=Local`
+- `APP_DATABASE_DSN=host=127.0.0.1 port=5432 user=postgres password=pwd dbname=task_system sslmode=disable TimeZone=Asia/Shanghai`
 - `APP_JWT_SECRET=your-secret`

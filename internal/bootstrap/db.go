@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"time"
 
-	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
-func InitMySQL(dsn string, maxIdleConns, maxOpenConns, connMaxLifetimeMinutes int) (*gorm.DB, error) {
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+func InitPostgres(dsn string, maxIdleConns, maxOpenConns, connMaxLifetimeMinutes int) (*gorm.DB, error) {
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		return nil, fmt.Errorf("open mysql: %w", err)
+		return nil, fmt.Errorf("open postgres: %w", err)
 	}
 
 	sqlDB, err := db.DB()
@@ -24,7 +24,7 @@ func InitMySQL(dsn string, maxIdleConns, maxOpenConns, connMaxLifetimeMinutes in
 	sqlDB.SetConnMaxLifetime(time.Duration(connMaxLifetimeMinutes) * time.Minute)
 
 	if err := sqlDB.Ping(); err != nil {
-		return nil, fmt.Errorf("ping mysql: %w", err)
+		return nil, fmt.Errorf("ping postgres: %w", err)
 	}
 
 	return db, nil

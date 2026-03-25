@@ -1,7 +1,7 @@
 # Collaborative Task Management - Database Design (Go backend)
 
 ## 1. Database Choice
-- RDBMS: MySQL 8.0+
+- RDBMS: PostgreSQL 14+
 - Reason:
   - Strong consistency for task CRUD and ownership control.
   - Native constraints for enum and priority checks.
@@ -12,7 +12,7 @@
 - tasks
 - task_audit_logs (optional but recommended)
 
-See SQL file: `db/schema.sql`.
+See SQL file: `db/schema_postgres.sql`.
 
 ## 3. Field Design Mapping to API
 ### users
