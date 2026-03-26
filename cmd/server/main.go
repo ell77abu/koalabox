@@ -20,7 +20,7 @@ func main() {
 		log.Fatalf("init postgres failed: %v", err)
 	}
 
-	r := router.NewRouter(db)
+	r := router.NewRouter(db, cfg)
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	log.Printf("server starting on %s", addr)
 
