@@ -18,13 +18,14 @@ See SQL file: `db/schema_postgres.sql`.
 ### users
 - id: primary key
 - username: unique, matches `[A-Za-z0-9_]{4,20}`
-- password_hash: store bcrypt/argon2 hash only
+- password_hash: store bcrypt/argon2 hash only `[a-zA-Z0-9_]{6,30}`
 - created_at / updated_at / deleted_at
 
 ### tasks
 - id: primary key
 - user_id: owner user id
 - title / description
+- message
 - status: `TODO|DOING|DONE|ERROR`
 - priority: `1|2|3`
 - deadline: nullable datetime
