@@ -15,8 +15,6 @@ CREATE TABLE IF NOT EXISTS users (
   deleted_at TIMESTAMP NULL,
   CONSTRAINT chk_users_username_format
     CHECK (username ~ '^[A-Za-z0-9_]{4,20}$')
-  CONSTRAINT chk_users_password_format
-    CHECK (password_hash ~ '^[A-Za-z0-9_]{6,30}$')
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
