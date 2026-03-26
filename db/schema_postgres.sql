@@ -15,12 +15,15 @@ CREATE TABLE IF NOT EXISTS users (
   deleted_at TIMESTAMP NULL,
   CONSTRAINT chk_users_username_format
     CHECK (username ~ '^[A-Za-z0-9_]{4,20}$')
+  CONSTRAINT chk_users_password_format
+    CHECK (password_hash ~ '^[A-Za-z0-9_]{6,30}$')
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
   id BIGSERIAL PRIMARY KEY,
   user_id BIGINT NOT NULL REFERENCES users(id),
   title VARCHAR(120) NOT NULL,
+  message TEXT NOT NULL,
   description TEXT NULL,
   status VARCHAR(10) NOT NULL DEFAULT 'TODO',
   priority SMALLINT NOT NULL DEFAULT 2,
