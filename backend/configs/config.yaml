@@ -4,7 +4,7 @@ server:
 
 database:
   dsn: "host=127.0.0.1 port=5432 user=postgres password=admin dbname=sec sslmode=disable TimeZone=Asia/Shanghai"
-  max_idle_conns: 10W
+  max_idle_conns: 10
   max_open_conns: 50
   conn_max_lifetime_minutes: 60
 
