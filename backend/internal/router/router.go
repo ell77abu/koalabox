@@ -34,6 +34,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		{
 			authGroup.POST("/register", authHandler.Register)
 			authGroup.POST("/login", authHandler.Login)
+			authGroup.PUT("/password", middleware.JWTAuth(cfg.JWT.Secret), authHandler.ChangePassword)
 		}
 
 		taskGroup := apiV1.Group("/tasks")

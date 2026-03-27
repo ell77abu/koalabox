@@ -63,3 +63,42 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	response.Success(c, "login success", data)
 }
+
+func (h *AuthHandler) ChangePassword(c *gin.Context) {
+	userIDValue, exists := c.Get("user_id")
+	if !exists {
+		response.Unauthorized(c, "unauthorized")
+		return
+	}
+	userID, ok := userIDValue.(uint64)
+	if !ok {
+		response.Unauthorized(c, "invalid auth context")
+		return
+	}
+
+	var req service.ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "invalid request body")
+		return
+	}
+
+	err := h.authService.ChangePassword(c.Request.Context(), userID, req)
+	if errors.Is(err, service.ErrInvalidPassword) {
+		response.BadRequest(c, "invalid new password")
+		return
+	}
+	if errors.Is(err, service.ErrInvalidOldPassword) {
+		response.BadRequest(c, "invalid old password")
+		return
+	}
+	if errors.Is(err, service.ErrInvalidCredentials) {
+		response.Unauthorized(c, "unauthorized")
+		return
+	}
+	if err != nil {
+		response.InternalError(c, "change password failed")
+		return
+	}
+
+	response.Success(c, "change password success", nil)
+}

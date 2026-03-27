@@ -23,7 +23,8 @@ const (
 
 // User maps to users table.
 type User struct {
-	ID uint64 `json:"id" db:"id"`
+	ID    uint64 `json:"id" db:"id"`
+	Level uint8  `json:"level" db:"level"`
 	// Enforce username regex ^[A-Za-z0-9_]{4,20}$ in request DTO/service layer.
 	Username     string     `json:"username" db:"username"`
 	PasswordHash string     `json:"-" db:"password_hash"`
@@ -68,6 +69,7 @@ type CommonResponse[T any] struct {
 type LoginResponseData struct {
 	Token    string `json:"token"`
 	Username string `json:"username"`
+	Level    uint8  `json:"level"`
 }
 
 // Paging defines common list query params.

@@ -34,10 +34,10 @@ type UpdateTaskRequest struct {
 }
 
 type TaskService interface {
-	List(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, int, int, error)
+	List(ctx context.Context, userID uint64, userLevel uint8, page, size int) ([]model.Task, int64, int, int, error)
 	Create(ctx context.Context, userID uint64, req CreateTaskRequest) (*model.Task, error)
-	Update(ctx context.Context, userID, taskID uint64, req UpdateTaskRequest) (*model.Task, error)
-	Delete(ctx context.Context, userID, taskID uint64) error
+	Update(ctx context.Context, userID uint64, userLevel uint8, taskID uint64, req UpdateTaskRequest) (*model.Task, error)
+	Delete(ctx context.Context, userID uint64, userLevel uint8, taskID uint64) error
 }
 
 type taskService struct {
@@ -48,7 +48,7 @@ func NewTaskService(taskRepo repository.TaskRepository) TaskService {
 	return &taskService{taskRepo: taskRepo}
 }
 
-func (s *taskService) List(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, int, int, error) {
+func (s *taskService) List(ctx context.Context, userID uint64, userLevel uint8, page, size int) ([]model.Task, int64, int, int, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -59,7 +59,16 @@ func (s *taskService) List(ctx context.Context, userID uint64, page, size int) (
 		size = 100
 	}
 
-	list, total, err := s.taskRepo.ListByUserID(ctx, userID, page, size)
+	var (
+		list  []model.Task
+		total int64
+		err   error
+	)
+	if userLevel == 1 {
+		list, total, err = s.taskRepo.ListAll(ctx, page, size)
+	} else {
+		list, total, err = s.taskRepo.ListByUserID(ctx, userID, page, size)
+	}
 	if err != nil {
 		return nil, 0, 0, 0, err
 	}
@@ -107,8 +116,16 @@ func (s *taskService) Create(ctx context.Context, userID uint64, req CreateTaskR
 	return task, nil
 }
 
-func (s *taskService) Update(ctx context.Context, userID, taskID uint64, req UpdateTaskRequest) (*model.Task, error) {
-	task, err := s.taskRepo.GetByIDAndUserID(ctx, taskID, userID)
+func (s *taskService) Update(ctx context.Context, userID uint64, userLevel uint8, taskID uint64, req UpdateTaskRequest) (*model.Task, error) {
+	var (
+		task *model.Task
+		err  error
+	)
+	if userLevel == 1 {
+		task, err = s.taskRepo.GetByID(ctx, taskID)
+	} else {
+		task, err = s.taskRepo.GetByIDAndUserID(ctx, taskID, userID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -145,8 +162,17 @@ func (s *taskService) Update(ctx context.Context, userID, taskID uint64, req Upd
 		task.Deadline = deadline
 	}
 
-	if err := s.taskRepo.UpdateByIDAndUserID(ctx, task); err != nil {
+	if userLevel == 1 {
+		err = s.taskRepo.UpdateByID(ctx, task)
+	} else {
+		err = s.taskRepo.UpdateByIDAndUserID(ctx, task)
+	}
+	if err != nil {
 		return nil, err
+	}
+
+	if userLevel == 1 {
+		return s.taskRepo.GetByID(ctx, taskID)
 	}
 
 	updated, err := s.taskRepo.GetByIDAndUserID(ctx, taskID, userID)
@@ -156,7 +182,10 @@ func (s *taskService) Update(ctx context.Context, userID, taskID uint64, req Upd
 	return updated, nil
 }
 
-func (s *taskService) Delete(ctx context.Context, userID, taskID uint64) error {
+func (s *taskService) Delete(ctx context.Context, userID uint64, userLevel uint8, taskID uint64) error {
+	if userLevel == 1 {
+		return s.taskRepo.DeleteByID(ctx, taskID)
+	}
 	return s.taskRepo.DeleteByIDAndUserID(ctx, taskID, userID)
 }
 

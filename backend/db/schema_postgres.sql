@@ -9,10 +9,12 @@
 CREATE TABLE IF NOT EXISTS users (
   id BIGSERIAL PRIMARY KEY,
   username VARCHAR(20) NOT NULL UNIQUE,
+  level SMALLINT NOT NULL DEFAULT 0,
   password_hash VARCHAR(255) NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at TIMESTAMP NULL,
+  CONSTRAINT chk_users_level CHECK (level IN (0, 1)),
   CONSTRAINT chk_users_username_format
     CHECK (username ~ '^[A-Za-z0-9_]{4,20}$')
 );
