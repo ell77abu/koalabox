@@ -73,7 +73,7 @@
             <div class="task-main">
               <div class="task-title-section">
                 <h3>{{ task.title }}</h3>
-                <span class="status-badge" :class="`status-${task.status.toLowerCase()}`">
+                <span class="status-badge" :class="`status-${(task.status || 'TODO').toLowerCase()}`">
                   {{ statusLabel(task.status) }}
                 </span>
                 <span
@@ -239,12 +239,16 @@ const loadTasks = async () => {
   try {
     const response = await getTasksApi(taskStore.currentPage.value, taskStore.pageSize.value);
     if (response.data.code === 0) {
-      taskStore.setTasks(response.data.data || []);
-      // 假设后端返回 total 字段，若无则使用返回的数据长度
-      const total = response.data.total || (response.data.data?.length || 0);
+      const pageData = response.data.data || {};
+      const list = Array.isArray(pageData.list) ? pageData.list : [];
+      const total = Number(pageData.total || 0);
+      const currentPage = Number(pageData.page || taskStore.currentPage.value);
+      const pageSize = Number(pageData.size || taskStore.pageSize.value);
+
+      taskStore.setTasks(list);
       taskStore.setPageInfo(
-        taskStore.currentPage.value,
-        taskStore.pageSize.value,
+        currentPage,
+        pageSize,
         total
       );
     }
@@ -270,7 +274,7 @@ const onCreateTask = async () => {
       title: newTask.title,
       description: newTask.description || null,
       priority: parseInt(newTask.priority),
-      deadline: newTask.deadline || null,
+      deadline: formatDateTimeForBackend(newTask.deadline),
       status: 'TODO',
     };
 
@@ -303,7 +307,7 @@ const onUpdateTask = async () => {
       description: editingTask.description || null,
       status: editingTask.status,
       priority: parseInt(editingTask.priority),
-      deadline: editingTask.deadline || null,
+      deadline: formatDateTimeForBackend(editingTask.deadline),
     };
 
     const response = await updateTaskApi(editingTask.id, payload);
@@ -401,14 +405,22 @@ const formatDateForInput = (dateStr) => {
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 };
 
+// 转换 datetime-local 值到后端约定格式：YYYY-MM-DD HH:mm:ss
+const formatDateTimeForBackend = (inputValue) => {
+  if (!inputValue) return null;
+  const normalized = inputValue.replace('T', ' ');
+  return normalized.length === 16 ? `${normalized}:00` : normalized;
+};
+
 // 状态标签
 const statusLabel = (status) => {
   const map = {
     TODO: '待做',
     DOING: '进行中',
     DONE: '已完成',
+    ERROR: '异常',
   };
-  return map[status] || status;
+  return map[status] || status || '待做';
 };
 
 // 优先级标签

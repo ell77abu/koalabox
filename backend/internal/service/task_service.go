@@ -177,9 +177,19 @@ func parseDeadline(input string) (*time.Time, error) {
 	if strings.TrimSpace(input) == "" {
 		return nil, nil
 	}
-	t, err := time.ParseInLocation("2006-01-02 15:04:05", input, time.Local)
-	if err != nil {
-		return nil, ErrInvalidTaskDeadline
+
+	formats := []string{
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04",
 	}
-	return &t, nil
+
+	for _, layout := range formats {
+		t, err := time.ParseInLocation(layout, input, time.Local)
+		if err == nil {
+			return &t, nil
+		}
+	}
+
+	return nil, ErrInvalidTaskDeadline
 }
