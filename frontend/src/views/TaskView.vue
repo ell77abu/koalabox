@@ -62,6 +62,11 @@
           <p>加载中...</p>
         </div>
 
+        <!-- 错误状态 -->
+        <div v-else-if="listError" class="empty-state">
+          <p>{{ listError }}</p>
+        </div>
+
         <!-- 空状态 -->
         <div v-else-if="taskStore.tasks.value.length === 0" class="empty-state">
           <p>暂无任务，创建一个新任务开始吧！</p>
@@ -224,6 +229,7 @@ const updatingId = ref(null);
 const deletingId = ref(null);
 const createError = ref('');
 const updateError = ref('');
+const listError = ref('');
 
 // 退出登录
 const logout = async () => {
@@ -236,6 +242,7 @@ const logout = async () => {
 const loadTasks = async () => {
   loading.value = true;
   taskStore.setLoading(true);
+  listError.value = '';
   try {
     const response = await getTasksApi(taskStore.currentPage.value, taskStore.pageSize.value);
     if (response.data.code === 0) {
@@ -251,8 +258,11 @@ const loadTasks = async () => {
         pageSize,
         total
       );
+    } else {
+      listError.value = response.data.message || '加载任务失败';
     }
   } catch (error) {
+    listError.value = error.response?.data?.message || '加载任务失败，请检查登录状态或后端服务';
     console.error('加载任务失败:', error);
   } finally {
     loading.value = false;
