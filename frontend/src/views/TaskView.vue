@@ -78,7 +78,7 @@
             <div class="task-main">
               <div class="task-title-section">
                 <h3>{{ task.title }}</h3>
-                <span class="status-badge" :class="`status-${(task.status || 'TODO').toLowerCase()}`">
+                <span class="status-badge" :class="`status-${String(task.status ?? 'TODO').toLowerCase()}`">
                   {{ statusLabel(task.status) }}
                 </span>
                 <span
