@@ -7,46 +7,12 @@
           <h1>任务管理</h1>
           <p class="hint">欢迎你，{{ authStore.username.value }}</p>
         </div>
-        <button class="btn btn-outline" @click="logout">退出登录</button>
+        <div class="header-actions">
+          <RouterLink to="/tasks/create" class="add-task-fab" title="创建任务">
+            <span class="plus-icon">+</span>
+          </RouterLink>
+        </div>
       </header>
-
-      <!-- 创建任务表单 -->
-      <div class="form-section">
-        <h2>创建新任务</h2>
-        <form @submit.prevent="onCreateTask" class="task-form">
-          <div class="form-row">
-            <input
-              v-model.trim="newTask.title"
-              type="text"
-              placeholder="任务标题（必填）"
-              required
-              maxlength="100"
-              class="form-input"
-            />
-            <select v-model="newTask.priority" class="form-input">
-              <option value="1">优先级：低</option>
-              <option value="2">优先级：中</option>
-              <option value="3">优先级：高</option>
-            </select>
-          </div>
-
-          <textarea
-            v-model.trim="newTask.description"
-            placeholder="任务描述（可选）"
-            class="form-input form-textarea"
-            maxlength="500"
-          ></textarea>
-
-          <div class="form-row">
-            <input v-model="newTask.deadline" type="datetime-local" class="form-input" />
-            <button type="submit" class="btn btn-primary" :disabled="creatingTask">
-              {{ creatingTask ? '创建中...' : '创建任务' }}
-            </button>
-          </div>
-
-          <p v-if="createError" class="error-msg">{{ createError }}</p>
-        </form>
-      </div>
 
       <!-- 任务列表 -->
       <div class="list-section">
@@ -62,11 +28,6 @@
           <p>加载中...</p>
         </div>
 
-        <!-- 错误状态 -->
-        <div v-else-if="listError" class="empty-state">
-          <p>{{ listError }}</p>
-        </div>
-
         <!-- 空状态 -->
         <div v-else-if="taskStore.tasks.value.length === 0" class="empty-state">
           <p>暂无任务，创建一个新任务开始吧！</p>
@@ -78,7 +39,7 @@
             <div class="task-main">
               <div class="task-title-section">
                 <h3>{{ task.title }}</h3>
-                <span class="status-badge" :class="`status-${(task.status || 'TODO').toLowerCase()}`">
+                <span class="status-badge" :class="`status-${task.status.toLowerCase()}`">
                   {{ statusLabel(task.status) }}
                 </span>
                 <span
@@ -192,7 +153,7 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, RouterLink } from 'vue-router';
 import { authStore } from '../stores/auth';
 import { taskStore } from '../stores/task';
 import {
@@ -229,7 +190,6 @@ const updatingId = ref(null);
 const deletingId = ref(null);
 const createError = ref('');
 const updateError = ref('');
-const listError = ref('');
 
 // 退出登录
 const logout = async () => {
@@ -242,27 +202,19 @@ const logout = async () => {
 const loadTasks = async () => {
   loading.value = true;
   taskStore.setLoading(true);
-  listError.value = '';
   try {
     const response = await getTasksApi(taskStore.currentPage.value, taskStore.pageSize.value);
     if (response.data.code === 0) {
-      const pageData = response.data.data || {};
-      const list = Array.isArray(pageData.list) ? pageData.list : [];
-      const total = Number(pageData.total || 0);
-      const currentPage = Number(pageData.page || taskStore.currentPage.value);
-      const pageSize = Number(pageData.size || taskStore.pageSize.value);
-
-      taskStore.setTasks(list);
+      taskStore.setTasks(response.data.data || []);
+      // 假设后端返回 total 字段，若无则使用返回的数据长度
+      const total = response.data.total || (response.data.data?.length || 0);
       taskStore.setPageInfo(
-        currentPage,
-        pageSize,
+        taskStore.currentPage.value,
+        taskStore.pageSize.value,
         total
       );
-    } else {
-      listError.value = response.data.message || '加载任务失败';
     }
   } catch (error) {
-    listError.value = error.response?.data?.message || '加载任务失败，请检查登录状态或后端服务';
     console.error('加载任务失败:', error);
   } finally {
     loading.value = false;
@@ -284,7 +236,7 @@ const onCreateTask = async () => {
       title: newTask.title,
       description: newTask.description || null,
       priority: parseInt(newTask.priority),
-      deadline: formatDateTimeForBackend(newTask.deadline),
+      deadline: newTask.deadline || null,
       status: 'TODO',
     };
 
@@ -317,7 +269,7 @@ const onUpdateTask = async () => {
       description: editingTask.description || null,
       status: editingTask.status,
       priority: parseInt(editingTask.priority),
-      deadline: formatDateTimeForBackend(editingTask.deadline),
+      deadline: editingTask.deadline || null,
     };
 
     const response = await updateTaskApi(editingTask.id, payload);
@@ -415,22 +367,14 @@ const formatDateForInput = (dateStr) => {
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 };
 
-// 转换 datetime-local 值到后端约定格式：YYYY-MM-DD HH:mm:ss
-const formatDateTimeForBackend = (inputValue) => {
-  if (!inputValue) return null;
-  const normalized = inputValue.replace('T', ' ');
-  return normalized.length === 16 ? `${normalized}:00` : normalized;
-};
-
 // 状态标签
 const statusLabel = (status) => {
   const map = {
     TODO: '待做',
     DOING: '进行中',
     DONE: '已完成',
-    ERROR: '异常',
   };
-  return map[status] || status || '待做';
+  return map[status] || status;
 };
 
 // 优先级标签
