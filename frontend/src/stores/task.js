@@ -9,7 +9,7 @@ const total = ref(0);
 const hasMore = computed(() => currentPage.value * pageSize.value < total.value);
 
 const setTasks = (newTasks) => {
-  tasks.value = newTasks;
+  tasks.value = Array.isArray(newTasks) ? newTasks : [];
 };
 
 const setLoading = (isLoading) => {

@@ -32,13 +32,28 @@ data	Object/Array	具体的业务数据内容 (可选)
   "code": 0,
   "data": {
     "token": "eyJhbGci...", // JWT Token
-    "username": "user_123"
+    "username": "user_123",
+    "level": 0 // 0: 普通用户, 1: 管理员
   }
 }
 
+2.3 用户修改自己的密码
+- URL: /auth/password
+- Method: PUT
+- Header: Authorization: Bearer <token>
+- Request Body:
+- JSON
+{
+  "old_password": "OldPassword123",
+  "new_password": "NewPassword123" // 约束：长度>=6, 包含字母+数字
+}
+- Response: 200 OK / 400 Bad Request / 401 Unauthorized
+
 ---
 3. 任务管理模块 (Tasks)
-后端需从 Authorization Header 解析出用户 ID，实现“仅操作自己任务”的逻辑。
+后端需从 Authorization Header 解析出用户信息（user_id + level）。
+- 普通用户（level=0）：仅操作自己的任务。
+- 管理员用户（level=1）：可查看并管理所有用户任务。
 3.1 获取任务列表
 - URL: /tasks
 - Method: GET
@@ -47,18 +62,25 @@ data	Object/Array	具体的业务数据内容 (可选)
 - JSON
 {
   "code": 0,
-  "message": 查询成功 // 或者null？随便？
-  "data": [
-    {
-      // 展示字段取决于数据库中任务字段
-      "id": 1,
-      "title": "任务标题",
-      "status": "TODO", // 枚举：TODO, DOING, DONE,ERROR
-      "priority": 1,    // 1:低, 2:中, 3:高
-      "deadline": "2026-04-01 12:00:00"
-      ……
-    }
-  ]
+  "message": "query success",
+  "data": {
+    "list": [
+      {
+        "id": 1,
+        "user_id": 1,
+        "title": "任务标题",
+        "description": "任务描述",
+        "status": "TODO", // 枚举：TODO, DOING, DONE, ERROR
+        "priority": 1,      // 1:低, 2:中, 3:高
+        "deadline": "2026-04-01 12:00:00",
+        "created_at": "2026-03-28 10:00:00",
+        "updated_at": "2026-03-28 10:00:00"
+      }
+    ],
+    "page": 1,
+    "size": 10,
+    "total": 35
+  }
 }
 3.2 创建任务
 - URL: /tasks
@@ -87,6 +109,7 @@ data	Object/Array	具体的业务数据内容 (可选)
 4. 数据库字段
 字段名	类型	约束	说明
 id	BigInt	Primary Key, Auto Increment	唯一标识
+level	SmallInt	Default 0, Check(0/1)	用户等级：0普通用户，1管理员
 title	Varchar(100)	Not Null	任务标题
 description	Text	Nullable	详细描述
 status	Enum	Default 'TODO'	状态：TODO, DOING, DONE
