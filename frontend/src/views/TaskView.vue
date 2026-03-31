@@ -49,7 +49,10 @@
                 v-for="task in incompleteTasks"
                 :key="task.id"
                 class="task-item"
-                :class="{ 'task-item-celebrating': celebrationTaskId === task.id }"
+                :class="{
+                  'task-item-celebrating': celebrationTaskId === task.id,
+                  'task-item-completing': completingTaskId === task.id,
+                }"
               >
                 <div v-if="celebrationTaskId === task.id" class="confetti-burst" aria-hidden="true">
                   <span
@@ -138,7 +141,10 @@
                   v-for="task in completedTasks"
                   :key="task.id"
                   class="task-item task-item-done"
-                  :class="{ 'task-item-celebrating': celebrationTaskId === task.id }"
+                  :class="{
+                    'task-item-celebrating': celebrationTaskId === task.id,
+                    'task-item-arrived': arrivedTaskId === task.id,
+                  }"
                 >
                   <div v-if="celebrationTaskId === task.id" class="confetti-burst" aria-hidden="true">
                     <span
@@ -312,8 +318,12 @@ const createError = ref('');
 const updateError = ref('');
 const showCompletedHistory = ref(false);
 const celebrationTaskId = ref(null);
+const completingTaskId = ref(null);
+const arrivedTaskId = ref(null);
 const confettiPieces = Array.from({ length: 14 }, (_, index) => index);
 let celebrationTimer = null;
+let completeMoveTimer = null;
+let arrivalTimer = null;
 
 const incompleteTasks = computed(() =>
   taskStore.tasks.value.filter((task) => task.status !== 'DONE')
@@ -429,6 +439,16 @@ const triggerCelebration = (taskId) => {
   }, 1600);
 };
 
+const moveTaskToCompleted = (taskId) => {
+  taskStore.setTasks(
+    taskStore.tasks.value.map((item) =>
+      item.id === taskId
+        ? { ...item, status: 'DONE' }
+        : item
+    )
+  );
+};
+
 const markTaskDone = async (task) => {
   if (task.status === 'DONE') {
     return;
@@ -446,9 +466,28 @@ const markTaskDone = async (task) => {
 
     const response = await updateTaskApi(task.id, payload);
     if (response.data.code === 0) {
+      completingTaskId.value = task.id;
       triggerCelebration(task.id);
       showCompletedHistory.value = true;
-      await loadTasks();
+
+      if (completeMoveTimer) {
+        clearTimeout(completeMoveTimer);
+      }
+      if (arrivalTimer) {
+        clearTimeout(arrivalTimer);
+      }
+
+      completeMoveTimer = window.setTimeout(() => {
+        moveTaskToCompleted(task.id);
+        completingTaskId.value = null;
+        arrivedTaskId.value = task.id;
+        completeMoveTimer = null;
+
+        arrivalTimer = window.setTimeout(() => {
+          arrivedTaskId.value = null;
+          arrivalTimer = null;
+        }, 850);
+      }, 950);
     } else {
       alert(response.data.message || '更新失败');
     }
@@ -564,6 +603,12 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (celebrationTimer) {
     clearTimeout(celebrationTimer);
+  }
+  if (completeMoveTimer) {
+    clearTimeout(completeMoveTimer);
+  }
+  if (arrivalTimer) {
+    clearTimeout(arrivalTimer);
   }
 });
 </script>
@@ -783,6 +828,14 @@ onBeforeUnmount(() => {
 .task-item-celebrating {
   border-color: #86efac;
   box-shadow: 0 16px 36px rgba(34, 197, 94, 0.22);
+}
+
+.task-item-completing {
+  animation: task-complete-exit 0.95s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.task-item-arrived {
+  animation: task-complete-arrive 0.7s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .task-item:hover {
@@ -1097,6 +1150,35 @@ onBeforeUnmount(() => {
       )
       rotate(calc((var(--piece-index) - 4) * 28deg))
       scale(1);
+  }
+}
+
+@keyframes task-complete-exit {
+  0% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  45% {
+    opacity: 1;
+    transform: translate3d(10px, -10px, 0) scale(1.02);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate3d(30px, -18px, 0) scale(0.96);
+  }
+}
+
+@keyframes task-complete-arrive {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0) scale(0.96);
+  }
+
+  100% {
+    opacity: 0.92;
+    transform: translate3d(0, 0, 0) scale(1);
   }
 }
 </style>
