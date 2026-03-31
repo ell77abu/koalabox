@@ -7,13 +7,10 @@
         <RouterLink to="/tasks" class="nav-item" active-class="active">
           <span class="icon">📋</span> 任务中心
         </RouterLink>
-        <RouterLink to="/profile" class="nav-item" active-class="active">
-          <span class="icon">👤</span> 个人信息
-        </RouterLink>
       </nav>
-      <div class="user-info">
+      <RouterLink to="/profile" class="user-info" active-class="active-user-info">
         <span class="username">{{ authStore.username.value }}</span>
-      </div>
+      </RouterLink>
     </aside>
 
     <!-- 右侧内容区 -->
@@ -89,9 +86,24 @@ import { authStore } from './stores/auth';
 }
 
 .user-info {
+  display: block;
   padding: 16px 24px;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   font-size: 14px;
+  color: rgba(255, 255, 255, 0.85);
+  text-decoration: none;
+  transition: all 0.3s;
+}
+
+.user-info:hover,
+.active-user-info {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.username {
+  display: inline-block;
+  font-weight: 500;
 }
 
 .main-container {
