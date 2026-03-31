@@ -203,22 +203,29 @@ func isValidPriority(priority model.Priority) bool {
 }
 
 func parseDeadline(input string) (*time.Time, error) {
-	if strings.TrimSpace(input) == "" {
-		return nil, nil
-	}
+    input = strings.TrimSpace(input)
+    if input == "" {
+        return nil, nil
+    }
 
-	formats := []string{
-		"2006-01-02 15:04:05",
-		"2006-01-02T15:04:05",
-		"2006-01-02T15:04",
-	}
+    // 优先使用 Go 内置的 RFC3339Nano（支持毫秒、微秒、Z 或 ±时区）
+    if t, err := time.Parse(time.RFC3339Nano, input); err == nil {
+        return &t, nil
+    }
 
-	for _, layout := range formats {
-		t, err := time.ParseInLocation(layout, input, time.Local)
-		if err == nil {
-			return &t, nil
-		}
-	}
+    // 兼容旧格式（可选）
+    formats := []string{
+        "2006-01-02 15:04:05",
+        "2006-01-02T15:04:05",
+        "2006-01-02T15:04:05.999999999", // 带毫秒但不带 Z
+        "2006-01-02T15:04",
+    }
 
-	return nil, ErrInvalidTaskDeadline
+    for _, layout := range formats {
+        if t, err := time.ParseInLocation(layout, input, time.Local); err == nil {
+            return &t, nil
+        }
+    }
+
+    return nil, ErrInvalidTaskDeadline
 }

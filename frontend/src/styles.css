@@ -79,6 +79,48 @@ input:focus {
   border-color: var(--primary);
 }
 
+.password-field {
+  position: relative;
+}
+
+.password-field input {
+  width: 100%;
+  padding-right: 44px;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 999px;
+  padding: 0;
+}
+
+.password-toggle:hover {
+  background: rgba(28, 126, 214, 0.08);
+  color: var(--primary);
+}
+
+.password-toggle-icon {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .btn {
   height: 42px;
   border: none;
@@ -156,4 +198,58 @@ input:focus {
     flex-direction: column;
     align-items: flex-start;
   }
+}
+
+/* 悬浮加号按钮 (FAB) 样式 */
+.add-task-fab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  background-color: var(--primary);
+  color: white;
+  border-radius: 50%;
+  text-decoration: none;
+  font-size: 28px;
+  box-shadow: 0 4px 12px rgba(28, 126, 214, 0.3);
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  position: relative;
+}
+
+.add-task-fab:hover {
+  background-color: var(--primary-hover);
+  transform: scale(1.1);
+  box-shadow: 0 6px 16px rgba(28, 126, 214, 0.4);
+}
+
+.add-task-fab:hover .plus-icon {
+  transform: rotate(90deg);
+}
+
+/* 悬浮文字提示 */
+.add-task-fab::after {
+  content: "创建任务";
+  position: absolute;
+  top: 50%;
+  right: 60px;
+  transform: translateY(-50%) rotate(0deg);
+  background: rgba(0, 0, 0, 0.75);
+  color: white;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+
+.add-task-fab:hover::after {
+  opacity: 1;
+}
+
+.plus-icon {
+  line-height: 1;
+  margin-top: -2px;
 }
