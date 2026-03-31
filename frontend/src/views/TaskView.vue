@@ -3,11 +3,33 @@
     <section class="card card-wide">
       <!-- 页头 -->
       <header class="task-header">
-        <div>
+        <div class="task-title">
           <h1>任务管理</h1>
           <p class="hint">欢迎你，{{ authStore.username.value }}</p>
         </div>
         <div class="header-actions">
+          <div class="search-box">
+            <span class="search-fab" aria-hidden="true">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2" />
+                <line x1="16.65" y1="16.65" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </span>
+            <input
+              v-model.trim="searchQuery"
+              type="search"
+              placeholder="搜索任务"
+              class="search-input"
+            />
+            <button
+              v-if="isSearching"
+              type="button"
+              class="search-clear"
+              @click="searchQuery = ''"
+            >
+              清除
+            </button>
+          </div>
           <RouterLink to="/tasks/create" class="add-task-fab" title="创建任务">
             <span class="plus-icon">+</span>
           </RouterLink>
@@ -18,8 +40,13 @@
       <div class="list-section">
         <div class="list-header">
           <h2>任务列表</h2>
-          <p v-if="!loading && taskStore.tasks.value.length > 0" class="hint">
-            共 {{ taskStore.total.value }} 个任务
+          <p v-if="!loading && displayedTasks.length > 0" class="hint">
+            <template v-if="isSearching">
+              搜索结果 {{ displayedTasks.length }} 项
+            </template>
+            <template v-else>
+              共 {{ taskStore.total.value }} 个任务
+            </template>
           </p>
         </div>
 
@@ -29,8 +56,9 @@
         </div>
 
         <!-- 空状态 -->
-        <div v-else-if="taskStore.tasks.value.length === 0" class="empty-state">
-          <p>暂无任务，创建一个新任务开始吧！</p>
+        <div v-else-if="displayedTasks.length === 0" class="empty-state">
+          <p v-if="isSearching">未找到匹配的任务。</p>
+          <p v-else>暂无任务，创建一个新任务开始吧！</p>
         </div>
 
         <!-- 任务列表 -->
@@ -41,7 +69,28 @@
                 <h3>待办任务</h3>
                 <!-- <p>优先展示待做和进行中的任务</p> -->
               </div>
-              <span class="task-group-count">{{ incompleteTasks.length }}</span>
+              <div class="task-group-actions">
+                <div class="sort-control">
+                  <span class="sort-fab" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path
+                        d="M7 4v14M7 18l-3-3m3 3l3-3M17 20V6m0 0l-3 3m3-3l3 3"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </span>
+                  <select id="task-sort" v-model="sortOption" class="sort-select">
+                    <option value="default">默认顺序</option>
+                    <option value="deadline">按截止时间</option>
+                    <option value="priority">按优先级</option>
+                  </select>
+                </div>
+                <span class="task-group-count">{{ incompleteTasks.length }}</span>
+              </div>
             </div>
 
             <div v-if="incompleteTasks.length" class="task-group-list">
@@ -80,10 +129,10 @@
 
                   <div class="task-meta">
                     <span v-if="task.deadline" class="meta-item">
-                      📅 {{ formatDate(task.deadline) }}
+                      <span class="meta-label">截止时间：</span>{{ formatDate(task.deadline) }}
                     </span>
                     <span class="meta-item">
-                      🕐 {{ formatDate(task.created_at) }}
+                      <span class="meta-label">创建时间：</span>{{ formatDate(task.created_at) }}
                     </span>
                   </div>
                 </div>
@@ -172,10 +221,10 @@
 
                     <div class="task-meta">
                       <span v-if="task.deadline" class="meta-item">
-                        📅 {{ formatDate(task.deadline) }}
+                        <span class="meta-label">截止时间：</span>{{ formatDate(task.deadline) }}
                       </span>
                       <span class="meta-item">
-                        🕐 {{ formatDate(task.created_at) }}
+                        <span class="meta-label">创建时间：</span>{{ formatDate(task.created_at) }}
                       </span>
                     </div>
                   </div>
@@ -207,7 +256,7 @@
         </div>
 
         <!-- 分页 -->
-        <div v-if="taskStore.tasks.value.length > 0" class="pagination">
+        <div v-if="taskStore.tasks.value.length > 0 && !isSearching" class="pagination">
           <button
             :disabled="taskStore.currentPage.value === 1 || loading"
             @click="onPrevPage"
@@ -278,7 +327,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import { useRouter, RouterLink } from 'vue-router';
 import { authStore } from '../stores/auth';
 import { taskStore } from '../stores/task';
@@ -316,6 +365,8 @@ const updatingId = ref(null);
 const deletingId = ref(null);
 const createError = ref('');
 const updateError = ref('');
+const searchQuery = ref('');
+const sortOption = ref('default');
 const showCompletedHistory = ref(false);
 const celebrationTaskId = ref(null);
 const completingTaskId = ref(null);
@@ -325,12 +376,25 @@ let celebrationTimer = null;
 let completeMoveTimer = null;
 let arrivalTimer = null;
 
+const displayedTasks = computed(() => {
+  const list = taskStore.tasks.value;
+  const keyword = searchQuery.value.trim().toLowerCase();
+  if (!keyword) {
+    return list;
+  }
+  return list.filter((task) =>
+    String(task.title || '').toLowerCase().includes(keyword)
+  );
+});
+
+const isSearching = computed(() => searchQuery.value.trim().length > 0);
+
 const incompleteTasks = computed(() =>
-  taskStore.tasks.value.filter((task) => task.status !== 'DONE')
+  displayedTasks.value.filter((task) => task.status !== 'DONE')
 );
 
 const completedTasks = computed(() =>
-  taskStore.tasks.value.filter((task) => task.status === 'DONE')
+  displayedTasks.value.filter((task) => task.status === 'DONE')
 );
 
 // 退出登录
@@ -345,7 +409,11 @@ const loadTasks = async () => {
   loading.value = true;
   taskStore.setLoading(true);
   try {
-    const response = await getTasksApi(taskStore.currentPage.value, taskStore.pageSize.value);
+    const response = await getTasksApi(
+      taskStore.currentPage.value,
+      taskStore.pageSize.value,
+      sortOption.value
+    );
     if (response.data.code === 0) {
       const pageData = response.data.data || {};
       const list = Array.isArray(pageData.list) ? pageData.list : [];
@@ -601,6 +669,11 @@ onMounted(() => {
   loadTasks();
 });
 
+watch(sortOption, async () => {
+  taskStore.currentPage.value = 1;
+  await loadTasks();
+});
+
 onBeforeUnmount(() => {
   if (celebrationTimer) {
     clearTimeout(celebrationTimer);
@@ -618,11 +691,124 @@ onBeforeUnmount(() => {
 /* 头部 */
 .task-header {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1rem;
   margin-bottom: 2rem;
   padding-bottom: 1rem;
   border-bottom: 1px solid #e5e7eb;
+}
+
+.task-title {
+  text-align: center;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.task-group-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.sort-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.25rem 0.75rem 0.25rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.sort-fab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(28, 126, 214, 0.28);
+  flex-shrink: 0;
+}
+
+.sort-fab svg {
+  width: 16px;
+  height: 16px;
+}
+
+.sort-select {
+  border: none;
+  background: transparent;
+  font-size: 0.85rem;
+  color: #1f2937;
+  cursor: pointer;
+}
+
+.sort-select:focus {
+  outline: none;
+}
+
+.search-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.25rem 0.75rem 0.25rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  flex: 1;
+}
+
+.search-fab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(28, 126, 214, 0.28);
+  flex-shrink: 0;
+}
+
+.search-fab svg {
+  width: 18px;
+  height: 18px;
+}
+
+.search-input {
+  border: none;
+  background: transparent;
+  width: 100%;
+  font-size: 0.85rem;
+  color: #1f2937;
+}
+
+.search-input:focus {
+  outline: none;
+}
+
+.search-clear {
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+}
+
+.search-clear:hover {
+  color: #0f172a;
 }
 
 .task-header h1 {
@@ -962,6 +1148,13 @@ onBeforeUnmount(() => {
   gap: 0.25rem;
 }
 
+.meta-label {
+  color: #64748b;
+  font-size: 0.85rem;
+  min-width: 72px;
+  display: inline-block;
+}
+
 /* 任务操作 */
 .task-actions {
   display: flex;
@@ -1097,10 +1290,29 @@ onBeforeUnmount(() => {
 
 /* 响应式设计 */
 @media (max-width: 768px) {
+  .header-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .search-box {
+    flex: 1;
+  }
+
+  .search-input {
+    width: 100%;
+  }
+
   .task-group-header,
   .history-toggle {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .task-group-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .history-toggle-meta {
