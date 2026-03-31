@@ -18,6 +18,7 @@ func NewAuthHandler(authService service.AuthService) *AuthHandler {
 	return &AuthHandler{authService: authService}
 }
 
+// Register 处理注册请求，并将 Service 错误映射到 HTTP 响应。
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req service.RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -44,6 +45,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	})
 }
 
+// Login 校验登录凭证，成功后返回 JWT 相关数据。
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req service.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -64,6 +66,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	response.Success(c, "login success", data)
 }
 
+// ChangePassword 允许已登录用户修改自己的密码。
 func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	userIDValue, exists := c.Get("user_id")
 	if !exists {

@@ -2,7 +2,7 @@ package model
 
 import "time"
 
-// TaskStatus matches API enum: TODO, DOING, DONE, ERROR.
+// TaskStatus 对应 API 中的任务状态枚举：TODO、DOING、DONE、ERROR。
 type TaskStatus string
 
 const (
@@ -12,7 +12,7 @@ const (
 	TaskStatusERROR TaskStatus = "ERROR"
 )
 
-// Priority: 1=low, 2=medium, 3=high.
+// Priority 任务优先级：1=低，2=中，3=高。
 type Priority uint8
 
 const (
@@ -21,11 +21,11 @@ const (
 	PriorityHigh   Priority = 3
 )
 
-// User maps to users table.
+// User 映射 users 表。
 type User struct {
 	ID    uint64 `json:"id" db:"id"`
 	Level uint8  `json:"level" db:"level"`
-	// Enforce username regex ^[A-Za-z0-9_]{4,20}$ in request DTO/service layer.
+	// 用户名正则 ^[A-Za-z0-9_]{4,20}$ 在请求 DTO/Service 层校验。
 	Username     string     `json:"username" db:"username"`
 	PasswordHash string     `json:"-" db:"password_hash"`
 	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
@@ -33,7 +33,7 @@ type User struct {
 	DeletedAt    *time.Time `json:"-" db:"deleted_at"`
 }
 
-// Task maps to tasks table.
+// Task 映射 tasks 表。
 type Task struct {
 	ID          uint64     `json:"id" db:"id"`
 	UserID      uint64     `json:"user_id" db:"user_id"`
@@ -47,7 +47,7 @@ type Task struct {
 	DeletedAt   *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`
 }
 
-// TaskAuditLog maps to task_audit_logs table.
+// TaskAuditLog 映射 task_audit_logs 表。
 type TaskAuditLog struct {
 	ID        uint64    `json:"id" db:"id"`
 	TaskID    uint64    `json:"task_id" db:"task_id"`
@@ -58,21 +58,21 @@ type TaskAuditLog struct {
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 }
 
-// CommonResponse follows the API unified response style.
+// CommonResponse 为 API 统一响应结构。
 type CommonResponse[T any] struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Data    T      `json:"data"`
 }
 
-// LoginResponseData follows /auth/login success payload.
+// LoginResponseData 对应 /auth/login 成功返回的数据结构。
 type LoginResponseData struct {
 	Token    string `json:"token"`
 	Username string `json:"username"`
 	Level    uint8  `json:"level"`
 }
 
-// Paging defines common list query params.
+// Paging 定义列表查询通用分页参数。
 type Paging struct {
 	Page int `json:"page" form:"page" validate:"min=1"`
 	Size int `json:"size" form:"size" validate:"min=1,max=100"`
