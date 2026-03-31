@@ -3,7 +3,7 @@ package handler
 import (
 	"errors"
 	"strconv"
-
+	"strings"
 	"github.com/gin-gonic/gin"
 
 	"task-backend/internal/middleware"
@@ -20,6 +20,7 @@ func NewTaskHandler(taskService service.TaskService) *TaskHandler {
 	return &TaskHandler{taskService: taskService}
 }
 
+//支持排序
 func (h *TaskHandler) List(c *gin.Context) {
 	userID, ok := getUserIDFromContext(c)
 	if !ok {
@@ -33,7 +34,26 @@ func (h *TaskHandler) List(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	size, _ := strconv.Atoi(c.DefaultQuery("size", "10"))
 
-	list, total, fixedPage, fixedSize, err := h.taskService.List(c.Request.Context(), userID, userLevel, page, size)
+	// 新增搜索 + 排序参数
+	search := strings.TrimSpace(c.DefaultQuery("search", ""))
+	sortField := strings.ToLower(strings.TrimSpace(c.DefaultQuery("sort", "created_at")))
+	orderDir := strings.ToLower(strings.TrimSpace(c.DefaultQuery("order", "desc")))
+
+	// 规范化 orderDir
+	if orderDir != "asc" && orderDir != "desc" {
+		orderDir = "desc"
+	}
+
+	list, total, fixedPage, fixedSize, err := h.taskService.List(
+		c.Request.Context(),
+		userID,
+		userLevel,
+		page,
+		size,
+		search,     // 新增
+		sortField,
+		orderDir,
+	)
 	if err != nil {
 		response.InternalError(c, "query tasks failed")
 		return
