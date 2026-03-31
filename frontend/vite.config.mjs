@@ -8,7 +8,7 @@ export default defineConfig({
     // 生产环境：直接请求真实后端服务器（在 http.js 中配置）
     proxy: {
       '/api/v1': {
-        target: 'http://localhost:3001',
+        target: 'http://localhost:8080',
         changeOrigin: true,
       },
     },
