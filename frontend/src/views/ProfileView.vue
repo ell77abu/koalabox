@@ -11,12 +11,17 @@
         <span class="value tag">普通用户</span>
       </div>
     </div>
-    <button class="btn logout-btn" @click="onLogout">退出登录</button>
+    <div class="profile-actions">
+      <RouterLink to="/profile/password" class="btn change-password-link">
+        修改密码
+      </RouterLink>
+      <button class="btn logout-btn" @click="onLogout">退出登录</button>
+    </div>
   </section>
 </template>
 
 <script setup>
-import { useRouter } from 'vue-router';
+import { RouterLink, useRouter } from 'vue-router';
 import { authStore } from '../stores/auth';
 
 const router = useRouter();
@@ -72,10 +77,22 @@ const onLogout = () => {
 
 .logout-btn {
   background-color: #ff4d4f;
-  margin-top: 20px;
 }
 
 .logout-btn:hover {
   background-color: #ff7875;
+}
+
+.profile-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.change-password-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
 }
 </style>
