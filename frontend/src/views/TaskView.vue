@@ -7,46 +7,12 @@
           <h1>任务管理</h1>
           <p class="hint">欢迎你，{{ authStore.username.value }}</p>
         </div>
-        <button class="btn btn-outline" @click="logout">退出登录</button>
+        <div class="header-actions">
+          <RouterLink to="/tasks/create" class="add-task-fab" title="创建任务">
+            <span class="plus-icon">+</span>
+          </RouterLink>
+        </div>
       </header>
-
-      <!-- 创建任务表单 -->
-      <div class="form-section">
-        <h2>创建新任务</h2>
-        <form @submit.prevent="onCreateTask" class="task-form">
-          <div class="form-row">
-            <input
-              v-model.trim="newTask.title"
-              type="text"
-              placeholder="任务标题（必填）"
-              required
-              maxlength="100"
-              class="form-input"
-            />
-            <select v-model="newTask.priority" class="form-input">
-              <option value="1">优先级：低</option>
-              <option value="2">优先级：中</option>
-              <option value="3">优先级：高</option>
-            </select>
-          </div>
-
-          <textarea
-            v-model.trim="newTask.description"
-            placeholder="任务描述（可选）"
-            class="form-input form-textarea"
-            maxlength="500"
-          ></textarea>
-
-          <div class="form-row">
-            <input v-model="newTask.deadline" type="datetime-local" class="form-input" />
-            <button type="submit" class="btn btn-primary" :disabled="creatingTask">
-              {{ creatingTask ? '创建中...' : '创建任务' }}
-            </button>
-          </div>
-
-          <p v-if="createError" class="error-msg">{{ createError }}</p>
-        </form>
-      </div>
 
       <!-- 任务列表 -->
       <div class="list-section">
@@ -187,7 +153,7 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, RouterLink } from 'vue-router';
 import { authStore } from '../stores/auth';
 import { taskStore } from '../stores/task';
 import {

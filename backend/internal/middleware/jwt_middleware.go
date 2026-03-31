@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	ContextUserIDKey   = "user_id"
-	ContextUsernameKey = "username"
+	ContextUserIDKey    = "user_id"
+	ContextUsernameKey  = "username"
+	ContextUserLevelKey = "user_level"
 )
 
 func JWTAuth(secret string) gin.HandlerFunc {
@@ -40,6 +41,7 @@ func JWTAuth(secret string) gin.HandlerFunc {
 
 		c.Set(ContextUserIDKey, claims.UserID)
 		c.Set(ContextUsernameKey, claims.Username)
+		c.Set(ContextUserLevelKey, claims.Level)
 		c.Next()
 	}
 }

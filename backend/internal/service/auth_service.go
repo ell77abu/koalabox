@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"unicode"
 
 	"task-backend/internal/model"
@@ -18,6 +19,7 @@ var (
 	ErrInvalidPassword    = errors.New("invalid password")
 	ErrUsernameExists     = errors.New("username already exists")
 	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrInvalidOldPassword = errors.New("invalid old password")
 )
 
 type RegisterRequest struct {
@@ -30,9 +32,15 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+type ChangePasswordRequest struct {
+	OldPassword string `json:"old_password"`
+	NewPassword string `json:"new_password"`
+}
+
 type AuthService interface {
 	Register(ctx context.Context, req RegisterRequest) error
 	Login(ctx context.Context, req LoginRequest) (*model.LoginResponseData, error)
+	ChangePassword(ctx context.Context, userID uint64, req ChangePasswordRequest) error
 }
 
 type authService struct {
@@ -72,6 +80,7 @@ func (s *authService) Register(ctx context.Context, req RegisterRequest) error {
 
 	user := &model.User{
 		Username:     req.Username,
+		Level:        0,
 		PasswordHash: hash,
 	}
 	if err := s.userRepo.Create(ctx, user); err != nil {
@@ -94,7 +103,7 @@ func (s *authService) Login(ctx context.Context, req LoginRequest) (*model.Login
 		return nil, ErrInvalidCredentials
 	}
 
-	token, err := jwtx.GenerateToken(user.ID, user.Username, s.jwtSecret, s.jwtExpireHr)
+	token, err := jwtx.GenerateToken(user.ID, user.Username, user.Level, s.jwtSecret, s.jwtExpireHr)
 	if err != nil {
 		return nil, fmt.Errorf("generate token: %w", err)
 	}
@@ -102,7 +111,40 @@ func (s *authService) Login(ctx context.Context, req LoginRequest) (*model.Login
 	return &model.LoginResponseData{
 		Token:    token,
 		Username: user.Username,
+		Level:    user.Level,
 	}, nil
+}
+
+func (s *authService) ChangePassword(ctx context.Context, userID uint64, req ChangePasswordRequest) error {
+	if strings.TrimSpace(req.OldPassword) == "" || strings.TrimSpace(req.NewPassword) == "" {
+		return ErrInvalidPassword
+	}
+	if !isValidPassword(req.NewPassword) {
+		return ErrInvalidPassword
+	}
+
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return ErrInvalidCredentials
+	}
+	if err != nil {
+		return fmt.Errorf("query user by id: %w", err)
+	}
+
+	if err := password.Compare(user.PasswordHash, req.OldPassword); err != nil {
+		return ErrInvalidOldPassword
+	}
+
+	hash, err := password.Hash(req.NewPassword)
+	if err != nil {
+		return fmt.Errorf("hash new password: %w", err)
+	}
+
+	if err := s.userRepo.UpdatePasswordByID(ctx, userID, hash); err != nil {
+		return fmt.Errorf("update password: %w", err)
+	}
+
+	return nil
 }
 
 func isValidUsername(username string) bool {

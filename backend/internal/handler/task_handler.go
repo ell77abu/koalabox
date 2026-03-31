@@ -25,11 +25,15 @@ func (h *TaskHandler) List(c *gin.Context) {
 	if !ok {
 		return
 	}
+	userLevel, ok := getUserLevelFromContext(c)
+	if !ok {
+		return
+	}
 
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	size, _ := strconv.Atoi(c.DefaultQuery("size", "10"))
 
-	list, total, fixedPage, fixedSize, err := h.taskService.List(c.Request.Context(), userID, page, size)
+	list, total, fixedPage, fixedSize, err := h.taskService.List(c.Request.Context(), userID, userLevel, page, size)
 	if err != nil {
 		response.InternalError(c, "query tasks failed")
 		return
@@ -68,6 +72,10 @@ func (h *TaskHandler) Update(c *gin.Context) {
 	if !ok {
 		return
 	}
+	userLevel, ok := getUserLevelFromContext(c)
+	if !ok {
+		return
+	}
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
@@ -81,7 +89,7 @@ func (h *TaskHandler) Update(c *gin.Context) {
 		return
 	}
 
-	task, err := h.taskService.Update(c.Request.Context(), userID, id, req)
+	task, err := h.taskService.Update(c.Request.Context(), userID, userLevel, id, req)
 	if isTaskValidationError(err) {
 		response.BadRequest(c, err.Error())
 		return
@@ -103,6 +111,10 @@ func (h *TaskHandler) Delete(c *gin.Context) {
 	if !ok {
 		return
 	}
+	userLevel, ok := getUserLevelFromContext(c)
+	if !ok {
+		return
+	}
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
@@ -110,7 +122,7 @@ func (h *TaskHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	err = h.taskService.Delete(c.Request.Context(), userID, id)
+	err = h.taskService.Delete(c.Request.Context(), userID, userLevel, id)
 	if errors.Is(err, repository.ErrNotFound) {
 		response.Forbidden(c, "cannot delete others task or task not found")
 		return
@@ -135,6 +147,20 @@ func getUserIDFromContext(c *gin.Context) (uint64, bool) {
 		return 0, false
 	}
 	return userID, true
+}
+
+func getUserLevelFromContext(c *gin.Context) (uint8, bool) {
+	v, exists := c.Get(middleware.ContextUserLevelKey)
+	if !exists {
+		response.Unauthorized(c, "unauthorized")
+		return 0, false
+	}
+	level, ok := v.(uint8)
+	if !ok {
+		response.Unauthorized(c, "invalid auth context")
+		return 0, false
+	}
+	return level, true
 }
 
 func isTaskValidationError(err error) bool {
