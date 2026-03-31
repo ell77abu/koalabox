@@ -193,7 +193,6 @@ input:focus {
   .card {
     padding: 22px;
   }
-
   .task-header {
     flex-direction: column;
     align-items: flex-start;
@@ -223,10 +222,6 @@ input:focus {
   box-shadow: 0 6px 16px rgba(28, 126, 214, 0.4);
 }
 
-.add-task-fab:hover .plus-icon {
-  transform: rotate(90deg);
-}
-
 /* 悬浮文字提示 */
 .add-task-fab::after {
   content: "创建任务";
@@ -251,5 +246,4 @@ input:focus {
 
 .plus-icon {
   line-height: 1;
-  margin-top: -2px;
 }
