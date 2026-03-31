@@ -347,12 +347,13 @@ const loadTasks = async () => {
   try {
     const response = await getTasksApi(taskStore.currentPage.value, taskStore.pageSize.value);
     if (response.data.code === 0) {
-      taskStore.setTasks(response.data.data || []);
-      // 假设后端返回 total 字段，若无则使用返回的数据长度
-      const total = response.data.total || (response.data.data?.length || 0);
+      const pageData = response.data.data || {};
+      const list = Array.isArray(pageData.list) ? pageData.list : [];
+      taskStore.setTasks(list);
+      const total = Number.isFinite(pageData.total) ? pageData.total : list.length;
       taskStore.setPageInfo(
-        taskStore.currentPage.value,
-        taskStore.pageSize.value,
+        Number.isFinite(pageData.page) ? pageData.page : taskStore.currentPage.value,
+        Number.isFinite(pageData.size) ? pageData.size : taskStore.pageSize.value,
         total
       );
     }
