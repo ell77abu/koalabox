@@ -5,6 +5,7 @@ import RegisterView from '../views/RegisterView.vue';
 import TaskView from '../views/TaskView.vue';
 import ProfileView from '../views/ProfileView.vue';
 import CreateTaskView from '../views/CreateTaskView.vue';
+import ChangePasswordView from '../views/ChangePasswordView.vue';
 
 const routes = [
   {
@@ -39,6 +40,12 @@ const routes = [
     path: '/profile',
     name: 'profile',
     component: ProfileView,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/profile/password',
+    name: 'change-password',
+    component: ChangePasswordView,
     meta: { requiresAuth: true },
   },
 ];
