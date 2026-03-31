@@ -45,7 +45,20 @@
             </div>
 
             <div v-if="incompleteTasks.length" class="task-group-list">
-              <div v-for="task in incompleteTasks" :key="task.id" class="task-item">
+              <div
+                v-for="task in incompleteTasks"
+                :key="task.id"
+                class="task-item"
+                :class="{ 'task-item-celebrating': celebrationTaskId === task.id }"
+              >
+                <div v-if="celebrationTaskId === task.id" class="confetti-burst" aria-hidden="true">
+                  <span
+                    v-for="piece in confettiPieces"
+                    :key="`${task.id}-${piece}`"
+                    class="confetti-piece"
+                    :style="{ '--piece-index': piece }"
+                  ></span>
+                </div>
                 <div class="task-main">
                   <div class="task-title-section">
                     <h3>{{ task.title }}</h3>
@@ -74,8 +87,16 @@
 
                 <div class="task-actions">
                   <button
+                    class="btn btn-small btn-complete"
+                    @click="markTaskDone(task)"
+                    :disabled="updatingId === task.id"
+                  >
+                    {{ updatingId === task.id ? '完成中...' : '完成任务' }}
+                  </button>
+                  <button
                     class="btn btn-small btn-edit"
                     @click="startEdit(task)"
+                    :disabled="updatingId === task.id"
                   >
                     编辑
                   </button>
@@ -113,7 +134,20 @@
 
             <div v-if="showCompletedHistory">
               <div v-if="completedTasks.length" class="task-group-list">
-                <div v-for="task in completedTasks" :key="task.id" class="task-item task-item-done">
+                <div
+                  v-for="task in completedTasks"
+                  :key="task.id"
+                  class="task-item task-item-done"
+                  :class="{ 'task-item-celebrating': celebrationTaskId === task.id }"
+                >
+                  <div v-if="celebrationTaskId === task.id" class="confetti-burst" aria-hidden="true">
+                    <span
+                      v-for="piece in confettiPieces"
+                      :key="`${task.id}-${piece}`"
+                      class="confetti-piece"
+                      :style="{ '--piece-index': piece }"
+                    ></span>
+                  </div>
                   <div class="task-main">
                     <div class="task-title-section">
                       <h3>{{ task.title }}</h3>
@@ -144,6 +178,7 @@
                     <button
                       class="btn btn-small btn-edit"
                       @click="startEdit(task)"
+                      :disabled="updatingId === task.id"
                     >
                       编辑
                     </button>
@@ -237,7 +272,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter, RouterLink } from 'vue-router';
 import { authStore } from '../stores/auth';
 import { taskStore } from '../stores/task';
@@ -276,6 +311,9 @@ const deletingId = ref(null);
 const createError = ref('');
 const updateError = ref('');
 const showCompletedHistory = ref(false);
+const celebrationTaskId = ref(null);
+const confettiPieces = Array.from({ length: 14 }, (_, index) => index);
+let celebrationTimer = null;
 
 const incompleteTasks = computed(() =>
   taskStore.tasks.value.filter((task) => task.status !== 'DONE')
@@ -375,6 +413,47 @@ const onUpdateTask = async () => {
     }
   } catch (error) {
     updateError.value = error.response?.data?.message || '更新任务失败，请重试';
+  } finally {
+    updatingId.value = null;
+  }
+};
+
+const triggerCelebration = (taskId) => {
+  celebrationTaskId.value = taskId;
+  if (celebrationTimer) {
+    clearTimeout(celebrationTimer);
+  }
+  celebrationTimer = window.setTimeout(() => {
+    celebrationTaskId.value = null;
+    celebrationTimer = null;
+  }, 1600);
+};
+
+const markTaskDone = async (task) => {
+  if (task.status === 'DONE') {
+    return;
+  }
+
+  updatingId.value = task.id;
+  try {
+    const payload = {
+      title: task.title,
+      description: task.description || null,
+      status: 'DONE',
+      priority: parseInt(task.priority),
+      deadline: task.deadline || null,
+    };
+
+    const response = await updateTaskApi(task.id, payload);
+    if (response.data.code === 0) {
+      triggerCelebration(task.id);
+      showCompletedHistory.value = true;
+      await loadTasks();
+    } else {
+      alert(response.data.message || '更新失败');
+    }
+  } catch (error) {
+    alert(error.response?.data?.message || '完成任务失败，请重试');
   } finally {
     updatingId.value = null;
   }
@@ -480,6 +559,12 @@ const priorityLabel = (priority) => {
 // 页面加载时获取任务列表
 onMounted(() => {
   loadTasks();
+});
+
+onBeforeUnmount(() => {
+  if (celebrationTimer) {
+    clearTimeout(celebrationTimer);
+  }
 });
 </script>
 
@@ -683,6 +768,8 @@ onMounted(() => {
 }
 
 .task-item {
+  position: relative;
+  overflow: hidden;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -690,11 +777,55 @@ onMounted(() => {
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 0.5rem;
-  transition: box-shadow 0.2s;
+  transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+}
+
+.task-item-celebrating {
+  border-color: #86efac;
+  box-shadow: 0 16px 36px rgba(34, 197, 94, 0.22);
 }
 
 .task-item:hover {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  transform: translateY(-4px);
+  border-color: #bfdbfe;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+}
+
+.confetti-burst {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.confetti-piece {
+  --x-start: calc(8% + var(--piece-index) * 6%);
+  position: absolute;
+  left: var(--x-start);
+  top: 52%;
+  width: 10px;
+  height: 18px;
+  border-radius: 999px;
+  opacity: 0;
+  transform: translate3d(0, 0, 0) rotate(0deg) scale(0.8);
+  animation: confetti-pop 1.2s ease-out forwards;
+  animation-delay: calc(var(--piece-index) * 0.03s);
+}
+
+.confetti-piece:nth-child(4n + 1) {
+  background: #f97316;
+}
+
+.confetti-piece:nth-child(4n + 2) {
+  background: #22c55e;
+}
+
+.confetti-piece:nth-child(4n + 3) {
+  background: #38bdf8;
+}
+
+.confetti-piece:nth-child(4n) {
+  background: #facc15;
 }
 
 .task-main {
@@ -780,6 +911,8 @@ onMounted(() => {
 /* 任务操作 */
 .task-actions {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 0.5rem;
   margin-left: 1rem;
   flex-shrink: 0;
@@ -799,6 +932,35 @@ onMounted(() => {
 
 .btn-edit:hover:not(:disabled) {
   background: #bfdbfe;
+}
+
+.btn-complete {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  color: #fff;
+  border: 1px solid rgba(34, 197, 94, 0.5);
+  box-shadow: 0 10px 18px rgba(34, 197, 94, 0.2);
+  transition: transform 0.22s ease, box-shadow 0.22s ease, filter 0.22s ease;
+}
+
+.btn-complete::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, transparent 0%, rgba(255, 255, 255, 0.28) 45%, transparent 100%);
+  transform: translateX(-120%);
+  transition: transform 0.45s ease;
+}
+
+.btn-complete:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.03);
+  filter: saturate(1.08);
+  box-shadow: 0 14px 24px rgba(34, 197, 94, 0.28);
+}
+
+.btn-complete:hover:not(:disabled)::before {
+  transform: translateX(120%);
 }
 
 .btn-danger {
@@ -912,6 +1074,29 @@ onMounted(() => {
 
   .pagination {
     flex-wrap: wrap;
+  }
+}
+
+@keyframes confetti-pop {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(0.8);
+  }
+
+  15% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform:
+      translate3d(
+        calc((var(--piece-index) - 6) * 12px),
+        calc(-90px - var(--piece-index) * 6px),
+        0
+      )
+      rotate(calc((var(--piece-index) - 4) * 28deg))
+      scale(1);
   }
 }
 </style>
