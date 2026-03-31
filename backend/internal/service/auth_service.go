@@ -32,6 +32,7 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+// ChangePasswordRequest 用于已登录用户修改自己的密码。
 type ChangePasswordRequest struct {
 	OldPassword string `json:"old_password"`
 	NewPassword string `json:"new_password"`
@@ -58,6 +59,7 @@ func NewAuthService(userRepo repository.UserRepository, jwtSecret string, jwtExp
 }
 
 func (s *authService) Register(ctx context.Context, req RegisterRequest) error {
+	// 先进行基础参数校验，再访问数据库。
 	if !isValidUsername(req.Username) {
 		return ErrInvalidUsername
 	}
@@ -103,6 +105,7 @@ func (s *authService) Login(ctx context.Context, req LoginRequest) (*model.Login
 		return nil, ErrInvalidCredentials
 	}
 
+	// Token 中携带用户身份与角色，供后续鉴权使用。
 	token, err := jwtx.GenerateToken(user.ID, user.Username, user.Level, s.jwtSecret, s.jwtExpireHr)
 	if err != nil {
 		return nil, fmt.Errorf("generate token: %w", err)
@@ -116,6 +119,7 @@ func (s *authService) Login(ctx context.Context, req LoginRequest) (*model.Login
 }
 
 func (s *authService) ChangePassword(ctx context.Context, userID uint64, req ChangePasswordRequest) error {
+	// 旧密码和新密码都不能为空。
 	if strings.TrimSpace(req.OldPassword) == "" || strings.TrimSpace(req.NewPassword) == "" {
 		return ErrInvalidPassword
 	}
@@ -131,6 +135,7 @@ func (s *authService) ChangePassword(ctx context.Context, userID uint64, req Cha
 		return fmt.Errorf("query user by id: %w", err)
 	}
 
+	// 必须先校验旧密码正确，才允许更新。
 	if err := password.Compare(user.PasswordHash, req.OldPassword); err != nil {
 		return ErrInvalidOldPassword
 	}

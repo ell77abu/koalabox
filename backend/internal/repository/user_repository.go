@@ -14,6 +14,7 @@ type UserRepository interface {
 	Create(ctx context.Context, user *model.User) error
 	GetByUsername(ctx context.Context, username string) (*model.User, error)
 	GetByID(ctx context.Context, id uint64) (*model.User, error)
+	// UpdatePasswordByID 仅更新目标用户的密码哈希。
 	UpdatePasswordByID(ctx context.Context, id uint64, passwordHash string) error
 }
 
@@ -26,16 +27,14 @@ func NewUserRepository(db *gorm.DB) UserRepository {
 }
 
 func (r *userRepository) Create(ctx context.Context, user *model.User) error {
-	// 执行创建操作
+	// 创建用户记录，并保留调试日志便于部署排查。
 	result := r.db.WithContext(ctx).Create(user)
-	
-	// 调试日志：如果写入失败，这里会打印原因（如唯一键冲突、表不存在等）
+
+	// 写入失败时输出原因，例如唯一键冲突或表结构不一致。
 	if result.Error != nil {
 		fmt.Printf("[GORM ERROR] Create User Failed: %v\n", result.Error)
 		return result.Error
 	}
-	
-	// 调试日志：确认受影响行数和生成的 ID
 	fmt.Printf("[GORM INFO] User Created Successfully! ID: %d, RowsAffected: %d\n", user.ID, result.RowsAffected)
 	return nil
 }
