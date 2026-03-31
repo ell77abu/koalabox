@@ -35,49 +35,134 @@
 
         <!-- 任务列表 -->
         <div v-else class="task-list">
-          <div v-for="task in taskStore.tasks.value" :key="task.id" class="task-item">
-            <div class="task-main">
-              <div class="task-title-section">
-                <h3>{{ task.title }}</h3>
-                <span class="status-badge" :class="`status-${task.status.toLowerCase()}`">
-                  {{ statusLabel(task.status) }}
-                </span>
-                <span
-                  class="priority-badge"
-                  :class="`priority-${task.priority}`"
-                >
-                  {{ priorityLabel(task.priority) }}
-                </span>
+          <section class="task-group">
+            <div class="task-group-header">
+              <div>
+                <h3>未完成任务</h3>
+                <!-- <p>优先展示待做和进行中的任务</p> -->
               </div>
+              <span class="task-group-count">{{ incompleteTasks.length }}</span>
+            </div>
 
-              <p v-if="task.description" class="task-description">{{ task.description }}</p>
+            <div v-if="incompleteTasks.length" class="task-group-list">
+              <div v-for="task in incompleteTasks" :key="task.id" class="task-item">
+                <div class="task-main">
+                  <div class="task-title-section">
+                    <h3>{{ task.title }}</h3>
+                    <span class="status-badge" :class="`status-${task.status.toLowerCase()}`">
+                      {{ statusLabel(task.status) }}
+                    </span>
+                    <span
+                      class="priority-badge"
+                      :class="`priority-${task.priority}`"
+                    >
+                      {{ priorityLabel(task.priority) }}
+                    </span>
+                  </div>
 
-              <div class="task-meta">
-                <span v-if="task.deadline" class="meta-item">
-                  📅 {{ formatDate(task.deadline) }}
-                </span>
-                <span class="meta-item">
-                  🕐 {{ formatDate(task.created_at) }}
-                </span>
+                  <p v-if="task.description" class="task-description">{{ task.description }}</p>
+
+                  <div class="task-meta">
+                    <span v-if="task.deadline" class="meta-item">
+                      📅 {{ formatDate(task.deadline) }}
+                    </span>
+                    <span class="meta-item">
+                      🕐 {{ formatDate(task.created_at) }}
+                    </span>
+                  </div>
+                </div>
+
+                <div class="task-actions">
+                  <button
+                    class="btn btn-small btn-edit"
+                    @click="startEdit(task)"
+                  >
+                    编辑
+                  </button>
+                  <button
+                    class="btn btn-small btn-danger"
+                    @click="onDeleteTask(task.id)"
+                    :disabled="deletingId === task.id"
+                  >
+                    {{ deletingId === task.id ? '删除中...' : '删除' }}
+                  </button>
+                </div>
               </div>
             </div>
 
-            <div class="task-actions">
-              <button
-                class="btn btn-small btn-edit"
-                @click="startEdit(task)"
-              >
-                编辑
-              </button>
-              <button
-                class="btn btn-small btn-danger"
-                @click="onDeleteTask(task.id)"
-                :disabled="deletingId === task.id"
-              >
-                {{ deletingId === task.id ? '删除中...' : '删除' }}
-              </button>
+            <div v-else class="sub-empty-state">
+              <p>当前没有未完成任务。</p>
             </div>
-          </div>
+          </section>
+
+          <section class="task-group task-group-history">
+            <button
+              type="button"
+              class="history-toggle"
+              @click="showCompletedHistory = !showCompletedHistory"
+            >
+              <div>
+                <h3>已完成历史</h3>
+                <p>点击 {{ showCompletedHistory ? '收起' : '展开' }}</p>
+              </div>
+              <div class="history-toggle-meta">
+                <span class="task-group-count done">{{ completedTasks.length }}</span>
+                <!-- <span class="history-toggle-text">{{ showCompletedHistory ? '收起' : '展开' }}</span> -->
+              </div>
+            </button>
+
+            <div v-if="showCompletedHistory">
+              <div v-if="completedTasks.length" class="task-group-list">
+                <div v-for="task in completedTasks" :key="task.id" class="task-item task-item-done">
+                  <div class="task-main">
+                    <div class="task-title-section">
+                      <h3>{{ task.title }}</h3>
+                      <span class="status-badge" :class="`status-${task.status.toLowerCase()}`">
+                        {{ statusLabel(task.status) }}
+                      </span>
+                      <span
+                        class="priority-badge"
+                        :class="`priority-${task.priority}`"
+                      >
+                        {{ priorityLabel(task.priority) }}
+                      </span>
+                    </div>
+
+                    <p v-if="task.description" class="task-description">{{ task.description }}</p>
+
+                    <div class="task-meta">
+                      <span v-if="task.deadline" class="meta-item">
+                        📅 {{ formatDate(task.deadline) }}
+                      </span>
+                      <span class="meta-item">
+                        🕐 {{ formatDate(task.created_at) }}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div class="task-actions">
+                    <button
+                      class="btn btn-small btn-edit"
+                      @click="startEdit(task)"
+                    >
+                      编辑
+                    </button>
+                    <button
+                      class="btn btn-small btn-danger"
+                      @click="onDeleteTask(task.id)"
+                      :disabled="deletingId === task.id"
+                    >
+                      {{ deletingId === task.id ? '删除中...' : '删除' }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div v-else class="sub-empty-state">
+                <p>还没有已完成的历史任务。</p>
+              </div>
+            </div>
+          </section>
         </div>
 
         <!-- 分页 -->
@@ -152,7 +237,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted } from 'vue';
 import { useRouter, RouterLink } from 'vue-router';
 import { authStore } from '../stores/auth';
 import { taskStore } from '../stores/task';
@@ -190,6 +275,15 @@ const updatingId = ref(null);
 const deletingId = ref(null);
 const createError = ref('');
 const updateError = ref('');
+const showCompletedHistory = ref(false);
+
+const incompleteTasks = computed(() =>
+  taskStore.tasks.value.filter((task) => task.status !== 'DONE')
+);
+
+const completedTasks = computed(() =>
+  taskStore.tasks.value.filter((task) => task.status === 'DONE')
+);
 
 // 退出登录
 const logout = async () => {
@@ -492,7 +586,100 @@ onMounted(() => {
 .task-list {
   display: flex;
   flex-direction: column;
+  gap: 1.25rem;
+}
+
+.task-group {
+  padding: 1rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+}
+
+.task-group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
   gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.task-group-header h3,
+.history-toggle h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #1f2937;
+}
+
+.task-group-header p,
+.history-toggle p {
+  margin: 0.35rem 0 0;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.task-group-count {
+  min-width: 2.25rem;
+  height: 2.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.75rem;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.task-group-count.done {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.task-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.history-toggle {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0;
+  margin-bottom: 1rem;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.history-toggle-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.history-toggle-text {
+  color: #0f766e;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.task-item-done {
+  opacity: 0.92;
+}
+
+.sub-empty-state {
+  padding: 1rem;
+  text-align: center;
+  color: #6b7280;
+  background: #ffffff;
+  border: 1px dashed #dbe3f0;
+  border-radius: 0.5rem;
 }
 
 .task-item {
@@ -694,6 +881,17 @@ onMounted(() => {
 
 /* 响应式设计 */
 @media (max-width: 768px) {
+  .task-group-header,
+  .history-toggle {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .history-toggle-meta {
+    width: 100%;
+    justify-content: space-between;
+  }
+
   .form-row {
     grid-template-columns: 1fr;
   }
