@@ -11,8 +11,8 @@
           <div class="search-box">
             <span class="search-fab" aria-hidden="true">
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2" />
-                <line x1="16.65" y1="16.65" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="4" />
+                <line x1="16.65" y1="16.65" x2="22" y2="22" stroke="currentColor" stroke-width="4" stroke-linecap="round" />
               </svg>
             </span>
             <input
@@ -697,10 +697,10 @@ onBeforeUnmount(() => {
 }
 
 .plus-icon {
-  font-size: 24px;
-  font-weight: 300;
+  font-size: 30px;
+  font-weight: 600 ;
   line-height: 1;
-  margin-top: -2px; /* 微调视觉中心 */
+  margin-top: -6px; /* 微调视觉中心 */
 }
 
 .sort-control {
