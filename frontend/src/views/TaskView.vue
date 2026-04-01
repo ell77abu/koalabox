@@ -74,7 +74,7 @@
                   <span class="sort-fab" aria-hidden="true">
                     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                       <path
-                        d="M7 4v14M7 18l-3-3m3 3l3-3M17 20V6m0 0l-3 3m3-3l3 3"
+                        d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"
                         fill="none"
                         stroke="currentColor"
                         stroke-width="2"
@@ -674,6 +674,33 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.75rem;
+}
+
+.add-task-fab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  text-decoration: none;
+  box-shadow: 0 4px 10px rgba(28, 126, 214, 0.28);
+  transition: transform 0.2s, box-shadow 0.2s;
+  flex-shrink: 0;
+}
+
+.add-task-fab:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 14px rgba(28, 126, 214, 0.35);
+}
+
+.plus-icon {
+  font-size: 24px;
+  font-weight: 300;
+  line-height: 1;
+  margin-top: -2px; /* 微调视觉中心 */
 }
 
 .sort-control {
