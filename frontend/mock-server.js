@@ -72,7 +72,7 @@ app.post('/api/v1/auth/register', (req, res) => {
   }
 
   // 存储用户（实际应该加盐哈希密码，这里 mock 简化处理）
-  users.set(username, { password });
+  users.set(username, { password, level: 0 });
   // 初始化用户的任务列表
   tasks.set(username, []);
 
@@ -108,6 +108,7 @@ app.post('/api/v1/auth/login', (req, res) => {
     data: {
       token,
       username,
+      level: user.level ?? 0,
     },
   });
 });
