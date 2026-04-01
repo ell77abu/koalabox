@@ -101,7 +101,7 @@ const onSubmit = async () => {
       throw new Error('登录响应格式不正确');
     }
 
-    authStore.setAuth(payload.token, payload.username);
+    authStore.setAuth(payload.token, payload.username, payload.level ?? 0);
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/tasks';
     await router.replace(redirect);
   } catch (error) {
