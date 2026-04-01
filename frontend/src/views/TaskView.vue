@@ -255,27 +255,7 @@
           </section>
         </div>
 
-        <!-- 分页 -->
-        <div v-if="taskStore.tasks.value.length > 0 && !isSearching" class="pagination">
-          <button
-            :disabled="taskStore.currentPage.value === 1 || loading"
-            @click="onPrevPage"
-            class="btn btn-small"
-          >
-            ← 上一页
-          </button>
-          <span class="page-info">
-            第 {{ taskStore.currentPage.value }} 页 / 共
-            {{ Math.ceil(taskStore.total.value / taskStore.pageSize.value) }} 页
-          </span>
-          <button
-            :disabled="!taskStore.hasMore.value || loading"
-            @click="onNextPage"
-            class="btn btn-small"
-          >
-            下一页 →
-          </button>
-        </div>
+
       </div>
 
       <!-- 编辑模态框 -->
@@ -404,26 +384,19 @@ const logout = async () => {
   await router.replace('/login');
 };
 
-// 加载任务列表
+// 加载任务列表 - 一次加载所有任务
 const loadTasks = async () => {
   loading.value = true;
   taskStore.setLoading(true);
   try {
-    const response = await getTasksApi(
-      taskStore.currentPage.value,
-      taskStore.pageSize.value,
-      sortOption.value
-    );
+    // 一次加载所有任务，使用大的 pageSize
+    const response = await getTasksApi(1, 1000, sortOption.value);
     if (response.data.code === 0) {
       const pageData = response.data.data || {};
       const list = Array.isArray(pageData.list) ? pageData.list : [];
       taskStore.setTasks(list);
       const total = Number.isFinite(pageData.total) ? pageData.total : list.length;
-      taskStore.setPageInfo(
-        Number.isFinite(pageData.page) ? pageData.page : taskStore.currentPage.value,
-        Number.isFinite(pageData.size) ? pageData.size : taskStore.pageSize.value,
-        total
-      );
+      taskStore.setTotal(total);
     }
   } catch (error) {
     console.error('加载任务失败:', error);
@@ -608,20 +581,7 @@ const cancelEdit = () => {
   editingTask.deadline = '';
 };
 
-// 分页
-const onPrevPage = async () => {
-  if (taskStore.currentPage.value > 1) {
-    taskStore.currentPage.value--;
-    await loadTasks();
-  }
-};
 
-const onNextPage = async () => {
-  if (taskStore.hasMore.value) {
-    taskStore.currentPage.value++;
-    await loadTasks();
-  }
-};
 
 // 格式化日期显示
 const formatDate = (dateStr) => {
@@ -670,7 +630,6 @@ onMounted(() => {
 });
 
 watch(sortOption, async () => {
-  taskStore.currentPage.value = 1;
   await loadTasks();
 });
 
