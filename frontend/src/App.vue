@@ -12,6 +12,9 @@
     <main class="main-container">
       <div class="content-wrapper">
         <header class="page-topbar">
+          <button class="theme-toggle" type="button" @click="toggleTheme">
+            {{ themeLabel }}
+          </button>
           <div class="profile-entry">
             <div class="profile-trigger">
               <img :src="avatarUrl" alt="用户头像" class="profile-avatar" />
@@ -38,7 +41,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { RouterView, RouterLink } from 'vue-router';
 import { authStore } from './stores/auth';
 
@@ -47,6 +50,29 @@ const avatarUrl = computed(
 );
 
 const levelLabel = computed(() => (Number(authStore.level.value) === 1 ? '管理员' : '普通用户'));
+
+const theme = ref('light');
+const themeLabel = computed(() => (theme.value === 'light' ? '深色模式' : '浅色模式'));
+
+const applyTheme = (value) => {
+  document.documentElement.setAttribute('data-theme', value);
+  localStorage.setItem('theme', value);
+};
+
+const toggleTheme = () => {
+  theme.value = theme.value === 'light' ? 'dark' : 'light';
+  applyTheme(theme.value);
+};
+
+onMounted(() => {
+  const saved = localStorage.getItem('theme');
+  if (saved === 'light' || saved === 'dark') {
+    theme.value = saved;
+  } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    theme.value = 'dark';
+  }
+  applyTheme(theme.value);
+});
 </script>
 
 <style scoped>
@@ -55,15 +81,21 @@ const levelLabel = computed(() => (Number(authStore.level.value) === 1 ? '管理
   height: 100vh;
   width: 100vw;
   overflow: hidden;
-  background-color: #f0f2f5;
+  background-color: var(--app-bg);
+  padding: 0;
+  gap: 0;
 }
 
 .sidebar {
   width: 240px;
-  background-color: #001529;
-  color: #fff;
+  background-color: var(--sidebar-bg);
+  color: var(--sidebar-text);
   display: flex;
   flex-direction: column;
+  height: 100%;
+  border-radius: 0 18px 18px 0;
+  overflow: hidden;
+  box-shadow: var(--sidebar-shadow);
 }
 
 .logo {
@@ -72,7 +104,8 @@ const levelLabel = computed(() => (Number(authStore.level.value) === 1 ? '管理
   text-align: center;
   font-size: 20px;
   font-weight: bold;
-  background: rgba(255, 255, 255, 0.1);
+  color: var(--sidebar-logo-text);
+  background: var(--sidebar-logo-bg);
 }
 
 .nav-menu {
@@ -84,19 +117,19 @@ const levelLabel = computed(() => (Number(authStore.level.value) === 1 ? '管理
   display: flex;
   align-items: center;
   padding: 12px 24px;
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--sidebar-item-text);
   text-decoration: none;
   transition: all 0.3s;
 }
 
 .nav-item:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.05);
+  color: var(--sidebar-item-hover-text);
+  background: var(--sidebar-item-hover-bg);
 }
 
 .nav-item.active {
-  color: #fff;
-  background: #1890ff;
+  color: var(--sidebar-item-active-text);
+  background: var(--sidebar-item-active-bg);
 }
 
 .icon {
@@ -118,6 +151,8 @@ const levelLabel = computed(() => (Number(authStore.level.value) === 1 ? '管理
 .page-topbar {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 18px;
 }
 
@@ -131,8 +166,8 @@ const levelLabel = computed(() => (Number(authStore.level.value) === 1 ? '管理
   gap: 10px;
   padding: 8px 12px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.78);
-  border: 1px solid rgba(203, 213, 225, 0.9);
+  background: var(--pill-bg);
+  border: 1px solid var(--pill-border);
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
   transition: transform 0.24s ease, box-shadow 0.24s ease;
   backdrop-filter: blur(10px);
@@ -155,7 +190,25 @@ const levelLabel = computed(() => (Number(authStore.level.value) === 1 ? '管理
 .profile-name {
   font-size: 14px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--pill-text);
+}
+
+.theme-toggle {
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--pill-border);
+  background: var(--pill-bg);
+  color: var(--pill-text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.theme-toggle:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.12);
 }
 
 .profile-popover {

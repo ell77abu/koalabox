@@ -56,7 +56,11 @@
 
         <label>
           截止日期
-          <input v-model="newTask.deadline" type="datetime-local" />
+          <input
+            v-model.trim="newTask.deadline"
+            type="datetime-local"
+            class="date-input"
+          />
         </label>
       </div>
 
@@ -114,6 +118,27 @@ const handleOutsideClick = (event) => {
   }
 };
 
+const parseDateInput = (value) => {
+  if (!value) return null;
+  const normalized = String(value).trim().replace(/\//g, '-');
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = match[4] ? Number(match[4]) : 0;
+  const minute = match[5] ? Number(match[5]) : 0;
+  if (!year || !month || !day) return null;
+  return { year, month, day, hour, minute };
+};
+
+const toBackendDeadline = (value) => {
+  const parts = parseDateInput(value);
+  if (!parts) return null;
+  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, 0));
+  return date.toISOString();
+};
+
 onMounted(() => {
   document.addEventListener('click', handleOutsideClick);
 });
@@ -130,7 +155,7 @@ const onCreateTask = async () => {
     // 转换日期格式为后端需要的字符串（如果后端需要 ISO 格式）
     const payload = {
       ...newTask,
-      deadline: newTask.deadline ? new Date(newTask.deadline).toISOString() : null,
+      deadline: toBackendDeadline(newTask.deadline),
       status: 'TODO'
     };
     

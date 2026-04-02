@@ -289,7 +289,11 @@
               <option value="3">优先级：高</option>
             </select>
 
-            <input v-model="editingTask.deadline" type="datetime-local" class="form-input" />
+            <input
+              v-model.trim="editingTask.deadline"
+              type="datetime-local"
+              class="form-input date-input"
+            />
 
             <div class="modal-actions">
               <button type="button" class="btn btn-outline" @click="cancelEdit">取消</button>
@@ -420,7 +424,7 @@ const onCreateTask = async () => {
       title: newTask.title,
       description: newTask.description || null,
       priority: parseInt(newTask.priority),
-      deadline: newTask.deadline || null,
+      deadline: toBackendDeadline(newTask.deadline),
       status: 'TODO',
     };
 
@@ -453,7 +457,7 @@ const onUpdateTask = async () => {
       description: editingTask.description || null,
       status: editingTask.status,
       priority: parseInt(editingTask.priority),
-      deadline: editingTask.deadline || null,
+      deadline: toBackendDeadline(editingTask.deadline),
     };
 
     const response = await updateTaskApi(editingTask.id, payload);
@@ -584,28 +588,51 @@ const cancelEdit = () => {
 
 
 // 格式化日期显示
+const parseDateInput = (value) => {
+  if (!value) return null;
+  const normalized = String(value).trim().replace(/\//g, '-');
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = match[4] ? Number(match[4]) : 0;
+  const minute = match[5] ? Number(match[5]) : 0;
+  if (!year || !month || !day) return null;
+  return { year, month, day, hour, minute };
+};
+
+const toBackendDeadline = (value) => {
+  const parts = parseDateInput(value);
+  if (!parts) return null;
+  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, 0));
+  return date.toISOString();
+};
+
+// 格式化日期显示为 YYYY/MM/DD
 const formatDate = (dateStr) => {
   if (!dateStr) return '-';
   const date = new Date(dateStr);
-  return date.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  if (Number.isNaN(date.getTime())) return '-';
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const hour = String(date.getUTCHours()).padStart(2, '0');
+  const minute = String(date.getUTCMinutes()).padStart(2, '0');
+  return `${year}年${month}月${day}日 ${hour}:${minute}`;
 };
 
-// 格式化日期为 input[type="datetime-local"] 的格式
+// 格式化日期为输入框显示
 const formatDateForInput = (dateStr) => {
   if (!dateStr) return '';
   const date = new Date(dateStr);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
+  if (Number.isNaN(date.getTime())) return '';
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const hour = String(date.getUTCHours()).padStart(2, '0');
+  const minute = String(date.getUTCMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hour}:${minute}`;
 };
 
 // 状态标签
@@ -732,11 +759,21 @@ onBeforeUnmount(() => {
 }
 
 .sort-select {
-  border: none;
-  background: transparent;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  border: 1px solid #d7e2ef;
+  border-radius: 999px;
+  background: #fff;
   font-size: 0.85rem;
   color: #1f2937;
   cursor: pointer;
+  padding: 6px 28px 6px 12px;
+  background-image: linear-gradient(45deg, transparent 50%, #64748b 50%),
+    linear-gradient(135deg, #64748b 50%, transparent 50%);
+  background-position: calc(100% - 16px) 55%, calc(100% - 10px) 55%;
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
 }
 
 .sort-select:focus {
@@ -800,12 +837,12 @@ onBeforeUnmount(() => {
 .task-header h1 {
   margin: 0 0 0.5rem 0;
   font-size: 1.5rem;
-  color: #1f2937;
+  color: var(--text);
 }
 
 .task-header .hint {
   margin: 0;
-  color: #6b7280;
+  color: var(--muted);
   font-size: 0.875rem;
 }
 
