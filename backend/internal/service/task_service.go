@@ -34,7 +34,7 @@ type UpdateTaskRequest struct {
 }
 
 type TaskService interface {
-	List(ctx context.Context, userID uint64, userLevel uint8, page, size int) ([]model.Task, int64, int, int, error)
+	List(ctx context.Context, userID uint64, userLevel uint8, page, size int, search, sort, order string) ([]model.Task, int64, int, int, error)
 	Create(ctx context.Context, userID uint64, req CreateTaskRequest) (*model.Task, error)
 	Update(ctx context.Context, userID uint64, userLevel uint8, taskID uint64, req UpdateTaskRequest) (*model.Task, error)
 	Delete(ctx context.Context, userID uint64, userLevel uint8, taskID uint64) error
@@ -47,8 +47,8 @@ type taskService struct {
 func NewTaskService(taskRepo repository.TaskRepository) TaskService {
 	return &taskService{taskRepo: taskRepo}
 }
-
-func (s *taskService) List(ctx context.Context, userID uint64, userLevel uint8, page, size int) ([]model.Task, int64, int, int, error) {
+//支持排序
+func (s *taskService) List(ctx context.Context, userID uint64, userLevel uint8, page, size int, search, sort, order string) ([]model.Task, int64, int, int, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -59,19 +59,52 @@ func (s *taskService) List(ctx context.Context, userID uint64, userLevel uint8, 
 		size = 100
 	}
 
+	// 处理搜索关键词（去空格）
+	search = strings.TrimSpace(search)
+
+	// 处理排序（复用之前的逻辑）
+	sort = strings.TrimSpace(strings.ToLower(sort))
+	order = strings.TrimSpace(strings.ToLower(order))
+
+	if sort == "" {
+		sort = "created_at"
+	}
+	if order != "asc" {
+		order = "desc"
+	}
+
+	// 构建 orderBy
+	var orderBy string
+	switch sort {
+	case "deadline":
+		orderBy = "deadline"
+	case "priority":
+		orderBy = "priority"
+	default:
+		orderBy = "created_at"
+	}
+	if order == "asc" {
+		orderBy += " ASC"
+	} else {
+		orderBy += " DESC"
+	}
+
 	var (
 		list  []model.Task
 		total int64
 		err   error
 	)
+
 	if userLevel == 1 {
-		list, total, err = s.taskRepo.ListAll(ctx, page, size)
+		list, total, err = s.taskRepo.ListAllWithSearch(ctx, page, size, search, orderBy)
 	} else {
-		list, total, err = s.taskRepo.ListByUserID(ctx, userID, page, size)
+		list, total, err = s.taskRepo.ListByUserIDWithSearch(ctx, userID, page, size, search, orderBy)
 	}
+
 	if err != nil {
 		return nil, 0, 0, 0, err
 	}
+
 	return list, total, page, size, nil
 }
 
@@ -203,22 +236,29 @@ func isValidPriority(priority model.Priority) bool {
 }
 
 func parseDeadline(input string) (*time.Time, error) {
-	if strings.TrimSpace(input) == "" {
-		return nil, nil
-	}
+    input = strings.TrimSpace(input)
+    if input == "" {
+        return nil, nil
+    }
 
-	formats := []string{
-		"2006-01-02 15:04:05",
-		"2006-01-02T15:04:05",
-		"2006-01-02T15:04",
-	}
+    // 优先使用 Go 内置的 RFC3339Nano（支持毫秒、微秒、Z 或 ±时区）
+    if t, err := time.Parse(time.RFC3339Nano, input); err == nil {
+        return &t, nil
+    }
 
-	for _, layout := range formats {
-		t, err := time.ParseInLocation(layout, input, time.Local)
-		if err == nil {
-			return &t, nil
-		}
-	}
+    // 兼容旧格式（可选）
+    formats := []string{
+        "2006-01-02 15:04:05",
+        "2006-01-02T15:04:05",
+        "2006-01-02T15:04:05.999999999", // 带毫秒但不带 Z
+        "2006-01-02T15:04",
+    }
 
-	return nil, ErrInvalidTaskDeadline
+    for _, layout := range formats {
+        if t, err := time.ParseInLocation(layout, input, time.Local); err == nil {
+            return &t, nil
+        }
+    }
+
+    return nil, ErrInvalidTaskDeadline
 }

@@ -3,7 +3,11 @@ server:
   port: 8080
 
 database:
+<<<<<<< HEAD
+  dsn: "host=127.0.0.1 port=5433 user=postgres password=123456 dbname=task_system sslmode=disable TimeZone=Asia/Shanghai"
+=======
   dsn: "host=127.0.0.1 port=5432 user=postgres password=123456 dbname=sec sslmode=disable TimeZone=Asia/Shanghai"
+>>>>>>> e8b7272760b7e179ca6fdb77d33d765f1f3c02b7
   max_idle_conns: 10
   max_open_conns: 50
   conn_max_lifetime_minutes: 60

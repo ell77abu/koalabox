@@ -3,6 +3,7 @@
 - 本 README 说明项目的部署步骤，产品最终在linux云服务器上部署，调试或本地验收时可以选择本地linux虚拟环境。
 - 建议部署坏境版本尽量使用最新稳定版，避免出现冲突
 
+<<<<<<< HEAD
 ## 本地部署
 ### 依赖准备
 #### 安装Postgreasql数据库
@@ -128,3 +129,11 @@ sudo pkill lab1_server
 ```Bash
 tail -f /opt/lab1/backend/backend.log
 ```
+=======
+分为frontend和backend两部分，前端由vue实现，后端由go语言+PostgreSQL实现
+
+部署在服务器上：
+http://175.24.179.11/tasks
+
+具体部署操作参考前后端目录下的readme文档。
+>>>>>>> 46b23a7e7572b47db8b8c3cbb0aa2de519668f51

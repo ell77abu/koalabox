@@ -3,6 +3,9 @@ import { authStore } from '../stores/auth';
 import LoginView from '../views/LoginView.vue';
 import RegisterView from '../views/RegisterView.vue';
 import TaskView from '../views/TaskView.vue';
+import ProfileView from '../views/ProfileView.vue';
+import CreateTaskView from '../views/CreateTaskView.vue';
+import ChangePasswordView from '../views/ChangePasswordView.vue';
 
 const routes = [
   {
@@ -25,6 +28,24 @@ const routes = [
     path: '/tasks',
     name: 'tasks',
     component: TaskView,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/tasks/create',
+    name: 'create-task',
+    component: CreateTaskView,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/profile',
+    name: 'profile',
+    component: ProfileView,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/profile/password',
+    name: 'change-password',
+    component: ChangePasswordView,
     meta: { requiresAuth: true },
   },
 ];

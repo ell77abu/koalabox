@@ -6,8 +6,8 @@ import { http } from './http';
  * @param {number} size - 每页数量
  * @returns {Promise}
  */
-export const getTasksApi = (page = 1, size = 10) =>
-  http.get('/tasks', { params: { page, size } });
+export const getTasksApi = (page = 1, size = 10, sort = 'default') =>
+  http.get('/tasks', { params: { page, size, sort } });
 
 /**
  * 创建任务

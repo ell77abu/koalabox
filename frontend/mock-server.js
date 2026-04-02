@@ -72,7 +72,7 @@ app.post('/api/v1/auth/register', (req, res) => {
   }
 
   // 存储用户（实际应该加盐哈希密码，这里 mock 简化处理）
-  users.set(username, { password });
+  users.set(username, { password, level: 0 });
   // 初始化用户的任务列表
   tasks.set(username, []);
 
@@ -108,7 +108,47 @@ app.post('/api/v1/auth/login', (req, res) => {
     data: {
       token,
       username,
+      level: user.level ?? 0,
     },
+  });
+});
+
+/**
+ * 用户修改密码
+ * PUT /api/v1/auth/password
+ */
+app.put('/api/v1/auth/password', verifyToken, (req, res) => {
+  const { username } = req.user;
+  const { old_password, new_password } = req.body;
+
+  if (!old_password || !new_password) {
+    return res.status(400).json({ code: 1, message: '旧密码和新密码不能为空' });
+  }
+
+  const user = users.get(username);
+  if (!user) {
+    return res.status(404).json({ code: 1, message: '用户不存在' });
+  }
+
+  if (user.password !== old_password) {
+    return res.status(401).json({ code: 1, message: '旧密码错误' });
+  }
+
+  if (new_password.length < 6) {
+    return res.status(400).json({ code: 1, message: '密码长度不能少于 6 位' });
+  }
+
+  const hasLetter = /[a-zA-Z]/.test(new_password);
+  const hasNumber = /\d/.test(new_password);
+  if (!hasLetter || !hasNumber) {
+    return res.status(400).json({ code: 1, message: '密码必须同时包含字母和数字' });
+  }
+
+  user.password = new_password;
+
+  return res.status(200).json({
+    code: 0,
+    message: '密码修改成功',
   });
 });
 

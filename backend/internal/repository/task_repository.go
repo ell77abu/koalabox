@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"time"
-
+	"strings"
 	"gorm.io/gorm"
 
 	"task-backend/internal/model"
@@ -14,6 +14,12 @@ type TaskRepository interface {
 	Create(ctx context.Context, task *model.Task) error
 	ListByUserID(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error)
 	ListAll(ctx context.Context, page, size int) ([]model.Task, int64, error)
+	// 新增：支持排序的两个方法
+	ListByUserIDWithOrder(ctx context.Context, userID uint64, page, size int, orderBy string) ([]model.Task, int64, error)
+	ListAllWithOrder(ctx context.Context, page, size int, orderBy string) ([]model.Task, int64, error)
+	//新增：支持搜索
+	ListByUserIDWithSearch(ctx context.Context, userID uint64, page, size int, search, orderBy string) ([]model.Task, int64, error)
+	ListAllWithSearch(ctx context.Context, page, size int, search, orderBy string) ([]model.Task, int64, error)
 	GetByIDAndUserID(ctx context.Context, id, userID uint64) (*model.Task, error)
 	GetByID(ctx context.Context, id uint64) (*model.Task, error)
 	UpdateByIDAndUserID(ctx context.Context, task *model.Task) error
@@ -99,6 +105,188 @@ func (r *taskRepository) ListAll(ctx context.Context, page, size int) ([]model.T
 		return nil, 0, err
 	}
 	return tasks, total, nil
+}
+// ==================== 新增支持排序的方法（核心） ====================
+
+func (r *taskRepository) ListByUserIDWithOrder(ctx context.Context, userID uint64, page, size int, orderBy string) ([]model.Task, int64, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if size <= 0 {
+		size = 10
+	}
+	if size > 100 {
+		size = 100
+	}
+
+	offset := (page - 1) * size
+
+	// 安全校验排序字段，防止 SQL 注入
+	orderBy = sanitizeOrderBy(orderBy)
+
+	query := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("user_id = ?", userID).
+		Where("deleted_at IS NULL")
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var tasks []model.Task
+	err := query.
+		Order(orderBy).        // PostgreSQL 支持直接传入 "priority DESC"
+		Limit(size).
+		Offset(offset).
+		Find(&tasks).Error
+
+	if err != nil {
+		return nil, 0, err
+	}
+	return tasks, total, nil
+}
+
+func (r *taskRepository) ListAllWithOrder(ctx context.Context, page, size int, orderBy string) ([]model.Task, int64, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if size <= 0 {
+		size = 10
+	}
+	if size > 100 {
+		size = 100
+	}
+
+	offset := (page - 1) * size
+
+	orderBy = sanitizeOrderBy(orderBy)
+
+	query := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("deleted_at IS NULL")
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var tasks []model.Task
+	err := query.
+		Order(orderBy).
+		Limit(size).
+		Offset(offset).
+		Find(&tasks).Error
+
+	if err != nil {
+		return nil, 0, err
+	}
+	return tasks, total, nil
+}
+
+// ==================== 工具函数：排序安全校验 ====================
+
+// 只允许指定的字段排序，防止 SQL 注入
+func sanitizeOrderBy(orderBy string) string {
+	// 默认排序
+	if orderBy == "" {
+		return "created_at DESC"
+	}
+
+	// 支持的排序字段 + 方向
+	allowed := map[string]bool{
+		"created_at DESC": true,
+		"created_at ASC":  true,
+		"deadline DESC":   true,
+		"deadline ASC":    true,
+		"priority DESC":   true,
+		"priority ASC":    true,
+	}
+
+	// 如果传入的就是完整 "字段 方向"，直接校验
+	if allowed[orderBy] {
+		return orderBy
+	}
+
+	// 支持前端只传字段名的情况（默认 DESC）
+	switch strings.ToLower(strings.TrimSpace(orderBy)) {
+	case "created_at":
+		return "created_at DESC"
+	case "deadline":
+		return "deadline DESC"
+	case "priority":
+		return "priority DESC"
+	default:
+		return "created_at DESC" // 默认
+	}
+}
+
+// ========== 新增：带搜索的查询方法 ==========
+
+func (r *taskRepository) ListByUserIDWithSearch(ctx context.Context, userID uint64, page, size int, search, orderBy string) ([]model.Task, int64, error) {
+	if page <= 0 { page = 1 }
+	if size <= 0 { size = 10 }
+	if size > 100 { size = 100 }
+
+	offset := (page - 1) * size
+	orderBy = sanitizeOrderBy(orderBy)
+
+	query := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("user_id = ?", userID).
+		Where("deleted_at IS NULL")
+
+	// 如果有搜索关键词，则对 title 和 description 进行模糊搜索
+	if search != "" {
+		likePattern := "%" + search + "%"
+		query = query.Where("title ILIKE ? OR description ILIKE ?", likePattern, likePattern)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var tasks []model.Task
+	err := query.
+		Order(orderBy).
+		Limit(size).
+		Offset(offset).
+		Find(&tasks).Error
+
+	return tasks, total, err
+}
+
+func (r *taskRepository) ListAllWithSearch(ctx context.Context, page, size int, search, orderBy string) ([]model.Task, int64, error) {
+	if page <= 0 { page = 1 }
+	if size <= 0 { size = 10 }
+	if size > 100 { size = 100 }
+
+	offset := (page - 1) * size
+	orderBy = sanitizeOrderBy(orderBy)
+
+	query := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("deleted_at IS NULL")
+
+	if search != "" {
+		likePattern := "%" + search + "%"
+		query = query.Where("title ILIKE ? OR description ILIKE ?", likePattern, likePattern)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var tasks []model.Task
+	err := query.
+		Order(orderBy).
+		Limit(size).
+		Offset(offset).
+		Find(&tasks).Error
+
+	return tasks, total, err
 }
 
 func (r *taskRepository) GetByIDAndUserID(ctx context.Context, id, userID uint64) (*model.Task, error) {
