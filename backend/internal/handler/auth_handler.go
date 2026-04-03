@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"task-backend/internal/repository"
 	"task-backend/internal/service"
 	"task-backend/pkg/response"
 )
@@ -31,7 +32,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	if errors.Is(err, service.ErrUsernameExists) {
+	if errors.Is(err, repository.ErrConflict) {
 		response.Conflict(c, "name already exists")
 		return
 	}

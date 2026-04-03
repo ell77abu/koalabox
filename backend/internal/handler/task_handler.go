@@ -3,7 +3,7 @@ package handler
 import (
 	"errors"
 	"strconv"
-	"strings"
+
 	"github.com/gin-gonic/gin"
 
 	"task-backend/internal/middleware"
@@ -20,7 +20,6 @@ func NewTaskHandler(taskService service.TaskService) *TaskHandler {
 	return &TaskHandler{taskService: taskService}
 }
 
-//支持排序
 func (h *TaskHandler) List(c *gin.Context) {
 	userID, ok := getUserIDFromContext(c)
 	if !ok {
@@ -34,26 +33,7 @@ func (h *TaskHandler) List(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	size, _ := strconv.Atoi(c.DefaultQuery("size", "10"))
 
-	// 新增搜索 + 排序参数
-	search := strings.TrimSpace(c.DefaultQuery("search", ""))
-	sortField := strings.ToLower(strings.TrimSpace(c.DefaultQuery("sort", "created_at")))
-	orderDir := strings.ToLower(strings.TrimSpace(c.DefaultQuery("order", "desc")))
-
-	// 规范化 orderDir
-	if orderDir != "asc" && orderDir != "desc" {
-		orderDir = "desc"
-	}
-
-	list, total, fixedPage, fixedSize, err := h.taskService.List(
-		c.Request.Context(),
-		userID,
-		userLevel,
-		page,
-		size,
-		search,     // 新增
-		sortField,
-		orderDir,
-	)
+	list, total, fixedPage, fixedSize, err := h.taskService.List(c.Request.Context(), userID, userLevel, page, size)
 	if err != nil {
 		response.InternalError(c, "query tasks failed")
 		return
@@ -114,8 +94,12 @@ func (h *TaskHandler) Update(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
+	if errors.Is(err, repository.ErrForbidden) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
 	if errors.Is(err, repository.ErrNotFound) {
-		response.Forbidden(c, "You dont have the right to modify others task or task not found")
+		response.NotFound(c, "task not found")
 		return
 	}
 	if err != nil {
@@ -143,8 +127,12 @@ func (h *TaskHandler) Delete(c *gin.Context) {
 	}
 
 	err = h.taskService.Delete(c.Request.Context(), userID, userLevel, id)
+	if errors.Is(err, repository.ErrForbidden) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
 	if errors.Is(err, repository.ErrNotFound) {
-		response.Forbidden(c, "cannot delete others task or task not found")
+		response.NotFound(c, "task not found")
 		return
 	}
 	if err != nil {

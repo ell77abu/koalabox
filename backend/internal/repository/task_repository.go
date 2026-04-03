@@ -3,9 +3,9 @@ package repository
 import (
 	"context"
 	"errors"
-	"time"
-	"strings"
 	"gorm.io/gorm"
+	"strings"
+	"time"
 
 	"task-backend/internal/model"
 )
@@ -106,6 +106,7 @@ func (r *taskRepository) ListAll(ctx context.Context, page, size int) ([]model.T
 	}
 	return tasks, total, nil
 }
+
 // ==================== 新增支持排序的方法（核心） ====================
 
 func (r *taskRepository) ListByUserIDWithOrder(ctx context.Context, userID uint64, page, size int, orderBy string) ([]model.Task, int64, error) {
@@ -136,7 +137,7 @@ func (r *taskRepository) ListByUserIDWithOrder(ctx context.Context, userID uint6
 
 	var tasks []model.Task
 	err := query.
-		Order(orderBy).        // PostgreSQL 支持直接传入 "priority DESC"
+		Order(orderBy). // PostgreSQL 支持直接传入 "priority DESC"
 		Limit(size).
 		Offset(offset).
 		Find(&tasks).Error
@@ -224,9 +225,15 @@ func sanitizeOrderBy(orderBy string) string {
 // ========== 新增：带搜索的查询方法 ==========
 
 func (r *taskRepository) ListByUserIDWithSearch(ctx context.Context, userID uint64, page, size int, search, orderBy string) ([]model.Task, int64, error) {
-	if page <= 0 { page = 1 }
-	if size <= 0 { size = 10 }
-	if size > 100 { size = 100 }
+	if page <= 0 {
+		page = 1
+	}
+	if size <= 0 {
+		size = 10
+	}
+	if size > 100 {
+		size = 100
+	}
 
 	offset := (page - 1) * size
 	orderBy = sanitizeOrderBy(orderBy)
@@ -258,9 +265,15 @@ func (r *taskRepository) ListByUserIDWithSearch(ctx context.Context, userID uint
 }
 
 func (r *taskRepository) ListAllWithSearch(ctx context.Context, page, size int, search, orderBy string) ([]model.Task, int64, error) {
-	if page <= 0 { page = 1 }
-	if size <= 0 { size = 10 }
-	if size > 100 { size = 100 }
+	if page <= 0 {
+		page = 1
+	}
+	if size <= 0 {
+		size = 10
+	}
+	if size > 100 {
+		size = 100
+	}
 
 	offset := (page - 1) * size
 	orderBy = sanitizeOrderBy(orderBy)
