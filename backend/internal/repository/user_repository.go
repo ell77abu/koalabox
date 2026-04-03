@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
 	"task-backend/internal/model"
@@ -32,6 +33,10 @@ func (r *userRepository) Create(ctx context.Context, user *model.User) error {
 
 	// 写入失败时输出原因，例如唯一键冲突或表结构不一致。
 	if result.Error != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(result.Error, &pgErr) && pgErr.Code == "23505" {
+			return ErrConflict
+		}
 		fmt.Printf("[GORM ERROR] Create User Failed: %v\n", result.Error)
 		return result.Error
 	}

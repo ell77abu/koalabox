@@ -17,7 +17,6 @@ import (
 var (
 	ErrInvalidUsername    = errors.New("invalid username")
 	ErrInvalidPassword    = errors.New("invalid password")
-	ErrUsernameExists     = errors.New("username already exists")
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrInvalidOldPassword = errors.New("invalid old password")
 )
@@ -69,7 +68,7 @@ func (s *authService) Register(ctx context.Context, req RegisterRequest) error {
 
 	_, err := s.userRepo.GetByUsername(ctx, req.Username)
 	if err == nil {
-		return ErrUsernameExists
+		return repository.ErrConflict
 	}
 	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return fmt.Errorf("query username: %w", err)
@@ -86,6 +85,9 @@ func (s *authService) Register(ctx context.Context, req RegisterRequest) error {
 		PasswordHash: hash,
 	}
 	if err := s.userRepo.Create(ctx, user); err != nil {
+		if errors.Is(err, repository.ErrConflict) {
+			return repository.ErrConflict
+		}
 		return fmt.Errorf("create user: %w", err)
 	}
 
