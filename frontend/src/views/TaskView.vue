@@ -83,11 +83,32 @@
                       />
                     </svg>
                   </span>
-                  <select id="task-sort" v-model="sortOption" class="sort-select">
-                    <option value="default">默认顺序</option>
-                    <option value="deadline">按截止时间</option>
-                    <option value="priority">按优先级</option>
-                  </select>
+                  <div ref="sortDropdownRef" class="sort-dropdown">
+                    <button
+                      type="button"
+                      class="sort-trigger"
+                      :aria-expanded="sortOpen"
+                      @click="toggleSortMenu"
+                    >
+                      <span>{{ currentSortLabel }}</span>
+                      <span class="sort-caret" :class="{ open: sortOpen }"></span>
+                    </button>
+
+                    <transition name="sort-menu-fade">
+                      <ul v-if="sortOpen" class="sort-menu" role="listbox" aria-label="任务排序">
+                        <li v-for="option in sortOptions" :key="option.value">
+                          <button
+                            type="button"
+                            class="sort-option"
+                            :class="{ active: sortOption === option.value }"
+                            @click="selectSortOption(option.value)"
+                          >
+                            {{ option.label }}
+                          </button>
+                        </li>
+                      </ul>
+                    </transition>
+                  </div>
                 </div>
                 <span class="task-group-count">{{ incompleteTasks.length }}</span>
               </div>
@@ -289,7 +310,11 @@
               <option value="3">优先级：高</option>
             </select>
 
-            <input v-model="editingTask.deadline" type="datetime-local" class="form-input" />
+            <input
+              v-model.trim="editingTask.deadline"
+              type="datetime-local"
+              class="form-input date-input"
+            />
 
             <div class="modal-actions">
               <button type="button" class="btn btn-outline" @click="cancelEdit">取消</button>
@@ -347,6 +372,8 @@ const createError = ref('');
 const updateError = ref('');
 const searchQuery = ref('');
 const sortOption = ref('default');
+const sortOpen = ref(false);
+const sortDropdownRef = ref(null);
 const showCompletedHistory = ref(false);
 const celebrationTaskId = ref(null);
 const completingTaskId = ref(null);
@@ -356,15 +383,53 @@ let celebrationTimer = null;
 let completeMoveTimer = null;
 let arrivalTimer = null;
 
-const displayedTasks = computed(() => {
-  const list = taskStore.tasks.value;
-  const keyword = searchQuery.value.trim().toLowerCase();
-  if (!keyword) {
-    return list;
+const sortOptions = [
+  { value: 'default', label: '按默认顺序' },
+  { value: 'deadline', label: '按截止时间' },
+  { value: 'priority', label: '按优先级' },
+];
+
+const currentSortLabel = computed(() => {
+  const option = sortOptions.find((item) => item.value === sortOption.value);
+  return option ? option.label : '默认顺序';
+});
+
+const toggleSortMenu = () => {
+  sortOpen.value = !sortOpen.value;
+};
+
+const selectSortOption = (value) => {
+  sortOption.value = value;
+  sortOpen.value = false;
+};
+
+const handleSortOutsideClick = (event) => {
+  if (sortDropdownRef.value && !sortDropdownRef.value.contains(event.target)) {
+    sortOpen.value = false;
   }
-  return list.filter((task) =>
-    String(task.title || '').toLowerCase().includes(keyword)
-  );
+};
+
+const displayedTasks = computed(() => {
+  const list = [...taskStore.tasks.value];
+  const keyword = searchQuery.value.trim().toLowerCase();
+  const filtered = keyword
+    ? list.filter((task) => String(task.title || '').toLowerCase().includes(keyword))
+    : list;
+
+  if (sortOption.value === 'deadline') {
+    return filtered.sort((a, b) => {
+      const aTime = a.deadline ? new Date(a.deadline).getTime() : Number.POSITIVE_INFINITY;
+      const bTime = b.deadline ? new Date(b.deadline).getTime() : Number.POSITIVE_INFINITY;
+      const aValid = Number.isFinite(aTime);
+      const bValid = Number.isFinite(bTime);
+      if (!aValid && !bValid) return 0;
+      if (!aValid) return 1;
+      if (!bValid) return -1;
+      return aTime - bTime;
+    });
+  }
+
+  return filtered;
 });
 
 const isSearching = computed(() => searchQuery.value.trim().length > 0);
@@ -420,7 +485,7 @@ const onCreateTask = async () => {
       title: newTask.title,
       description: newTask.description || null,
       priority: parseInt(newTask.priority),
-      deadline: newTask.deadline || null,
+      deadline: toBackendDeadline(newTask.deadline),
       status: 'TODO',
     };
 
@@ -453,7 +518,7 @@ const onUpdateTask = async () => {
       description: editingTask.description || null,
       status: editingTask.status,
       priority: parseInt(editingTask.priority),
-      deadline: editingTask.deadline || null,
+      deadline: toBackendDeadline(editingTask.deadline),
     };
 
     const response = await updateTaskApi(editingTask.id, payload);
@@ -584,28 +649,51 @@ const cancelEdit = () => {
 
 
 // 格式化日期显示
+const parseDateInput = (value) => {
+  if (!value) return null;
+  const normalized = String(value).trim().replace(/\//g, '-');
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = match[4] ? Number(match[4]) : 0;
+  const minute = match[5] ? Number(match[5]) : 0;
+  if (!year || !month || !day) return null;
+  return { year, month, day, hour, minute };
+};
+
+const toBackendDeadline = (value) => {
+  const parts = parseDateInput(value);
+  if (!parts) return null;
+  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, 0));
+  return date.toISOString();
+};
+
+// 格式化日期显示为 YYYY/MM/DD
 const formatDate = (dateStr) => {
   if (!dateStr) return '-';
   const date = new Date(dateStr);
-  return date.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  if (Number.isNaN(date.getTime())) return '-';
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const hour = String(date.getUTCHours()).padStart(2, '0');
+  const minute = String(date.getUTCMinutes()).padStart(2, '0');
+  return `${year}年${month}月${day}日 ${hour}:${minute}`;
 };
 
-// 格式化日期为 input[type="datetime-local"] 的格式
+// 格式化日期为输入框显示
 const formatDateForInput = (dateStr) => {
   if (!dateStr) return '';
   const date = new Date(dateStr);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
+  if (Number.isNaN(date.getTime())) return '';
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const hour = String(date.getUTCHours()).padStart(2, '0');
+  const minute = String(date.getUTCMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hour}:${minute}`;
 };
 
 // 状态标签
@@ -626,6 +714,7 @@ const priorityLabel = (priority) => {
 
 // 页面加载时获取任务列表
 onMounted(() => {
+  document.addEventListener('click', handleSortOutsideClick);
   loadTasks();
 });
 
@@ -634,6 +723,7 @@ watch(sortOption, async () => {
 });
 
 onBeforeUnmount(() => {
+  document.removeEventListener('click', handleSortOutsideClick);
   if (celebrationTimer) {
     clearTimeout(celebrationTimer);
   }
@@ -731,16 +821,101 @@ onBeforeUnmount(() => {
   height: 16px;
 }
 
-.sort-select {
-  border: none;
-  background: transparent;
+.sort-dropdown {
+  position: relative;
+  min-width: 120px;
+}
+
+.sort-trigger {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid #d7e2ef;
+  border-radius: 999px;
+  background: #fff;
   font-size: 0.85rem;
   color: #1f2937;
   cursor: pointer;
+  padding: 6px 10px 6px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.sort-select:focus {
+.sort-trigger:hover {
+  border-color: #bfd2ec;
+}
+
+.sort-trigger:focus-visible {
   outline: none;
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+.sort-caret {
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid #64748b;
+  border-bottom: 2px solid #64748b;
+  transform: rotate(45deg);
+  transition: transform 0.18s ease;
+}
+
+.sort-caret.open {
+  transform: rotate(225deg);
+}
+
+.sort-menu {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 6px;
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 25;
+  border: 1px solid #d5e1f0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(6px);
+}
+
+.sort-option {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #1f2937;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  padding: 0 8px;
+  transition: background-color 0.18s ease, border-color 0.18s ease;
+}
+
+.sort-option:hover {
+  background: #f3f8ff;
+  border-color: #dbeafe;
+}
+
+.sort-option.active {
+  background: #eaf2ff;
+  border-color: #c7ddff;
+  color: #1d4ed8;
+}
+
+.sort-menu-fade-enter-active,
+.sort-menu-fade-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.sort-menu-fade-enter-from,
+.sort-menu-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 .search-box {
@@ -800,12 +975,12 @@ onBeforeUnmount(() => {
 .task-header h1 {
   margin: 0 0 0.5rem 0;
   font-size: 1.5rem;
-  color: #1f2937;
+  color: var(--text);
 }
 
 .task-header .hint {
   margin: 0;
-  color: #6b7280;
+  color: var(--muted);
   font-size: 0.875rem;
 }
 
