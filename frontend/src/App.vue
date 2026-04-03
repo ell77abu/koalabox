@@ -2,7 +2,6 @@
   <div v-if="authStore.isLoggedIn.value" class="app-layout">
     <aside class="sidebar">
       <div class="logo">Collabox</div>
-      <div class="logo">Collabox</div>
       <nav class="nav-menu">
         <RouterLink to="/tasks" class="nav-item" active-class="active">
           <span class="icon">📋</span> 任务中心
