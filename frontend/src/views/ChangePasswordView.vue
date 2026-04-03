@@ -148,6 +148,18 @@ const showOldPassword = ref(false);
 const showNewPassword = ref(false);
 const showConfirmPassword = ref(false);
 
+const isOldPasswordError = (error) => {
+  const status = error?.response?.status;
+  const message = String(error?.response?.data?.message || '').toLowerCase();
+
+  return (
+    message.includes('invalid old password') ||
+    message.includes('old password') ||
+    message.includes('旧密码错误') ||
+    (status === 401 && !message.includes('unauthorized'))
+  );
+};
+
 const onSubmit = async () => {
   errorMessage.value = '';
   successMessage.value = '';
@@ -189,7 +201,7 @@ const onSubmit = async () => {
       router.replace('/profile');
     }, 900);
   } catch (error) {
-    if (error.response?.status === 401) {
+    if (isOldPasswordError(error)) {
       errorMessage.value = '旧密码错误，请重新输入';
     } else {
       errorMessage.value = error.response?.data?.message || '修改密码失败，请稍后重试';
