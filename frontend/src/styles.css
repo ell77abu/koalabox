@@ -1,0 +1,290 @@
+:root {
+  --bg-start: #f4f8ff;
+  --bg-end: #e9fff4;
+  --card-bg: #ffffff;
+  --primary: #1c7ed6;
+  --primary-hover: #1971c2;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --error: #dc2626;
+  --success: #15803d;
+  --border: #dbe3f0;
+  --app-bg: #eef2f7;
+  --sidebar-bg: #edf5f3;
+  --sidebar-text: #0f172a;
+  --sidebar-logo-text: #0b0b0b;
+  --sidebar-logo-bg: rgba(255, 255, 255, 0.6);
+  --sidebar-item-text: rgba(15, 23, 42, 0.7);
+  --sidebar-item-hover-text: #0f172a;
+  --sidebar-item-hover-bg: rgba(15, 23, 42, 0.06);
+  --sidebar-item-active-text: #0f172a;
+  --sidebar-item-active-bg: rgba(59, 130, 246, 0.18);
+  --sidebar-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
+  --pill-bg: rgba(255, 255, 255, 0.78);
+  --pill-border: rgba(203, 213, 225, 0.9);
+  --pill-text: #1f2937;
+}
+
+:root[data-theme='dark'] {
+  --bg-start: #0b1220;
+  --bg-end: #101a2b;
+  --card-bg: #0f172a;
+  --primary: #60a5fa;
+  --primary-hover: #3b82f6;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --error: #f87171;
+  --success: #34d399;
+  --border: #1f2a3a;
+  --app-bg: #0b1220;
+  --sidebar-bg: #0f1c2e;
+  --sidebar-text: #e2e8f0;
+  --sidebar-logo-text: #f8fafc;
+  --sidebar-logo-bg: rgba(15, 23, 42, 0.7);
+  --sidebar-item-text: rgba(226, 232, 240, 0.75);
+  --sidebar-item-hover-text: #f8fafc;
+  --sidebar-item-hover-bg: rgba(248, 250, 252, 0.08);
+  --sidebar-item-active-text: #f8fafc;
+  --sidebar-item-active-bg: rgba(96, 165, 250, 0.22);
+  --sidebar-shadow: 0 10px 24px rgba(2, 6, 23, 0.6);
+  --pill-bg: rgba(15, 23, 42, 0.85);
+  --pill-border: rgba(30, 41, 59, 0.9);
+  --pill-text: #e2e8f0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  color: var(--text);
+  background: linear-gradient(135deg, var(--bg-start), var(--bg-end));
+  min-height: 100vh;
+}
+
+.page-shell {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 24px;
+}
+
+.card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px;
+  box-shadow: 0 12px 40px rgba(28, 126, 214, 0.1);
+}
+
+.card-wide {
+  max-width: 760px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.hint {
+  margin: 8px 0 20px;
+  color: var(--muted);
+}
+
+.form {
+  display: grid;
+  gap: 14px;
+}
+
+label {
+  display: grid;
+  gap: 8px;
+  font-size: 14px;
+}
+
+input {
+  height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0 12px;
+  font-size: 14px;
+}
+
+input:focus {
+  outline: 2px solid rgba(28, 126, 214, 0.2);
+  border-color: var(--primary);
+}
+
+.password-field {
+  position: relative;
+}
+
+.password-field input {
+  width: 100%;
+  padding-right: 44px;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 999px;
+  padding: 0;
+}
+
+.password-toggle:hover {
+  background: rgba(28, 126, 214, 0.08);
+  color: var(--primary);
+}
+
+.password-toggle-icon {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.btn {
+  height: 42px;
+  border: none;
+  border-radius: 10px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: var(--primary-hover);
+}
+
+.btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.btn-outline {
+  width: 110px;
+  background: transparent;
+  border: 1px solid var(--primary);
+  color: var(--primary);
+}
+
+.btn-outline:hover {
+  background: rgba(28, 126, 214, 0.08);
+}
+
+.error {
+  margin: 0;
+  color: var(--error);
+  font-size: 14px;
+}
+
+.success {
+  margin: 0;
+  color: var(--success);
+  font-size: 14px;
+}
+
+.foot {
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.foot a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.task-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.task-placeholder {
+  margin-top: 24px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: #fbfdff;
+  padding: 18px;
+}
+
+@media (max-width: 640px) {
+  .card {
+    padding: 22px;
+  }
+  .task-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+/* 悬浮加号按钮 (FAB) 样式 */
+.add-task-fab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  background-color: var(--primary);
+  color: white;
+  border-radius: 50%;
+  text-decoration: none;
+  font-size: 28px;
+  box-shadow: 0 4px 12px rgba(28, 126, 214, 0.3);
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  position: relative;
+}
+
+.add-task-fab:hover {
+  background-color: var(--primary-hover);
+  transform: scale(1.1);
+  box-shadow: 0 6px 16px rgba(28, 126, 214, 0.4);
+}
+
+/* 悬浮文字提示 */
+.add-task-fab::after {
+  content: "创建任务";
+  position: absolute;
+  top: 50%;
+  right: 60px;
+  transform: translateY(-50%) rotate(0deg);
+  background: rgba(0, 0, 0, 0.75);
+  color: white;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+
+.add-task-fab:hover::after {
+  opacity: 1;
+}
+
+.plus-icon {
+  line-height: 1;
+}
