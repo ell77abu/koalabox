@@ -6,6 +6,9 @@
         <RouterLink to="/tasks" class="nav-item" active-class="active">
           <span class="icon">📋</span> 任务中心
         </RouterLink>
+        <RouterLink to="/teams" class="nav-item" active-class="active">
+          <span class="icon">👥</span> 我的团队
+        </RouterLink>
       </nav>
     </aside>
 
