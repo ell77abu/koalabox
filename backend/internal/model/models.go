@@ -21,6 +21,15 @@ const (
 	PriorityHigh   Priority = 3
 )
 
+// TeamRole 对应 team_members 里的成员角色。
+type TeamRole string
+
+const (
+	TeamRoleOwner  TeamRole = "Owner"
+	TeamRoleAdmin  TeamRole = "Admin"
+	TeamRoleMember TeamRole = "Member"
+)
+
 // User 映射 users 表。
 type User struct {
 	ID    uint64 `json:"id" db:"id"`
@@ -37,6 +46,8 @@ type User struct {
 type Task struct {
 	ID          uint64     `json:"id" db:"id"`
 	UserID      uint64     `json:"user_id" db:"user_id"`
+	TeamID      *uint64    `json:"team_id" db:"team_id"`
+	AssigneeID  *uint64    `json:"assignee_id" db:"assignee_id"`
 	Title       string     `json:"title" db:"title" validate:"required,min=1,max=120"`
 	Description string     `json:"description" db:"description"`
 	Status      TaskStatus `json:"status" db:"status" validate:"required,oneof=TODO DOING DONE ERROR"`
@@ -45,6 +56,27 @@ type Task struct {
 	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at" db:"updated_at"`
 	DeletedAt   *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`
+}
+
+// Team 映射 teams 表。
+type Team struct {
+	ID        uint64     `json:"id" db:"id"`
+	Name      string     `json:"name" db:"name"`
+	OwnerID   uint64     `json:"owner_id" db:"owner_id"`
+	CreatedAt time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at" db:"updated_at"`
+	DeletedAt *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`
+}
+
+// TeamMember 映射 team_members 表。
+type TeamMember struct {
+	ID        uint64     `json:"id" db:"id"`
+	TeamID    uint64     `json:"team_id" db:"team_id"`
+	UserID    uint64     `json:"user_id" db:"user_id"`
+	Role      TeamRole   `json:"role" db:"role"`
+	CreatedAt time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at" db:"updated_at"`
+	DeletedAt *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`
 }
 
 // TaskAuditLog 映射 task_audit_logs 表。

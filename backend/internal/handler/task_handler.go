@@ -33,7 +33,26 @@ func (h *TaskHandler) List(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	size, _ := strconv.Atoi(c.DefaultQuery("size", "10"))
 
-	list, total, fixedPage, fixedSize, err := h.taskService.List(c.Request.Context(), userID, userLevel, page, size)
+	var teamID *uint64
+	teamIDRaw := c.Query("team_id")
+	if teamIDRaw != "" {
+		parsed, err := strconv.ParseUint(teamIDRaw, 10, 64)
+		if err != nil {
+			response.BadRequest(c, "invalid team_id")
+			return
+		}
+		teamID = &parsed
+	}
+
+	list, total, fixedPage, fixedSize, err := h.taskService.List(c.Request.Context(), userID, userLevel, page, size, teamID)
+	if errors.Is(err, repository.ErrForbidden) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
+	if errors.Is(err, service.ErrInvalidTeamID) {
+		response.BadRequest(c, err.Error())
+		return
+	}
 	if err != nil {
 		response.InternalError(c, "query tasks failed")
 		return
@@ -59,6 +78,10 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
+	if isTaskForbiddenError(err) || errors.Is(err, repository.ErrForbidden) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
 	if err != nil {
 		response.InternalError(c, "create task failed")
 		return
@@ -69,10 +92,6 @@ func (h *TaskHandler) Create(c *gin.Context) {
 
 func (h *TaskHandler) Update(c *gin.Context) {
 	userID, ok := getUserIDFromContext(c)
-	if !ok {
-		return
-	}
-	userLevel, ok := getUserLevelFromContext(c)
 	if !ok {
 		return
 	}
@@ -89,9 +108,13 @@ func (h *TaskHandler) Update(c *gin.Context) {
 		return
 	}
 
-	task, err := h.taskService.Update(c.Request.Context(), userID, userLevel, id, req)
+	task, err := h.taskService.Update(c.Request.Context(), userID, id, req)
 	if isTaskValidationError(err) {
 		response.BadRequest(c, err.Error())
+		return
+	}
+	if isTaskForbiddenError(err) {
+		response.Forbidden(c, err.Error())
 		return
 	}
 	if errors.Is(err, repository.ErrForbidden) {
@@ -127,6 +150,10 @@ func (h *TaskHandler) Delete(c *gin.Context) {
 	}
 
 	err = h.taskService.Delete(c.Request.Context(), userID, userLevel, id)
+	if isTaskForbiddenError(err) {
+		response.Forbidden(c, err.Error())
+		return
+	}
 	if errors.Is(err, repository.ErrForbidden) {
 		response.Forbidden(c, "forbidden")
 		return
@@ -175,5 +202,13 @@ func isTaskValidationError(err error) bool {
 	return errors.Is(err, service.ErrInvalidTaskTitle) ||
 		errors.Is(err, service.ErrInvalidTaskStatus) ||
 		errors.Is(err, service.ErrInvalidTaskPriority) ||
-		errors.Is(err, service.ErrInvalidTaskDeadline)
+		errors.Is(err, service.ErrInvalidTaskDeadline) ||
+		errors.Is(err, service.ErrInvalidTeamID) ||
+		errors.Is(err, service.ErrInvalidAssigneeID) ||
+		errors.Is(err, service.ErrAssigneeNotInTeam)
+}
+
+func isTaskForbiddenError(err error) bool {
+	return errors.Is(err, service.ErrTeamRoleDenied) ||
+		errors.Is(err, service.ErrMemberStatusOnly)
 }

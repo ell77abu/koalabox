@@ -19,10 +19,13 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	healthHandler := handler.NewHealthHandler()
 	userRepo := repository.NewUserRepository(db)
 	taskRepo := repository.NewTaskRepository(db)
+	teamRepo := repository.NewTeamRepository(db)
 	authService := service.NewAuthService(userRepo, cfg.JWT.Secret, cfg.JWT.ExpireHour)
-	taskService := service.NewTaskService(taskRepo)
+	taskService := service.NewTaskService(taskRepo, teamRepo, userRepo)
+	teamService := service.NewTeamService(teamRepo, userRepo)
 	authHandler := handler.NewAuthHandler(authService)
 	taskHandler := handler.NewTaskHandler(taskService)
+	teamHandler := handler.NewTeamHandler(teamService)
 
 	r.GET("/ping", healthHandler.Ping)
 
@@ -45,6 +48,14 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			taskGroup.PUT("/:id", taskHandler.Update)
 			taskGroup.PATCH("/:id", taskHandler.Update)
 			taskGroup.DELETE("/:id", taskHandler.Delete)
+		}
+
+		teamGroup := apiV1.Group("/teams")
+		teamGroup.Use(middleware.JWTAuth(cfg.JWT.Secret))
+		{
+			teamGroup.GET("/mine", teamHandler.ListMine)
+			teamGroup.POST("", teamHandler.Create)
+			teamGroup.POST("/:id/members", teamHandler.AddMember)
 		}
 	}
 
