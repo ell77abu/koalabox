@@ -240,8 +240,8 @@ input:focus {
   }
 }
 
-/* 悬浮加号按钮 (FAB) 样式 */
-.add-task-fab {
+/* 1. 定义公共的 FAB 基础样式 */
+.fab {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -255,21 +255,23 @@ input:focus {
   box-shadow: 0 4px 12px rgba(28, 126, 214, 0.3);
   transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   position: relative;
+  border: none;
+  cursor: pointer;
 }
 
-.add-task-fab:hover {
+.fab:hover {
   background-color: var(--primary-hover);
   transform: scale(1.1);
   box-shadow: 0 6px 16px rgba(28, 126, 214, 0.4);
 }
 
-/* 悬浮文字提示 */
-.add-task-fab::after {
-  content: "创建任务";
+/* 2. 核心合并点：使用 attr(data-hint) 动态获取提示文字 */
+.fab::after {
+  content: attr(data-hint); /* 这里会读取 HTML 中的 data-hint 属性 */
   position: absolute;
   top: 50%;
   right: 60px;
-  transform: translateY(-50%) rotate(0deg);
+  transform: translateY(-50%);
   background: rgba(0, 0, 0, 0.75);
   color: white;
   padding: 6px 12px;
@@ -281,10 +283,9 @@ input:focus {
   transition: opacity 0.3s;
 }
 
-.add-task-fab:hover::after {
+.fab:hover::after {
   opacity: 1;
 }
-
 .plus-icon {
   line-height: 1;
 }

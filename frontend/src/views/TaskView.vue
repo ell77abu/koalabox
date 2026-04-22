@@ -29,7 +29,7 @@
               清除
             </button>
           </div>
-          <RouterLink to="/tasks/create" class="add-task-fab" title="创建任务">
+          <RouterLink to="/tasks/create" class="fab"  data-hint="创建任务" title="创建任务">
             <span class="plus-icon">+</span>
           </RouterLink>
         </div>
@@ -803,7 +803,7 @@ onBeforeUnmount(() => {
   gap: 0.75rem;
 }
 
-.add-task-fab {
+.fab {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -824,7 +824,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-.add-task-fab:hover {
+.fab:hover {
   transform: scale(1.05);
   box-shadow: 0 6px 14px rgba(28, 126, 214, 0.35);
 }

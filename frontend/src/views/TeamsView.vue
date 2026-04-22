@@ -7,7 +7,7 @@
           <p class="hint">和伙伴们高效协同，管理你的团队空间</p>
         </div>
         <div class="header-actions">
-          <RouterLink to="/teams/create" class="add-task-fab" title="创建新团队">
+          <RouterLink to="/teams/create" class="fab" data-hint="创建新团队" title="创建新团队">
             <span class="plus-icon">+</span>
           </RouterLink>
         </div>
@@ -113,13 +113,13 @@ onMounted(() => {
 .task-header .hint { margin: 0; color: var(--muted); font-size: 0.875rem; }
 .header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem; width: 100%; }
 
-.add-task-fab {
+.fab {
   display: flex; align-items: center; justify-content: center; width: 48px; height: 48px;
   border-radius: 50%; background: var(--primary); color: #fff; text-decoration: none;
   border: none; padding: 0; outline: none; cursor: pointer;
   box-shadow: 0 4px 10px rgba(28, 126, 214, 0.28); transition: transform 0.2s, box-shadow 0.2s; flex-shrink: 0;
 }
-.add-task-fab:hover { transform: scale(1.05); box-shadow: 0 6px 14px rgba(28, 126, 214, 0.35); }
+.fab:hover { transform: scale(1.05); box-shadow: 0 6px 14px rgba(28, 126, 214, 0.35); }
 .plus-icon { font-size: 30px; font-weight: 600; line-height: 1; margin-top: -6px; }
 
 .list-section { margin-bottom: 2rem; }
