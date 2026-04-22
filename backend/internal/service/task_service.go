@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -32,14 +33,39 @@ type CreateTaskRequest struct {
 	AssigneeID  *uint64 `json:"assignee_id"`
 }
 
+// OptionalUint64 用于区分字段未传、传 null、传具体数值三种状态。
+type OptionalUint64 struct {
+	Set   bool
+	Valid bool
+	Value uint64
+}
+
+func (o *OptionalUint64) UnmarshalJSON(data []byte) error {
+	o.Set = true
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "null" {
+		o.Valid = false
+		o.Value = 0
+		return nil
+	}
+
+	var v uint64
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	o.Valid = true
+	o.Value = v
+	return nil
+}
+
 type UpdateTaskRequest struct {
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
-	Status      *string `json:"status"`
-	Priority    *int    `json:"priority"`
-	Deadline    *string `json:"deadline"`
-	TeamID      *uint64 `json:"team_id"`
-	AssigneeID  *uint64 `json:"assignee_id"`
+	Title       *string        `json:"title"`
+	Description *string        `json:"description"`
+	Status      *string        `json:"status"`
+	Priority    *int           `json:"priority"`
+	Deadline    *string        `json:"deadline"`
+	TeamID      *uint64        `json:"team_id"`
+	AssigneeID  OptionalUint64 `json:"assignee_id"`
 }
 
 type TaskService interface {
@@ -302,20 +328,25 @@ func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.T
 		}
 		task.TeamID = req.TeamID
 	}
-	if req.AssigneeID != nil {
-		if _, err := s.userRepo.GetByID(ctx, *req.AssigneeID); err != nil {
-			return nil, ErrInvalidAssigneeID
-		}
-		if task.TeamID != nil {
-			inTeam, err := s.teamRepo.IsMember(ctx, *task.TeamID, *req.AssigneeID)
-			if err != nil {
-				return nil, err
+	if req.AssigneeID.Set {
+		if !req.AssigneeID.Valid {
+			task.AssigneeID = nil
+		} else {
+			assigneeID := req.AssigneeID.Value
+			if _, err := s.userRepo.GetByID(ctx, assigneeID); err != nil {
+				return nil, ErrInvalidAssigneeID
 			}
-			if !inTeam {
-				return nil, ErrAssigneeNotInTeam
+			if task.TeamID != nil {
+				inTeam, err := s.teamRepo.IsMember(ctx, *task.TeamID, assigneeID)
+				if err != nil {
+					return nil, err
+				}
+				if !inTeam {
+					return nil, ErrAssigneeNotInTeam
+				}
 			}
+			task.AssigneeID = &assigneeID
 		}
-		task.AssigneeID = req.AssigneeID
 	}
 
 	if err := s.taskRepo.UpdateByID(ctx, task); err != nil {
@@ -325,7 +356,7 @@ func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.T
 }
 
 func hasMemberRestrictedFields(req UpdateTaskRequest) bool {
-	return req.Title != nil || req.Description != nil || req.Priority != nil || req.Deadline != nil || req.TeamID != nil || req.AssigneeID != nil
+	return req.Title != nil || req.Description != nil || req.Priority != nil || req.Deadline != nil || req.TeamID != nil || req.AssigneeID.Set
 }
 
 func canManageTeamTasks(role model.TeamRole) bool {
