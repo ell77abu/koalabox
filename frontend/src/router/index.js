@@ -6,6 +6,9 @@ import TaskView from '../views/TaskView.vue';
 import ProfileView from '../views/ProfileView.vue';
 import CreateTaskView from '../views/CreateTaskView.vue';
 import ChangePasswordView from '../views/ChangePasswordView.vue';
+import TeamsView from '../views/TeamsView.vue';
+import CreateTeamView from '../views/CreateTeamView.vue';
+import TeamDetailView from '../views/TeamDetailView.vue';
 
 const routes = [
   {
@@ -46,6 +49,26 @@ const routes = [
     path: '/profile/password',
     name: 'change-password',
     component: ChangePasswordView,
+    meta: { requiresAuth: true },
+  },
+
+  // 我的团队列表页路由
+  {
+    path: '/teams',
+    name: 'teams',
+    component: TeamsView,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/teams/create',
+    name: 'create-team',
+    component: CreateTeamView,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/teams/:team_id',
+    name: 'team-detail',
+    component: TeamDetailView,
     meta: { requiresAuth: true },
   },
 ];
