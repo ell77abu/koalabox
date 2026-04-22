@@ -19,22 +19,9 @@ CREATE TABLE IF NOT EXISTS users (
     CHECK (username ~ '^[A-Za-z0-9_]{4,20}$')
 );
 
-CREATE TABLE IF NOT EXISTS teams (
-  id BIGSERIAL PRIMARY KEY,
-  name VARCHAR(100) NOT NULL,
-  owner_id BIGINT NOT NULL REFERENCES users(id),
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted_at TIMESTAMP NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_teams_owner_id ON teams (owner_id);
-
 CREATE TABLE IF NOT EXISTS tasks (
   id BIGSERIAL PRIMARY KEY,
   user_id BIGINT NOT NULL REFERENCES users(id),
-  team_id BIGINT NULL REFERENCES teams(id),
-  assignee_id BIGINT NULL REFERENCES users(id),
   title VARCHAR(120) NOT NULL,
   description TEXT NULL,
   status VARCHAR(10) NOT NULL DEFAULT 'TODO',
@@ -52,23 +39,6 @@ CREATE INDEX IF NOT EXISTS idx_tasks_user_deleted_created
 CREATE INDEX IF NOT EXISTS idx_tasks_user_status ON tasks (user_id, status);
 CREATE INDEX IF NOT EXISTS idx_tasks_user_deadline ON tasks (user_id, deadline);
 CREATE INDEX IF NOT EXISTS idx_tasks_user_priority ON tasks (user_id, priority);
-CREATE INDEX IF NOT EXISTS idx_tasks_team_id ON tasks (team_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_assignee_id ON tasks (assignee_id);
-
-CREATE TABLE IF NOT EXISTS team_members (
-  id BIGSERIAL PRIMARY KEY,
-  team_id BIGINT NOT NULL REFERENCES teams(id),
-  user_id BIGINT NOT NULL REFERENCES users(id),
-  role VARCHAR(10) NOT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted_at TIMESTAMP NULL,
-  CONSTRAINT chk_team_members_role CHECK (role IN ('Owner', 'Admin', 'Member')),
-  CONSTRAINT uk_team_members_team_user UNIQUE (team_id, user_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_team_members_team_id ON team_members (team_id);
-CREATE INDEX IF NOT EXISTS idx_team_members_user_id ON team_members (user_id);
 
 CREATE TABLE IF NOT EXISTS task_audit_logs (
   id BIGSERIAL PRIMARY KEY,
