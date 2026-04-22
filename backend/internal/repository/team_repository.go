@@ -12,11 +12,12 @@ import (
 
 type TeamRepository interface {
 	Create(ctx context.Context, team *model.Team) error
-	ListByUserID(ctx context.Context, userID uint64) ([]model.Team, error)
+	ListByUserID(ctx context.Context, userID uint64) ([]model.TeamWithRole, error)
 	GetByID(ctx context.Context, teamID uint64) (*model.Team, error)
 	AddMember(ctx context.Context, member *model.TeamMember) error
 	IsMember(ctx context.Context, teamID, userID uint64) (bool, error)
 	GetMemberRole(ctx context.Context, teamID, userID uint64) (model.TeamRole, error)
+	ListMembers(ctx context.Context, teamID uint64) ([]model.TeamMemberDetail, error)
 }
 
 type teamRepository struct {
@@ -31,10 +32,11 @@ func (r *teamRepository) Create(ctx context.Context, team *model.Team) error {
 	return r.db.WithContext(ctx).Create(team).Error
 }
 
-func (r *teamRepository) ListByUserID(ctx context.Context, userID uint64) ([]model.Team, error) {
-	var list []model.Team
+func (r *teamRepository) ListByUserID(ctx context.Context, userID uint64) ([]model.TeamWithRole, error) {
+	var list []model.TeamWithRole
 	err := r.db.WithContext(ctx).
-		Model(&model.Team{}).
+		Table("teams").
+		Select("teams.id AS team_id, teams.name, tm.role").
 		Joins("JOIN team_members tm ON tm.team_id = teams.id AND tm.deleted_at IS NULL").
 		Where("teams.deleted_at IS NULL").
 		Where("tm.user_id = ?", userID).
@@ -102,4 +104,23 @@ func (r *teamRepository) GetMemberRole(ctx context.Context, teamID, userID uint6
 		return "", err
 	}
 	return member.Role, nil
+}
+
+func (r *teamRepository) ListMembers(ctx context.Context, teamID uint64) ([]model.TeamMemberDetail, error) {
+	var list []model.TeamMemberDetail
+	err := r.db.WithContext(ctx).
+		Table("team_members tm").
+		Select("tm.user_id, u.username, tm.role").
+		Joins("JOIN users u ON u.id = tm.user_id AND u.deleted_at IS NULL").
+		Where("tm.team_id = ?", teamID).
+		Where("tm.deleted_at IS NULL").
+		Order("tm.created_at ASC").
+		Find(&list).Error
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = make([]model.TeamMemberDetail, 0)
+	}
+	return list, nil
 }

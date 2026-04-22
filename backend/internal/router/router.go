@@ -53,9 +53,11 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		teamGroup := apiV1.Group("/teams")
 		teamGroup.Use(middleware.JWTAuth(cfg.JWT.Secret))
 		{
+			teamGroup.GET("", teamHandler.ListMine)
 			teamGroup.GET("/mine", teamHandler.ListMine)
 			teamGroup.POST("", teamHandler.Create)
 			teamGroup.POST("/:id/members", teamHandler.AddMember)
+			teamGroup.GET("/:team_id/members", teamHandler.ListMembers)
 		}
 	}
 

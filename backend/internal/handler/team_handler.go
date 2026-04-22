@@ -15,6 +15,16 @@ type TeamHandler struct {
 	teamService service.TeamService
 }
 
+type createTeamResponse struct {
+	TeamID  uint64 `json:"team_id"`
+	Name    string `json:"name"`
+	OwnerID uint64 `json:"owner_id"`
+}
+
+type teamListResponse struct {
+	List interface{} `json:"list"`
+}
+
 func NewTeamHandler(teamService service.TeamService) *TeamHandler {
 	return &TeamHandler{teamService: teamService}
 }
@@ -31,7 +41,7 @@ func (h *TeamHandler) ListMine(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, "query success", list)
+	response.Success(c, "query success", teamListResponse{List: list})
 }
 
 func (h *TeamHandler) Create(c *gin.Context) {
@@ -56,7 +66,11 @@ func (h *TeamHandler) Create(c *gin.Context) {
 		return
 	}
 
-	response.Created(c, "create success", team)
+	response.Created(c, "team created", createTeamResponse{
+		TeamID:  team.ID,
+		Name:    team.Name,
+		OwnerID: team.OwnerID,
+	})
 }
 
 func (h *TeamHandler) AddMember(c *gin.Context) {
@@ -82,6 +96,10 @@ func (h *TeamHandler) AddMember(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
+	if errors.Is(err, service.ErrTeamOwnerOnly) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
 	if errors.Is(err, repository.ErrForbidden) {
 		response.Forbidden(c, "forbidden")
 		return
@@ -100,4 +118,33 @@ func (h *TeamHandler) AddMember(c *gin.Context) {
 	}
 
 	response.Created(c, "add member success", member)
+}
+
+func (h *TeamHandler) ListMembers(c *gin.Context) {
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
+
+	teamID, err := strconv.ParseUint(c.Param("team_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid team id")
+		return
+	}
+
+	list, err := h.teamService.ListMembers(c.Request.Context(), userID, teamID)
+	if errors.Is(err, repository.ErrForbidden) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
+	if errors.Is(err, repository.ErrNotFound) {
+		response.NotFound(c, "team not found")
+		return
+	}
+	if err != nil {
+		response.InternalError(c, "query team members failed")
+		return
+	}
+
+	response.Success(c, "query success", list)
 }

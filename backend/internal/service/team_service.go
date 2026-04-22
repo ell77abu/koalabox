@@ -12,6 +12,7 @@ import (
 var (
 	ErrInvalidTeamName = errors.New("invalid team name")
 	ErrInvalidTeamRole = errors.New("invalid team role")
+	ErrTeamOwnerOnly   = errors.New("only owner can manage team members")
 )
 
 type CreateTeamRequest struct {
@@ -25,8 +26,9 @@ type AddTeamMemberRequest struct {
 
 type TeamService interface {
 	Create(ctx context.Context, ownerID uint64, req CreateTeamRequest) (*model.Team, error)
-	ListMine(ctx context.Context, userID uint64) ([]model.Team, error)
+	ListMine(ctx context.Context, userID uint64) ([]model.TeamWithRole, error)
 	AddMember(ctx context.Context, operatorID, teamID uint64, req AddTeamMemberRequest) (*model.TeamMember, error)
+	ListMembers(ctx context.Context, operatorID, teamID uint64) ([]model.TeamMemberDetail, error)
 }
 
 type teamService struct {
@@ -63,7 +65,7 @@ func (s *teamService) Create(ctx context.Context, ownerID uint64, req CreateTeam
 	return team, nil
 }
 
-func (s *teamService) ListMine(ctx context.Context, userID uint64) ([]model.Team, error) {
+func (s *teamService) ListMine(ctx context.Context, userID uint64) ([]model.TeamWithRole, error) {
 	return s.teamRepo.ListByUserID(ctx, userID)
 }
 
@@ -72,12 +74,15 @@ func (s *teamService) AddMember(ctx context.Context, operatorID, teamID uint64, 
 		return nil, err
 	}
 
-	isMember, err := s.teamRepo.IsMember(ctx, teamID, operatorID)
+	operatorRole, err := s.teamRepo.GetMemberRole(ctx, teamID, operatorID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, repository.ErrForbidden
+	}
 	if err != nil {
 		return nil, err
 	}
-	if !isMember {
-		return nil, repository.ErrForbidden
+	if operatorRole != model.TeamRoleOwner {
+		return nil, ErrTeamOwnerOnly
 	}
 
 	if _, err := s.userRepo.GetByID(ctx, req.UserID); err != nil {
@@ -86,6 +91,9 @@ func (s *teamService) AddMember(ctx context.Context, operatorID, teamID uint64, 
 
 	role := model.TeamRole(req.Role)
 	if !isValidTeamRole(role) {
+		return nil, ErrInvalidTeamRole
+	}
+	if role == model.TeamRoleOwner {
 		return nil, ErrInvalidTeamRole
 	}
 
@@ -98,6 +106,22 @@ func (s *teamService) AddMember(ctx context.Context, operatorID, teamID uint64, 
 		return nil, err
 	}
 	return member, nil
+}
+
+func (s *teamService) ListMembers(ctx context.Context, operatorID, teamID uint64) ([]model.TeamMemberDetail, error) {
+	if _, err := s.teamRepo.GetByID(ctx, teamID); err != nil {
+		return nil, err
+	}
+
+	isMember, err := s.teamRepo.IsMember(ctx, teamID, operatorID)
+	if err != nil {
+		return nil, err
+	}
+	if !isMember {
+		return nil, repository.ErrForbidden
+	}
+
+	return s.teamRepo.ListMembers(ctx, teamID)
 }
 
 func isValidTeamRole(role model.TeamRole) bool {

@@ -79,6 +79,20 @@ type TeamMember struct {
 	DeletedAt *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`
 }
 
+// TeamWithRole 用于“我的团队”列表返回。
+type TeamWithRole struct {
+	TeamID uint64   `json:"team_id" db:"team_id"`
+	Name   string   `json:"name" db:"name"`
+	Role   TeamRole `json:"role" db:"role"`
+}
+
+// TeamMemberDetail 用于团队成员列表返回。
+type TeamMemberDetail struct {
+	UserID   uint64   `json:"user_id" db:"user_id"`
+	Username string   `json:"username" db:"username"`
+	Role     TeamRole `json:"role" db:"role"`
+}
+
 // TaskAuditLog 映射 task_audit_logs 表。
 type TaskAuditLog struct {
 	ID        uint64    `json:"id" db:"id"`
