@@ -92,6 +92,10 @@ func (h *TeamHandler) AddMember(c *gin.Context) {
 	}
 
 	member, err := h.teamService.AddMember(c.Request.Context(), userID, teamID, req)
+	if errors.Is(err, service.ErrInvalidTeamMember) {
+		response.BadRequest(c, err.Error())
+		return
+	}
 	if errors.Is(err, service.ErrInvalidTeamRole) {
 		response.BadRequest(c, err.Error())
 		return

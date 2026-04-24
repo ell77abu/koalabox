@@ -433,7 +433,7 @@ const handleAddMember = async () => {
   if (!newMemberName.value) return;
   submittingMember.value = true;
   try {
-    const res = await addTeamMemberApi(teamId, { user_id: newMemberName.value });
+    const res = await addTeamMemberApi(teamId, { username: newMemberName.value });
     if (res.data.code === 0) {
       showAddMemberModal.value = false;
       newMemberName.value = ''; 

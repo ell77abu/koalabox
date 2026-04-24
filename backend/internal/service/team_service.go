@@ -12,6 +12,7 @@ import (
 var (
 	ErrInvalidTeamName   = errors.New("invalid team name")
 	ErrInvalidTeamRole   = errors.New("invalid team role")
+	ErrInvalidTeamMember = errors.New("invalid team member")
 	ErrTeamOwnerOnly     = errors.New("only owner can manage team members")
 	ErrCannotRemoveSelf  = errors.New("owner cannot remove self from team")
 	ErrCannotModifyOwner = errors.New("owner role cannot be changed")
@@ -22,7 +23,8 @@ type CreateTeamRequest struct {
 }
 
 type AddTeamMemberRequest struct {
-	UserID uint64 `json:"user_id"`
+	UserID   uint64 `json:"user_id"`
+	Username string `json:"username"`
 }
 
 type UpdateTeamMemberRoleRequest struct {
@@ -92,13 +94,26 @@ func (s *teamService) AddMember(ctx context.Context, operatorID, teamID uint64, 
 		return nil, ErrTeamOwnerOnly
 	}
 
-	if _, err := s.userRepo.GetByID(ctx, req.UserID); err != nil {
+	targetUserID := req.UserID
+	if targetUserID == 0 {
+		username := strings.TrimSpace(req.Username)
+		if username == "" {
+			return nil, ErrInvalidTeamMember
+		}
+		targetUser, err := s.userRepo.GetByUsername(ctx, username)
+		if err != nil {
+			return nil, err
+		}
+		targetUserID = targetUser.ID
+	}
+
+	if _, err := s.userRepo.GetByID(ctx, targetUserID); err != nil {
 		return nil, err
 	}
 
 	member := &model.TeamMember{
 		TeamID: teamID,
-		UserID: req.UserID,
+		UserID: targetUserID,
 		Role:   model.TeamRoleMember,
 	}
 	if err := s.teamRepo.AddMember(ctx, member); err != nil {
