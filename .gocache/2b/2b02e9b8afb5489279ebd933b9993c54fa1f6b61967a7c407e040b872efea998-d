@@ -1,4 +1,0 @@
-./auth_handler.go
-./health_handler.go
-./task_handler.go
-./team_handler.go
