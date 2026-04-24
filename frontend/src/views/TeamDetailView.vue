@@ -244,6 +244,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { authStore } from '../stores/auth'; 
 import { teamStore } from '../stores/team';
 import { 
+  getTeamsApi,
   getTeamMembersApi, 
   addTeamMemberApi, 
   deleteTeamMemberApi, 
@@ -324,6 +325,18 @@ const formatDateForInput = (dateStr) => {
 };
 
 /* ================== 数据加载 ================== */
+
+const loadTeams = async () => {
+  try {
+    const res = await getTeamsApi();
+    if (res.data.code === 0) {
+      teamStore.setTeams(res.data.data.list || []);
+    }
+  } catch (error) {
+    console.error('加载团队列表失败', error);
+  }
+};
+
 const loadTeamTasks = async () => {
   loadingTasks.value = true;
   try {
@@ -469,6 +482,7 @@ const toggleAdminRole = async (member) => {
 };
 
 onMounted(() => {
+  loadTeams();
   loadTeamTasks();
   loadTeamMembers();
 });
