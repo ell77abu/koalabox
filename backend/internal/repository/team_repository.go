@@ -15,6 +15,8 @@ type TeamRepository interface {
 	ListByUserID(ctx context.Context, userID uint64) ([]model.TeamWithRole, error)
 	GetByID(ctx context.Context, teamID uint64) (*model.Team, error)
 	AddMember(ctx context.Context, member *model.TeamMember) error
+	RemoveMember(ctx context.Context, teamID, userID uint64) error
+	UpdateMemberRole(ctx context.Context, teamID, userID uint64, role model.TeamRole) error
 	IsMember(ctx context.Context, teamID, userID uint64) (bool, error)
 	GetMemberRole(ctx context.Context, teamID, userID uint64) (model.TeamRole, error)
 	ListMembers(ctx context.Context, teamID uint64) ([]model.TeamMemberDetail, error)
@@ -74,6 +76,37 @@ func (r *teamRepository) AddMember(ctx context.Context, member *model.TeamMember
 		return ErrConflict
 	}
 	return err
+}
+
+func (r *teamRepository) RemoveMember(ctx context.Context, teamID, userID uint64) error {
+	res := r.db.WithContext(ctx).
+		Unscoped().
+		Where("team_id = ?", teamID).
+		Where("user_id = ?", userID).
+		Delete(&model.TeamMember{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *teamRepository) UpdateMemberRole(ctx context.Context, teamID, userID uint64, role model.TeamRole) error {
+	res := r.db.WithContext(ctx).
+		Model(&model.TeamMember{}).
+		Where("team_id = ?", teamID).
+		Where("user_id = ?", userID).
+		Where("deleted_at IS NULL").
+		Updates(map[string]interface{}{"role": role})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (r *teamRepository) IsMember(ctx context.Context, teamID, userID uint64) (bool, error) {

@@ -10,9 +10,11 @@ import (
 )
 
 var (
-	ErrInvalidTeamName = errors.New("invalid team name")
-	ErrInvalidTeamRole = errors.New("invalid team role")
-	ErrTeamOwnerOnly   = errors.New("only owner can manage team members")
+	ErrInvalidTeamName   = errors.New("invalid team name")
+	ErrInvalidTeamRole   = errors.New("invalid team role")
+	ErrTeamOwnerOnly     = errors.New("only owner can manage team members")
+	ErrCannotRemoveSelf  = errors.New("owner cannot remove self from team")
+	ErrCannotModifyOwner = errors.New("owner role cannot be changed")
 )
 
 type CreateTeamRequest struct {
@@ -21,13 +23,18 @@ type CreateTeamRequest struct {
 
 type AddTeamMemberRequest struct {
 	UserID uint64 `json:"user_id"`
-	Role   string `json:"role"`
+}
+
+type UpdateTeamMemberRoleRequest struct {
+	Role string `json:"role"`
 }
 
 type TeamService interface {
 	Create(ctx context.Context, ownerID uint64, req CreateTeamRequest) (*model.Team, error)
 	ListMine(ctx context.Context, userID uint64) ([]model.TeamWithRole, error)
 	AddMember(ctx context.Context, operatorID, teamID uint64, req AddTeamMemberRequest) (*model.TeamMember, error)
+	RemoveMember(ctx context.Context, operatorID, teamID, targetUserID uint64) error
+	UpdateMemberRole(ctx context.Context, operatorID, teamID, targetUserID uint64, req UpdateTeamMemberRoleRequest) (*model.TeamMember, error)
 	ListMembers(ctx context.Context, operatorID, teamID uint64) ([]model.TeamMemberDetail, error)
 }
 
@@ -89,23 +96,85 @@ func (s *teamService) AddMember(ctx context.Context, operatorID, teamID uint64, 
 		return nil, err
 	}
 
-	role := model.TeamRole(req.Role)
-	if !isValidTeamRole(role) {
-		return nil, ErrInvalidTeamRole
-	}
-	if role == model.TeamRoleOwner {
-		return nil, ErrInvalidTeamRole
-	}
-
 	member := &model.TeamMember{
 		TeamID: teamID,
 		UserID: req.UserID,
-		Role:   role,
+		Role:   model.TeamRoleMember,
 	}
 	if err := s.teamRepo.AddMember(ctx, member); err != nil {
 		return nil, err
 	}
 	return member, nil
+}
+
+func (s *teamService) RemoveMember(ctx context.Context, operatorID, teamID, targetUserID uint64) error {
+	if _, err := s.teamRepo.GetByID(ctx, teamID); err != nil {
+		return err
+	}
+
+	operatorRole, err := s.teamRepo.GetMemberRole(ctx, teamID, operatorID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return repository.ErrForbidden
+	}
+	if err != nil {
+		return err
+	}
+	if operatorRole != model.TeamRoleOwner {
+		return ErrTeamOwnerOnly
+	}
+	if operatorID == targetUserID {
+		return ErrCannotRemoveSelf
+	}
+
+	targetRole, err := s.teamRepo.GetMemberRole(ctx, teamID, targetUserID)
+	if err != nil {
+		return err
+	}
+	if targetRole == model.TeamRoleOwner {
+		return ErrCannotModifyOwner
+	}
+
+	return s.teamRepo.RemoveMember(ctx, teamID, targetUserID)
+}
+
+func (s *teamService) UpdateMemberRole(ctx context.Context, operatorID, teamID, targetUserID uint64, req UpdateTeamMemberRoleRequest) (*model.TeamMember, error) {
+	if _, err := s.teamRepo.GetByID(ctx, teamID); err != nil {
+		return nil, err
+	}
+
+	operatorRole, err := s.teamRepo.GetMemberRole(ctx, teamID, operatorID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, repository.ErrForbidden
+	}
+	if err != nil {
+		return nil, err
+	}
+	if operatorRole != model.TeamRoleOwner {
+		return nil, ErrTeamOwnerOnly
+	}
+
+	targetRole, err := s.teamRepo.GetMemberRole(ctx, teamID, targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if targetRole == model.TeamRoleOwner {
+		return nil, ErrCannotModifyOwner
+	}
+
+	role := model.TeamRole(strings.TrimSpace(req.Role))
+	if role != model.TeamRoleAdmin && role != model.TeamRoleMember {
+		return nil, ErrInvalidTeamRole
+	}
+
+	if err := s.teamRepo.UpdateMemberRole(ctx, teamID, targetUserID, role); err != nil {
+		return nil, err
+	}
+
+	return &model.TeamMember{
+		TeamID: teamID,
+		UserID: targetUserID,
+		Role:   role,
+	}, nil
 }
 
 func (s *teamService) ListMembers(ctx context.Context, operatorID, teamID uint64) ([]model.TeamMemberDetail, error) {
