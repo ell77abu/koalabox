@@ -97,11 +97,11 @@ const onSubmit = async () => {
     });
 
     const payload = response.data?.data;
-    if (!payload?.token || !payload?.username) {
+    if (!payload?.username) {
       throw new Error('登录响应格式不正确');
     }
 
-    authStore.setAuth(payload.token, payload.username, payload.level ?? 0);
+    authStore.setAuth(payload.username, payload.level ?? 0);
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/tasks';
     await router.replace(redirect);
   } catch (error) {
