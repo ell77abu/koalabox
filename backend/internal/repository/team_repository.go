@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
@@ -12,7 +13,7 @@ import (
 
 type TeamRepository interface {
 	Create(ctx context.Context, team *model.Team) error
-	ListByUserID(ctx context.Context, userID uint64) ([]model.TeamWithRole, error)
+	ListByUserID(ctx context.Context, userID uint64, search string) ([]model.TeamWithRole, error)
 	GetByID(ctx context.Context, teamID uint64) (*model.Team, error)
 	AddMember(ctx context.Context, member *model.TeamMember) error
 	RemoveMember(ctx context.Context, teamID, userID uint64) error
@@ -34,14 +35,23 @@ func (r *teamRepository) Create(ctx context.Context, team *model.Team) error {
 	return r.db.WithContext(ctx).Create(team).Error
 }
 
-func (r *teamRepository) ListByUserID(ctx context.Context, userID uint64) ([]model.TeamWithRole, error) {
-	var list []model.TeamWithRole
-	err := r.db.WithContext(ctx).
+func (r *teamRepository) ListByUserID(ctx context.Context, userID uint64, search string) ([]model.TeamWithRole, error) {
+	trimmedSearch := strings.TrimSpace(search)
+
+	query := r.db.WithContext(ctx).
 		Table("teams").
 		Select("teams.id AS team_id, teams.name, tm.role").
 		Joins("JOIN team_members tm ON tm.team_id = teams.id AND tm.deleted_at IS NULL").
 		Where("teams.deleted_at IS NULL").
-		Where("tm.user_id = ?", userID).
+		Where("tm.user_id = ?", userID)
+
+	if trimmedSearch != "" {
+		likePattern := "%" + trimmedSearch + "%"
+		query = query.Where("teams.name ILIKE ?", likePattern)
+	}
+
+	var list []model.TeamWithRole
+	err := query.
 		Order("teams.created_at DESC").
 		Find(&list).Error
 	if err != nil {

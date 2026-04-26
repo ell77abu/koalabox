@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -35,7 +36,9 @@ func (h *TeamHandler) ListMine(c *gin.Context) {
 		return
 	}
 
-	list, err := h.teamService.ListMine(c.Request.Context(), userID)
+	search := strings.TrimSpace(c.Query("search"))
+
+	list, err := h.teamService.ListMine(c.Request.Context(), userID, search)
 	if err != nil {
 		response.InternalError(c, "query teams failed")
 		return
