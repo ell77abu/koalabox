@@ -23,7 +23,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	authService := service.NewAuthService(userRepo, cfg.JWT.Secret, cfg.JWT.ExpireHour)
 	taskService := service.NewTaskService(taskRepo, teamRepo, userRepo)
 	teamService := service.NewTeamService(teamRepo, userRepo)
-	authHandler := handler.NewAuthHandler(authService)
+	authHandler := handler.NewAuthHandler(authService, cfg.JWT.ExpireHour)
 	taskHandler := handler.NewTaskHandler(taskService)
 	teamHandler := handler.NewTeamHandler(teamService)
 
@@ -37,6 +37,8 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		{
 			authGroup.POST("/register", authHandler.Register)
 			authGroup.POST("/login", authHandler.Login)
+			authGroup.GET("/session", middleware.JWTAuth(cfg.JWT.Secret), authHandler.Session)
+			authGroup.POST("/logout", authHandler.Logout)
 			authGroup.PUT("/password", middleware.JWTAuth(cfg.JWT.Secret), authHandler.ChangePassword)
 		}
 

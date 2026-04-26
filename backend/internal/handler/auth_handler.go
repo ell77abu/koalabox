@@ -3,20 +3,25 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"task-backend/internal/middleware"
 	"task-backend/internal/repository"
 	"task-backend/internal/service"
 	"task-backend/pkg/response"
 )
 
+const sessionCookieName = "task_session"
+
 type AuthHandler struct {
-	authService service.AuthService
+	authService       service.AuthService
+	sessionExpireHour int
 }
 
-func NewAuthHandler(authService service.AuthService) *AuthHandler {
-	return &AuthHandler{authService: authService}
+func NewAuthHandler(authService service.AuthService, sessionExpireHour int) *AuthHandler {
+	return &AuthHandler{authService: authService, sessionExpireHour: sessionExpireHour}
 }
 
 // Register 处理注册请求，并将 Service 错误映射到 HTTP 响应。
@@ -46,7 +51,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	})
 }
 
-// Login 校验登录凭证，成功后返回 JWT 相关数据。
+// Login 校验登录凭证，成功后通过 HttpOnly Cookie 维护会话。
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req service.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -64,7 +69,51 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, "login success", data)
+	maxAge := int((time.Duration(h.sessionExpireHour) * time.Hour).Seconds())
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(sessionCookieName, data.Token, maxAge, "/", "", false, true)
+
+	response.Success(c, "login success", gin.H{
+		"username": data.Username,
+		"level":    data.Level,
+	})
+}
+
+// Session 返回当前登录会话信息。
+func (h *AuthHandler) Session(c *gin.Context) {
+	usernameValue, exists := c.Get(middleware.ContextUsernameKey)
+	if !exists {
+		response.Unauthorized(c, "unauthorized")
+		return
+	}
+	username, ok := usernameValue.(string)
+	if !ok || username == "" {
+		response.Unauthorized(c, "invalid auth context")
+		return
+	}
+
+	levelValue, exists := c.Get(middleware.ContextUserLevelKey)
+	if !exists {
+		response.Unauthorized(c, "unauthorized")
+		return
+	}
+	level, ok := levelValue.(uint8)
+	if !ok {
+		response.Unauthorized(c, "invalid auth context")
+		return
+	}
+
+	response.Success(c, "session active", gin.H{
+		"username": username,
+		"level":    level,
+	})
+}
+
+// Logout 清理会话 Cookie。
+func (h *AuthHandler) Logout(c *gin.Context) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(sessionCookieName, "", -1, "/", "", false, true)
+	response.Success(c, "logout success", nil)
 }
 
 // ChangePassword 允许已登录用户修改自己的密码。

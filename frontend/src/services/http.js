@@ -12,16 +12,10 @@ const baseURL = isProduction ? import.meta.env.VITE_API_BASE_URL : '/api/v1';
 export const http = axios.create({
   baseURL,
   timeout: 10000,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
-});
-
-http.interceptors.request.use((config) => {
-  if (authStore.token.value) {
-    config.headers.Authorization = `Bearer ${authStore.token.value}`;
-  }
-  return config;
 });
 
 http.interceptors.response.use(

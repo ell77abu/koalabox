@@ -31,6 +31,12 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+type LoginResult struct {
+	Token    string
+	Username string
+	Level    uint8
+}
+
 // ChangePasswordRequest 用于已登录用户修改自己的密码。
 type ChangePasswordRequest struct {
 	OldPassword string `json:"old_password"`
@@ -39,7 +45,7 @@ type ChangePasswordRequest struct {
 
 type AuthService interface {
 	Register(ctx context.Context, req RegisterRequest) error
-	Login(ctx context.Context, req LoginRequest) (*model.LoginResponseData, error)
+	Login(ctx context.Context, req LoginRequest) (*LoginResult, error)
 	ChangePassword(ctx context.Context, userID uint64, req ChangePasswordRequest) error
 }
 
@@ -70,7 +76,7 @@ func (s *authService) Register(ctx context.Context, req RegisterRequest) error {
 	if err == nil {
 		return repository.ErrConflict
 	}
-	if err != nil && !errors.Is(err, repository.ErrNotFound) {
+	if !errors.Is(err, repository.ErrNotFound) {
 		return fmt.Errorf("query username: %w", err)
 	}
 
@@ -94,7 +100,7 @@ func (s *authService) Register(ctx context.Context, req RegisterRequest) error {
 	return nil
 }
 
-func (s *authService) Login(ctx context.Context, req LoginRequest) (*model.LoginResponseData, error) {
+func (s *authService) Login(ctx context.Context, req LoginRequest) (*LoginResult, error) {
 	user, err := s.userRepo.GetByUsername(ctx, req.Username)
 	if errors.Is(err, repository.ErrNotFound) {
 		return nil, ErrInvalidCredentials
@@ -113,7 +119,7 @@ func (s *authService) Login(ctx context.Context, req LoginRequest) (*model.Login
 		return nil, fmt.Errorf("generate token: %w", err)
 	}
 
-	return &model.LoginResponseData{
+	return &LoginResult{
 		Token:    token,
 		Username: user.Username,
 		Level:    user.Level,
