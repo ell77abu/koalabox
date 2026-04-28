@@ -20,12 +20,20 @@
         >
           📋 团队任务
         </button>
-        <button 
-          class="tab-btn" 
-          :class="{ active: activeTab === 'members' }" 
+        <button
+          class="tab-btn"
+          :class="{ active: activeTab === 'members' }"
           @click="activeTab = 'members'"
         >
           👥 成员管理
+        </button>
+        <button
+          v-if="myRole === 'Owner'"
+          class="tab-btn"
+          :class="{ active: activeTab === 'manage' }"
+          @click="activeTab = 'manage'"
+        >
+          ⚙️ 团队管理
         </button>
       </div>
 
@@ -56,7 +64,7 @@
                   优先级: {{ priorityLabel(task.priority) }}
                 </span>
                 <span v-if="task.assignee_id" class="priority-badge" style="background: #eef2ff; color: #4f46e5;">
-                  执行者: {{ task.assignee_id }}
+                  执行者: {{ getAssigneeName(task.assignee_id) }}
                 </span>
                 <span v-else class="priority-badge" style="background: #f1f5f9; color: #64748b;">
                   待分配
@@ -122,6 +130,38 @@
         </div>
       </div>
 
+      <div v-if="activeTab === 'manage'" class="tab-content">
+        <div class="list-header">
+          <h2>团队管理</h2>
+        </div>
+
+        <div class="manage-section">
+          <div class="manage-card">
+            <h3>修改团队名称</h3>
+            <form @submit.prevent="handleRenameTeam" class="rename-form">
+              <input
+                v-model.trim="newTeamName"
+                type="text"
+                :placeholder="currentTeam ? currentTeam.name : '团队名称'"
+                required
+                class="form-input"
+              />
+              <button type="submit" class="btn btn-primary" :disabled="renamingTeam">
+                {{ renamingTeam ? '保存中...' : '保存修改' }}
+              </button>
+            </form>
+          </div>
+
+          <div class="manage-card danger-zone">
+            <h3>危险操作</h3>
+            <p>解散团队将删除所有相关任务数据，此操作不可撤销。</p>
+            <button class="btn btn-danger" :disabled="dissolvingTeam" @click="handleDissolveTeam">
+              {{ dissolvingTeam ? '处理中...' : '解散团队' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
     </section>
 
     <div v-if="showCreateTaskModal" class="modal-overlay" @click="showCreateTaskModal = false">
@@ -140,13 +180,14 @@
             <input v-model.trim="newTask.deadline" type="datetime-local" class="form-input" />
           </div>
 
-          <label style="font-size: 14px; font-weight: 600; color: #475569; margin-top: 10px;">指派给成员 (选填):</label>
-          <select v-model="newTask.assignee_id" class="form-input">
-            <option :value="null">-- 暂不分配，放入团队池 --</option>
-            <option v-for="m in members" :key="m.user_id" :value="m.user_id">
+          <label style="font-size: 14px; font-weight: 600; color: #475569; margin-top: 10px;">指派给成员 (可多选):</label>
+          <div class="assignee-checkbox-list">
+            <label v-for="m in members" :key="m.user_id" class="assignee-checkbox-item">
+              <input type="checkbox" :value="m.user_id" v-model="newTask.assignee_ids" />
               {{ m.username }} ({{ m.role }})
-            </option>
-          </select>
+            </label>
+            <span v-if="members.length === 0" style="color: #94a3b8; font-size: 0.85rem;">暂无团队成员</span>
+          </div>
 
           <div class="modal-actions">
             <button type="button" class="btn btn-outline" @click="showCreateTaskModal = false">取消</button>
@@ -203,12 +244,13 @@
               :disabled="myRole === 'Member'"
             />
             
-            <select v-model="editingTask.assignee_id" class="form-input" :disabled="myRole === 'Member'">
-              <option :value="null">-- 暂不分配，放入团队池 --</option>
-              <option v-for="m in members" :key="m.user_id" :value="m.user_id">
+            <div class="assignee-checkbox-list">
+              <label v-for="m in members" :key="m.user_id" class="assignee-checkbox-item" :class="{ 'is-disabled': myRole === 'Member' }">
+                <input type="checkbox" :value="m.user_id" v-model="editingTask.assignee_ids" :disabled="myRole === 'Member'" />
                 {{ m.username }} ({{ m.role }})
-              </option>
-            </select>
+              </label>
+              <span v-if="members.length === 0" style="color: #94a3b8; font-size: 0.85rem;">暂无团队成员</span>
+            </div>
           </div>
 
           <div class="modal-actions">
@@ -243,13 +285,15 @@ import { useRoute, useRouter } from 'vue-router';
 // 👇 新增引入：当前登录用户信息 (用于判断该任务是否分配给自己)
 import { authStore } from '../stores/auth'; 
 import { teamStore } from '../stores/team';
-import { 
+import {
   getTeamsApi,
-  getTeamMembersApi, 
-  addTeamMemberApi, 
-  deleteTeamMemberApi, 
+  getTeamMembersApi,
+  addTeamMemberApi,
+  deleteTeamMemberApi,
   updateTeamMemberRoleApi,
-  getTeamTasksApi
+  getTeamTasksApi,
+  updateTeamApi,
+  dissolveTeamApi
 } from '../services/team';
 // 👇 新增引入：修改和删除任务的 API
 import { createTaskApi, updateTaskApi, deleteTaskApi } from '../services/task';
@@ -271,15 +315,20 @@ const showCreateTaskModal = ref(false);
 const showEditTaskModal = ref(false);
 const submittingTask = ref(false);
 
-const newTask = ref({ title: '', description: '', priority: '2', deadline: '', assignee_id: null });
-const editingTask = ref({ id: null, title: '', description: '', status: 'TODO', priority: '2', deadline: '', assignee_id: null });
+const newTask = ref({ title: '', description: '', priority: '2', deadline: '', assignee_ids: [] });
+const editingTask = ref({ id: null, title: '', description: '', status: 'TODO', priority: '2', deadline: '', assignee_ids: [] });
 
 // 成员管理状态
 const members = ref([]);
 const loadingMembers = ref(false);
 const showAddMemberModal = ref(false);
 const submittingMember = ref(false);
-const newMemberName = ref(''); 
+const newMemberName = ref('');
+
+// 团队管理状态
+const newTeamName = ref('');
+const renamingTeam = ref(false);
+const dissolvingTeam = ref(false);
 
 /* ================== 工具函数 ================== */
 const statusLabel = (status) => ({ TODO: '待做', DOING: '进行中', DONE: '已完成' }[status] || status);
@@ -289,6 +338,13 @@ const roleBadgeClass = (role) => {
   if (role === 'Owner') return 'priority-3';
   if (role === 'Admin') return 'priority-2';
   return 'priority-1';
+};
+
+// 通过成员列表中的 user_id 查找对应的 username
+const getAssigneeName = (assigneeId) => {
+  if (!assigneeId) return '';
+  const member = members.value.find(m => m.user_id === assigneeId);
+  return member ? member.username : assigneeId;
 };
 
 const roleTextClass = (role) => {
@@ -301,7 +357,9 @@ const roleTextClass = (role) => {
 const canEditTask = (task) => {
   if (myRole.value === 'Owner' || myRole.value === 'Admin') return true;
   // 普通 Member 只能操作分派给自己的任务
-  return task.assignee_id === authStore.username.value;
+  const assigneeIds = task.assignee_ids || (task.assignee_id ? [task.assignee_id] : []);
+  const currentMember = members.value.find(m => m.username === authStore.username.value);
+  return currentMember ? assigneeIds.includes(currentMember.user_id) : false;
 };
 
 // 日期解析转换
@@ -375,7 +433,7 @@ const handleCreateTask = async () => {
     const res = await createTaskApi(payload);
     if (res.data.code === 0) {
       showCreateTaskModal.value = false;
-      newTask.value = { title: '', description: '', priority: '2', deadline: '', assignee_id: null };
+      newTask.value = { title: '', description: '', priority: '2', deadline: '', assignee_ids: [] };
       await loadTeamTasks();
     } else alert(res.data.message || '发布失败');
   } catch (error) {
@@ -394,7 +452,7 @@ const startEdit = (task) => {
     status: task.status,
     priority: String(task.priority),
     deadline: task.deadline ? formatDateForInput(task.deadline) : '',
-    assignee_id: task.assignee_id || null
+    assignee_ids: task.assignee_ids || (task.assignee_id ? [task.assignee_id] : [])
   };
   showEditTaskModal.value = true;
 };
@@ -409,7 +467,7 @@ const handleUpdateTask = async () => {
       status: editingTask.value.status,
       priority: Number(editingTask.value.priority),
       deadline: parseDateInput(editingTask.value.deadline),
-      assignee_id: editingTask.value.assignee_id || null
+      assignee_ids: editingTask.value.assignee_ids || []
     };
 
     const res = await updateTaskApi(editingTask.value.id, payload);
@@ -438,6 +496,45 @@ const handleDeleteTask = async (taskId) => {
     }
   } catch (error) {
     alert(error.response?.data?.message || '无权删除');
+  }
+};
+
+/* ================== 团队管理操作 ================== */
+const handleRenameTeam = async () => {
+  if (!newTeamName.value) return;
+  renamingTeam.value = true;
+  try {
+    const res = await updateTeamApi(teamId, { name: newTeamName.value });
+    if (res.data.code === 0) {
+      alert('团队名称修改成功');
+      newTeamName.value = '';
+      await loadTeams();
+    } else {
+      alert(res.data.message || '修改失败');
+    }
+  } catch (error) {
+    alert(error.response?.data?.message || '请求失败');
+  } finally {
+    renamingTeam.value = false;
+  }
+};
+
+const handleDissolveTeam = async () => {
+  if (!confirm('确定要解散该团队吗？此操作将删除所有相关任务数据且不可撤销！')) return;
+  dissolvingTeam.value = true;
+  try {
+    const res = await dissolveTeamApi(teamId);
+    if (res.data.code === 0) {
+      alert('团队已解散');
+      await loadTeams();
+      router.push('/teams');
+    } else {
+      alert(res.data.message || '解散失败');
+    }
+  } catch (error) {
+    alert(error.response?.data?.message || '请求失败');
+  } finally {
+    dissolvingTeam.value = false;
   }
 };
 
@@ -596,7 +693,31 @@ onMounted(() => {
 .text-blue-600 { color: #2563eb; }
 .font-bold { font-weight: bold; }
 
+/* 团队管理 */
+.manage-section { display: flex; flex-direction: column; gap: 1.5rem; }
+.manage-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 1.5rem; }
+.manage-card h3 { margin: 0 0 0.75rem; font-size: 1.05rem; color: #0f172a; }
+.manage-card p { color: #64748b; font-size: 0.85rem; margin: 0 0 1rem; }
+.rename-form { display: flex; gap: 0.75rem; align-items: center; }
+.rename-form .form-input { flex: 1; }
+.danger-zone { border-color: #fecaca; background: #fef2f2; }
+.danger-zone h3 { color: #b91c1c; }
+
+/* 多选指派成员 */
+.assignee-checkbox-list { display: flex; flex-wrap: wrap; gap: 0.5rem; padding: 0.5rem 0; }
+.assignee-checkbox-item { display: flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.75rem; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.85rem; color: #0f172a; cursor: pointer; transition: all 0.15s; user-select: none; }
+.assignee-checkbox-item:hover { border-color: #93c5fd; background: #eff6ff; }
+.assignee-checkbox-item input[type="checkbox"] { width: 16px; height: 16px; accent-color: #3b82f6; cursor: pointer; }
+.assignee-checkbox-item.is-disabled { opacity: 0.5; cursor: not-allowed; }
+
 /* === 深色模式适配补丁 === */
+:global([data-theme="dark"]) .manage-card { background: #1e293b; border-color: #334155; }
+:global([data-theme="dark"]) .manage-card h3 { color: #f8fafc; }
+:global([data-theme="dark"]) .manage-card p { color: #94a3b8; }
+:global([data-theme="dark"]) .danger-zone { border-color: #7f1d1d; background: #1a0f0f; }
+:global([data-theme="dark"]) .danger-zone h3 { color: #fca5a5; }
+
+/* 深色模式：现有组件 */
 :global([data-theme="dark"]) .task-item { background: #1e293b; border-color: #334155; }
 :global([data-theme="dark"]) .task-title-section h3 { color: #f8fafc; }
 :global([data-theme="dark"]) .task-description { color: #94a3b8; }
