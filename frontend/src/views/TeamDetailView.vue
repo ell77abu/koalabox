@@ -56,7 +56,7 @@
                   优先级: {{ priorityLabel(task.priority) }}
                 </span>
                 <span v-if="task.assignee_id" class="priority-badge" style="background: #eef2ff; color: #4f46e5;">
-                  执行者: {{ task.assignee_id }}
+                  执行者: {{ getAssigneeName(task.assignee_id) }}
                 </span>
                 <span v-else class="priority-badge" style="background: #f1f5f9; color: #64748b;">
                   待分配
@@ -289,6 +289,13 @@ const roleBadgeClass = (role) => {
   if (role === 'Owner') return 'priority-3';
   if (role === 'Admin') return 'priority-2';
   return 'priority-1';
+};
+
+// 通过成员列表中的 user_id 查找对应的 username
+const getAssigneeName = (assigneeId) => {
+  if (!assigneeId) return '';
+  const member = members.value.find(m => m.user_id === assigneeId);
+  return member ? member.username : assigneeId;
 };
 
 const roleTextClass = (role) => {
