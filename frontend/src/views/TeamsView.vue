@@ -7,6 +7,28 @@
           <p class="hint">和伙伴们高效协同，管理你的团队空间</p>
         </div>
         <div class="header-actions">
+          <div class="search-box">
+            <span class="search-fab" aria-hidden="true">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="4" />
+                <line x1="16.65" y1="16.65" x2="22" y2="22" stroke="currentColor" stroke-width="4" stroke-linecap="round" />
+              </svg>
+            </span>
+            <input
+              v-model.trim="searchQuery"
+              type="search"
+              placeholder="搜索团队"
+              class="search-input"
+            />
+            <button
+              v-if="isSearching"
+              type="button"
+              class="search-clear"
+              @click="searchQuery = ''"
+            >
+              清除
+            </button>
+          </div>
           <RouterLink to="/teams/create" class="fab" data-hint="创建新团队" title="创建新团队">
             <span class="plus-icon">+</span>
           </RouterLink>
@@ -16,22 +38,30 @@
       <div class="list-section">
         <div class="list-header">
           <h2>团队列表</h2>
-          <p v-if="!loading" class="hint">共 {{ teamStore.teams.value.length }} 个团队</p>
+          <p v-if="!loading" class="hint">
+            <template v-if="isSearching">
+              搜索结果 {{ displayedTeams.length }} 项
+            </template>
+            <template v-else>
+              共 {{ teamStore.teams.value.length }} 个团队
+            </template>
+          </p>
         </div>
 
         <div v-if="loading" class="loading-state">
           <p>加载中...</p>
         </div>
 
-        <div v-else-if="teamStore.teams.value.length === 0" class="empty-state">
-          <p>你还没有加入任何团队，快去创建一个吧！</p>
+        <div v-else-if="displayedTeams.length === 0" class="empty-state">
+          <p v-if="isSearching">未找到匹配的团队。</p>
+          <p v-else>你还没有加入任何团队，快去创建一个吧！</p>
         </div>
 
         <div v-else class="task-list">
           <section class="task-group">
             <div class="task-group-list">
               <div
-                v-for="team in teamStore.teams.value"
+                v-for="team in displayedTeams"
                 :key="team.team_id"
                 class="task-item"
               >
@@ -68,13 +98,23 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRouter, RouterLink } from 'vue-router';
 import { teamStore } from '../stores/team';
 import { getTeamsApi } from '../services/team';
 
 const router = useRouter();
 const loading = ref(false);
+const searchQuery = ref('');
+
+const isSearching = computed(() => searchQuery.value.trim().length > 0);
+
+const displayedTeams = computed(() => {
+  const list = teamStore.teams.value;
+  const keyword = searchQuery.value.trim().toLowerCase();
+  if (!keyword) return list;
+  return list.filter((team) => String(team.name || '').toLowerCase().includes(keyword));
+});
 
 const roleBadgeClass = (role) => {
   if (role === 'Owner') return 'priority-3';
@@ -121,6 +161,60 @@ onMounted(() => {
 }
 .fab:hover { transform: scale(1.05); box-shadow: 0 6px 14px rgba(28, 126, 214, 0.35); }
 .plus-icon { font-size: 30px; font-weight: 600; line-height: 1; margin-top: -6px; }
+
+.search-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.25rem 0.75rem 0.25rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  flex: 1;
+}
+
+.search-fab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(28, 126, 214, 0.28);
+  flex-shrink: 0;
+}
+
+.search-fab svg {
+  width: 18px;
+  height: 18px;
+}
+
+.search-input {
+  border: none;
+  background: transparent;
+  width: 100%;
+  font-size: 0.85rem;
+  color: #1f2937;
+}
+
+.search-input:focus {
+  outline: none;
+}
+
+.search-clear {
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+}
+
+.search-clear:hover {
+  color: #0f172a;
+}
 
 .list-section { margin-bottom: 2rem; }
 .list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
