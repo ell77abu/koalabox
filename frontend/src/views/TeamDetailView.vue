@@ -20,12 +20,20 @@
         >
           📋 团队任务
         </button>
-        <button 
-          class="tab-btn" 
-          :class="{ active: activeTab === 'members' }" 
+        <button
+          class="tab-btn"
+          :class="{ active: activeTab === 'members' }"
           @click="activeTab = 'members'"
         >
           👥 成员管理
+        </button>
+        <button
+          v-if="myRole === 'Owner'"
+          class="tab-btn"
+          :class="{ active: activeTab === 'manage' }"
+          @click="activeTab = 'manage'"
+        >
+          ⚙️ 团队管理
         </button>
       </div>
 
@@ -118,6 +126,38 @@
                 移除
               </button>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="activeTab === 'manage'" class="tab-content">
+        <div class="list-header">
+          <h2>团队管理</h2>
+        </div>
+
+        <div class="manage-section">
+          <div class="manage-card">
+            <h3>修改团队名称</h3>
+            <form @submit.prevent="handleRenameTeam" class="rename-form">
+              <input
+                v-model.trim="newTeamName"
+                type="text"
+                :placeholder="currentTeam ? currentTeam.name : '团队名称'"
+                required
+                class="form-input"
+              />
+              <button type="submit" class="btn btn-primary" :disabled="renamingTeam">
+                {{ renamingTeam ? '保存中...' : '保存修改' }}
+              </button>
+            </form>
+          </div>
+
+          <div class="manage-card danger-zone">
+            <h3>危险操作</h3>
+            <p>解散团队将删除所有相关任务数据，此操作不可撤销。</p>
+            <button class="btn btn-danger" :disabled="dissolvingTeam" @click="handleDissolveTeam">
+              {{ dissolvingTeam ? '处理中...' : '解散团队' }}
+            </button>
           </div>
         </div>
       </div>
@@ -243,13 +283,15 @@ import { useRoute, useRouter } from 'vue-router';
 // 👇 新增引入：当前登录用户信息 (用于判断该任务是否分配给自己)
 import { authStore } from '../stores/auth'; 
 import { teamStore } from '../stores/team';
-import { 
+import {
   getTeamsApi,
-  getTeamMembersApi, 
-  addTeamMemberApi, 
-  deleteTeamMemberApi, 
+  getTeamMembersApi,
+  addTeamMemberApi,
+  deleteTeamMemberApi,
   updateTeamMemberRoleApi,
-  getTeamTasksApi
+  getTeamTasksApi,
+  updateTeamApi,
+  dissolveTeamApi
 } from '../services/team';
 // 👇 新增引入：修改和删除任务的 API
 import { createTaskApi, updateTaskApi, deleteTaskApi } from '../services/task';
@@ -279,7 +321,12 @@ const members = ref([]);
 const loadingMembers = ref(false);
 const showAddMemberModal = ref(false);
 const submittingMember = ref(false);
-const newMemberName = ref(''); 
+const newMemberName = ref('');
+
+// 团队管理状态
+const newTeamName = ref('');
+const renamingTeam = ref(false);
+const dissolvingTeam = ref(false);
 
 /* ================== 工具函数 ================== */
 const statusLabel = (status) => ({ TODO: '待做', DOING: '进行中', DONE: '已完成' }[status] || status);
@@ -448,6 +495,45 @@ const handleDeleteTask = async (taskId) => {
   }
 };
 
+/* ================== 团队管理操作 ================== */
+const handleRenameTeam = async () => {
+  if (!newTeamName.value) return;
+  renamingTeam.value = true;
+  try {
+    const res = await updateTeamApi(teamId, { name: newTeamName.value });
+    if (res.data.code === 0) {
+      alert('团队名称修改成功');
+      newTeamName.value = '';
+      await loadTeams();
+    } else {
+      alert(res.data.message || '修改失败');
+    }
+  } catch (error) {
+    alert(error.response?.data?.message || '请求失败');
+  } finally {
+    renamingTeam.value = false;
+  }
+};
+
+const handleDissolveTeam = async () => {
+  if (!confirm('确定要解散该团队吗？此操作将删除所有相关任务数据且不可撤销！')) return;
+  dissolvingTeam.value = true;
+  try {
+    const res = await dissolveTeamApi(teamId);
+    if (res.data.code === 0) {
+      alert('团队已解散');
+      await loadTeams();
+      router.push('/teams');
+    } else {
+      alert(res.data.message || '解散失败');
+    }
+  } catch (error) {
+    alert(error.response?.data?.message || '请求失败');
+  } finally {
+    dissolvingTeam.value = false;
+  }
+};
+
 /* ================== 成员操作 ================== */
 const handleAddMember = async () => {
   if (!newMemberName.value) return;
@@ -603,7 +689,24 @@ onMounted(() => {
 .text-blue-600 { color: #2563eb; }
 .font-bold { font-weight: bold; }
 
+/* 团队管理 */
+.manage-section { display: flex; flex-direction: column; gap: 1.5rem; }
+.manage-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 1.5rem; }
+.manage-card h3 { margin: 0 0 0.75rem; font-size: 1.05rem; color: #0f172a; }
+.manage-card p { color: #64748b; font-size: 0.85rem; margin: 0 0 1rem; }
+.rename-form { display: flex; gap: 0.75rem; align-items: center; }
+.rename-form .form-input { flex: 1; }
+.danger-zone { border-color: #fecaca; background: #fef2f2; }
+.danger-zone h3 { color: #b91c1c; }
+
 /* === 深色模式适配补丁 === */
+:global([data-theme="dark"]) .manage-card { background: #1e293b; border-color: #334155; }
+:global([data-theme="dark"]) .manage-card h3 { color: #f8fafc; }
+:global([data-theme="dark"]) .manage-card p { color: #94a3b8; }
+:global([data-theme="dark"]) .danger-zone { border-color: #7f1d1d; background: #1a0f0f; }
+:global([data-theme="dark"]) .danger-zone h3 { color: #fca5a5; }
+
+/* 深色模式：现有组件 */
 :global([data-theme="dark"]) .task-item { background: #1e293b; border-color: #334155; }
 :global([data-theme="dark"]) .task-title-section h3 { color: #f8fafc; }
 :global([data-theme="dark"]) .task-description { color: #94a3b8; }
