@@ -37,7 +37,7 @@ type UpdateTeamRequest struct {
 
 type TeamService interface {
 	Create(ctx context.Context, ownerID uint64, req CreateTeamRequest) (*model.Team, error)
-	ListMine(ctx context.Context, userID uint64) ([]model.TeamWithRole, error)
+	ListMine(ctx context.Context, userID uint64, search string) ([]model.TeamWithRole, error)
 	Update(ctx context.Context, operatorID, teamID uint64, req UpdateTeamRequest) error
 	AddMember(ctx context.Context, operatorID, teamID uint64, req AddTeamMemberRequest) (*model.TeamMember, error)
 	RemoveMember(ctx context.Context, operatorID, teamID, targetUserID uint64) error
