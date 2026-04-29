@@ -12,15 +12,16 @@ import (
 )
 
 var (
-	ErrInvalidTaskTitle    = errors.New("invalid task title")
-	ErrInvalidTaskStatus   = errors.New("invalid task status")
-	ErrInvalidTaskPriority = errors.New("invalid task priority")
-	ErrInvalidTaskDeadline = errors.New("invalid task deadline format, expected YYYY-MM-DD HH:mm:ss")
-	ErrInvalidTeamID       = errors.New("invalid team id")
-	ErrInvalidAssigneeID   = errors.New("invalid assignee id")
-	ErrAssigneeNotInTeam   = errors.New("assignee is not in team")
-	ErrTeamRoleDenied      = errors.New("insufficient team role permission")
-	ErrMemberStatusOnly    = errors.New("member can only update status for assigned task")
+	ErrInvalidTaskTitle     = errors.New("invalid task title")
+	ErrInvalidTaskStatus    = errors.New("invalid task status")
+	ErrInvalidTaskPriority  = errors.New("invalid task priority")
+	ErrInvalidTaskDeadline  = errors.New("invalid task deadline format, expected YYYY-MM-DD HH:mm:ss")
+	ErrInvalidTeamID        = errors.New("invalid team id")
+	ErrInvalidAssigneeID    = errors.New("invalid assignee id")
+	ErrAssigneeNotInTeam    = errors.New("assignee is not in team")
+	ErrTeamRoleDenied       = errors.New("insufficient team role permission")
+	ErrMemberStatusOnly     = errors.New("member can only update status for assigned task")
+	ErrAssignmentNotPending = errors.New("assignment request is not pending")
 )
 
 type CreateTaskRequest struct {
@@ -73,16 +74,20 @@ type TaskService interface {
 	Create(ctx context.Context, userID uint64, req CreateTaskRequest) (*model.Task, error)
 	Update(ctx context.Context, userID uint64, taskID uint64, req UpdateTaskRequest) (*model.Task, error)
 	Delete(ctx context.Context, userID uint64, userLevel uint8, taskID uint64) error
+	ListPendingAssignments(ctx context.Context, userID uint64) ([]model.TaskAssignmentRequestDetail, error)
+	AcceptAssignment(ctx context.Context, userID, requestID uint64) error
+	DeclineAssignment(ctx context.Context, userID, requestID uint64) error
 }
 
 type taskService struct {
-	taskRepo repository.TaskRepository
-	teamRepo repository.TeamRepository
-	userRepo repository.UserRepository
+	taskRepo   repository.TaskRepository
+	teamRepo   repository.TeamRepository
+	userRepo   repository.UserRepository
+	assignRepo repository.TaskAssignmentRepository
 }
 
-func NewTaskService(taskRepo repository.TaskRepository, teamRepo repository.TeamRepository, userRepo repository.UserRepository) TaskService {
-	return &taskService{taskRepo: taskRepo, teamRepo: teamRepo, userRepo: userRepo}
+func NewTaskService(taskRepo repository.TaskRepository, teamRepo repository.TeamRepository, userRepo repository.UserRepository, assignRepo repository.TaskAssignmentRepository) TaskService {
+	return &taskService{taskRepo: taskRepo, teamRepo: teamRepo, userRepo: userRepo, assignRepo: assignRepo}
 }
 
 func (s *taskService) List(ctx context.Context, userID uint64, userLevel uint8, page, size int, teamID *uint64) ([]model.Task, int64, int, int, error) {
@@ -178,6 +183,9 @@ func (s *taskService) Create(ctx context.Context, userID uint64, req CreateTaskR
 		}
 	}
 
+	pendingAssignment := false
+	var pendingAssigneeID uint64
+
 	if req.AssigneeID != nil {
 		if _, err := s.userRepo.GetByID(ctx, *req.AssigneeID); err != nil {
 			return nil, ErrInvalidAssigneeID
@@ -191,12 +199,25 @@ func (s *taskService) Create(ctx context.Context, userID uint64, req CreateTaskR
 				return nil, ErrAssigneeNotInTeam
 			}
 		}
+		if req.TeamID != nil && *req.AssigneeID != userID {
+			pendingAssignment = true
+			pendingAssigneeID = *req.AssigneeID
+		}
+	}
+
+	var assigneeID *uint64
+	if req.AssigneeID != nil {
+		if pendingAssignment {
+			assigneeID = nil
+		} else {
+			assigneeID = req.AssigneeID
+		}
 	}
 
 	task := &model.Task{
 		UserID:      userID,
 		TeamID:      req.TeamID,
-		AssigneeID:  req.AssigneeID,
+		AssigneeID:  assigneeID,
 		Title:       title,
 		Description: req.Description,
 		Status:      status,
@@ -205,6 +226,19 @@ func (s *taskService) Create(ctx context.Context, userID uint64, req CreateTaskR
 	}
 	if err := s.taskRepo.Create(ctx, task); err != nil {
 		return nil, err
+	}
+
+	if pendingAssignment {
+		assignReq := &model.TaskAssignmentRequest{
+			TaskID:      task.ID,
+			TeamID:      *req.TeamID,
+			RequesterID: userID,
+			AssigneeID:  pendingAssigneeID,
+			Status:      model.InvitationStatusPending,
+		}
+		if err := s.assignRepo.Create(ctx, assignReq); err != nil {
+			return nil, err
+		}
 	}
 	return task, nil
 }
@@ -219,7 +253,7 @@ func (s *taskService) Update(ctx context.Context, userID uint64, taskID uint64, 
 		if task.UserID != userID {
 			return nil, repository.ErrForbidden
 		}
-		return s.applyTaskUpdatesAndSave(ctx, task, req)
+		return s.applyTaskUpdatesAndSave(ctx, task, req, userID)
 	}
 
 	role, err := s.teamRepo.GetMemberRole(ctx, *task.TeamID, userID)
@@ -231,7 +265,7 @@ func (s *taskService) Update(ctx context.Context, userID uint64, taskID uint64, 
 	}
 
 	if canManageTeamTasks(role) {
-		return s.applyTaskUpdatesAndSave(ctx, task, req)
+		return s.applyTaskUpdatesAndSave(ctx, task, req, userID)
 	}
 
 	if role != model.TeamRoleMember {
@@ -290,7 +324,7 @@ func (s *taskService) Delete(ctx context.Context, userID uint64, userLevel uint8
 	return s.taskRepo.DeleteByID(ctx, taskID)
 }
 
-func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.Task, req UpdateTaskRequest) (*model.Task, error) {
+func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.Task, req UpdateTaskRequest, operatorID uint64) (*model.Task, error) {
 	if req.Title != nil {
 		title := strings.TrimSpace(*req.Title)
 		if title == "" || len(title) > 120 {
@@ -331,6 +365,9 @@ func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.T
 	if req.AssigneeID.Set {
 		if !req.AssigneeID.Valid {
 			task.AssigneeID = nil
+			if err := s.assignRepo.DeclinePendingByTaskID(ctx, task.ID); err != nil {
+				return nil, err
+			}
 		} else {
 			assigneeID := req.AssigneeID.Value
 			if _, err := s.userRepo.GetByID(ctx, assigneeID); err != nil {
@@ -345,7 +382,24 @@ func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.T
 					return nil, ErrAssigneeNotInTeam
 				}
 			}
-			task.AssigneeID = &assigneeID
+			if task.TeamID != nil && assigneeID != operatorID {
+				if err := s.assignRepo.DeclinePendingByTaskID(ctx, task.ID); err != nil {
+					return nil, err
+				}
+				assignReq := &model.TaskAssignmentRequest{
+					TaskID:      task.ID,
+					TeamID:      *task.TeamID,
+					RequesterID: operatorID,
+					AssigneeID:  assigneeID,
+					Status:      model.InvitationStatusPending,
+				}
+				if err := s.assignRepo.Create(ctx, assignReq); err != nil {
+					return nil, err
+				}
+				task.AssigneeID = nil
+			} else {
+				task.AssigneeID = &assigneeID
+			}
 		}
 	}
 
@@ -353,6 +407,59 @@ func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.T
 		return nil, err
 	}
 	return s.taskRepo.GetByID(ctx, task.ID)
+}
+
+func (s *taskService) ListPendingAssignments(ctx context.Context, userID uint64) ([]model.TaskAssignmentRequestDetail, error) {
+	return s.assignRepo.ListPendingByAssignee(ctx, userID)
+}
+
+func (s *taskService) AcceptAssignment(ctx context.Context, userID, requestID uint64) error {
+	req, err := s.assignRepo.GetByID(ctx, requestID)
+	if err != nil {
+		return err
+	}
+	if req.AssigneeID != userID {
+		return repository.ErrForbidden
+	}
+	if req.Status != model.InvitationStatusPending {
+		return ErrAssignmentNotPending
+	}
+
+	if _, err := s.teamRepo.GetByID(ctx, req.TeamID); err != nil {
+		return err
+	}
+	if inTeam, err := s.teamRepo.IsMember(ctx, req.TeamID, userID); err != nil {
+		return err
+	} else if !inTeam {
+		return repository.ErrForbidden
+	}
+
+	task, err := s.taskRepo.GetByID(ctx, req.TaskID)
+	if err != nil {
+		return err
+	}
+
+	task.AssigneeID = &userID
+	if err := s.taskRepo.UpdateByID(ctx, task); err != nil {
+		return err
+	}
+
+	return s.assignRepo.UpdateStatus(ctx, requestID, model.InvitationStatusAccepted)
+}
+
+func (s *taskService) DeclineAssignment(ctx context.Context, userID, requestID uint64) error {
+	req, err := s.assignRepo.GetByID(ctx, requestID)
+	if err != nil {
+		return err
+	}
+	if req.AssigneeID != userID {
+		return repository.ErrForbidden
+	}
+	if req.Status != model.InvitationStatusPending {
+		return ErrAssignmentNotPending
+	}
+
+	return s.assignRepo.UpdateStatus(ctx, requestID, model.InvitationStatusDeclined)
 }
 
 func hasMemberRestrictedFields(req UpdateTaskRequest) bool {

@@ -20,9 +20,11 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	userRepo := repository.NewUserRepository(db)
 	taskRepo := repository.NewTaskRepository(db)
 	teamRepo := repository.NewTeamRepository(db)
+	teamInviteRepo := repository.NewTeamInvitationRepository(db)
+	taskAssignRepo := repository.NewTaskAssignmentRepository(db)
 	authService := service.NewAuthService(userRepo, cfg.JWT.Secret, cfg.JWT.ExpireHour)
-	taskService := service.NewTaskService(taskRepo, teamRepo, userRepo)
-	teamService := service.NewTeamService(teamRepo, userRepo)
+	taskService := service.NewTaskService(taskRepo, teamRepo, userRepo, taskAssignRepo)
+	teamService := service.NewTeamService(teamRepo, userRepo, teamInviteRepo)
 	authHandler := handler.NewAuthHandler(authService)
 	taskHandler := handler.NewTaskHandler(taskService)
 	teamHandler := handler.NewTeamHandler(teamService)
@@ -48,6 +50,9 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			taskGroup.PUT("/:id", taskHandler.Update)
 			taskGroup.PATCH("/:id", taskHandler.Update)
 			taskGroup.DELETE("/:id", taskHandler.Delete)
+			taskGroup.GET("/assignments/pending", taskHandler.ListPendingAssignments)
+			taskGroup.POST("/assignments/:request_id/accept", taskHandler.AcceptAssignment)
+			taskGroup.POST("/assignments/:request_id/decline", taskHandler.DeclineAssignment)
 		}
 
 		teamGroup := apiV1.Group("/teams")
@@ -61,6 +66,9 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			teamGroup.DELETE("/:team_id/members/:user_id", teamHandler.RemoveMember)
 			teamGroup.PUT("/:team_id/members/:user_id", teamHandler.UpdateMemberRole)
 			teamGroup.PATCH("/:team_id/members/:user_id", teamHandler.UpdateMemberRole)
+			teamGroup.GET("/invitations/pending", teamHandler.ListPendingInvitations)
+			teamGroup.POST("/invitations/:invitation_id/accept", teamHandler.AcceptInvitation)
+			teamGroup.POST("/invitations/:invitation_id/decline", teamHandler.DeclineInvitation)
 		}
 	}
 

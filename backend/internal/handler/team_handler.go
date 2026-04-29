@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"task-backend/internal/model"
 	"task-backend/internal/repository"
 	"task-backend/internal/service"
 	"task-backend/pkg/response"
@@ -19,6 +20,13 @@ type createTeamResponse struct {
 	TeamID  uint64 `json:"team_id"`
 	Name    string `json:"name"`
 	OwnerID uint64 `json:"owner_id"`
+}
+
+type addMemberResponse struct {
+	TeamID uint64 `json:"team_id"`
+	UserID uint64 `json:"user_id"`
+	Role   string `json:"role"`
+	Status string `json:"status"`
 }
 
 type teamListResponse struct {
@@ -113,7 +121,7 @@ func (h *TeamHandler) AddMember(c *gin.Context) {
 		return
 	}
 	if errors.Is(err, repository.ErrConflict) {
-		response.Conflict(c, "member already exists")
+		response.Conflict(c, "member already exists or invitation pending")
 		return
 	}
 	if err != nil {
@@ -121,7 +129,12 @@ func (h *TeamHandler) AddMember(c *gin.Context) {
 		return
 	}
 
-	response.Created(c, "add member success", member)
+	response.Created(c, "invitation sent", addMemberResponse{
+		TeamID: teamID,
+		UserID: member.UserID,
+		Role:   string(member.Role),
+		Status: string(model.InvitationStatusPending),
+	})
 }
 
 func (h *TeamHandler) RemoveMember(c *gin.Context) {
@@ -239,4 +252,85 @@ func (h *TeamHandler) ListMembers(c *gin.Context) {
 	}
 
 	response.Success(c, "query success", list)
+}
+
+func (h *TeamHandler) ListPendingInvitations(c *gin.Context) {
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
+
+	list, err := h.teamService.ListPendingInvitations(c.Request.Context(), userID)
+	if err != nil {
+		response.InternalError(c, "query invitations failed")
+		return
+	}
+
+	response.Success(c, "query success", list)
+}
+
+func (h *TeamHandler) AcceptInvitation(c *gin.Context) {
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
+
+	invitationID, err := strconv.ParseUint(c.Param("invitation_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid invitation id")
+		return
+	}
+
+	err = h.teamService.AcceptInvitation(c.Request.Context(), userID, invitationID)
+	if errors.Is(err, service.ErrInvitationNotPending) {
+		response.BadRequest(c, "invitation is not pending")
+		return
+	}
+	if errors.Is(err, repository.ErrForbidden) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
+	if errors.Is(err, repository.ErrNotFound) {
+		response.NotFound(c, "invitation or team not found")
+		return
+	}
+	if err != nil {
+		response.InternalError(c, "accept invitation failed")
+		return
+	}
+
+	response.Success(c, "invitation accepted", nil)
+}
+
+func (h *TeamHandler) DeclineInvitation(c *gin.Context) {
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
+
+	invitationID, err := strconv.ParseUint(c.Param("invitation_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid invitation id")
+		return
+	}
+
+	err = h.teamService.DeclineInvitation(c.Request.Context(), userID, invitationID)
+	if errors.Is(err, service.ErrInvitationNotPending) {
+		response.BadRequest(c, "invitation is not pending")
+		return
+	}
+	if errors.Is(err, repository.ErrForbidden) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
+	if errors.Is(err, repository.ErrNotFound) {
+		response.NotFound(c, "invitation not found")
+		return
+	}
+	if err != nil {
+		response.InternalError(c, "decline invitation failed")
+		return
+	}
+
+	response.Success(c, "invitation declined", nil)
 }

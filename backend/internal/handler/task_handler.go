@@ -82,6 +82,10 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		response.Forbidden(c, "forbidden")
 		return
 	}
+	if errors.Is(err, repository.ErrConflict) {
+		response.Conflict(c, "assignment already pending")
+		return
+	}
 	if err != nil {
 		response.InternalError(c, "create task failed")
 		return
@@ -123,6 +127,10 @@ func (h *TaskHandler) Update(c *gin.Context) {
 	}
 	if errors.Is(err, repository.ErrNotFound) {
 		response.NotFound(c, "task not found")
+		return
+	}
+	if errors.Is(err, repository.ErrConflict) {
+		response.Conflict(c, "assignment already pending")
 		return
 	}
 	if err != nil {
@@ -168,6 +176,87 @@ func (h *TaskHandler) Delete(c *gin.Context) {
 	}
 
 	response.Success(c, "delete success", nil)
+}
+
+func (h *TaskHandler) ListPendingAssignments(c *gin.Context) {
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
+
+	list, err := h.taskService.ListPendingAssignments(c.Request.Context(), userID)
+	if err != nil {
+		response.InternalError(c, "query assignment requests failed")
+		return
+	}
+
+	response.Success(c, "query success", list)
+}
+
+func (h *TaskHandler) AcceptAssignment(c *gin.Context) {
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
+
+	requestID, err := strconv.ParseUint(c.Param("request_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid request id")
+		return
+	}
+
+	err = h.taskService.AcceptAssignment(c.Request.Context(), userID, requestID)
+	if errors.Is(err, service.ErrAssignmentNotPending) {
+		response.BadRequest(c, "assignment is not pending")
+		return
+	}
+	if errors.Is(err, repository.ErrForbidden) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
+	if errors.Is(err, repository.ErrNotFound) {
+		response.NotFound(c, "assignment or task not found")
+		return
+	}
+	if err != nil {
+		response.InternalError(c, "accept assignment failed")
+		return
+	}
+
+	response.Success(c, "assignment accepted", nil)
+}
+
+func (h *TaskHandler) DeclineAssignment(c *gin.Context) {
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
+
+	requestID, err := strconv.ParseUint(c.Param("request_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid request id")
+		return
+	}
+
+	err = h.taskService.DeclineAssignment(c.Request.Context(), userID, requestID)
+	if errors.Is(err, service.ErrAssignmentNotPending) {
+		response.BadRequest(c, "assignment is not pending")
+		return
+	}
+	if errors.Is(err, repository.ErrForbidden) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
+	if errors.Is(err, repository.ErrNotFound) {
+		response.NotFound(c, "assignment not found")
+		return
+	}
+	if err != nil {
+		response.InternalError(c, "decline assignment failed")
+		return
+	}
+
+	response.Success(c, "assignment declined", nil)
 }
 
 func getUserIDFromContext(c *gin.Context) (uint64, bool) {
