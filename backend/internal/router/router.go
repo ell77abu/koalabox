@@ -58,6 +58,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			teamGroup.GET("", teamHandler.ListMine)
 			teamGroup.GET("/mine", teamHandler.ListMine)
 			teamGroup.POST("", teamHandler.Create)
+			teamGroup.PUT("/:team_id", teamHandler.Update)
 			teamGroup.POST("/:team_id/members", teamHandler.AddMember)
 			teamGroup.GET("/:team_id/members", teamHandler.ListMembers)
 			teamGroup.DELETE("/:team_id/members/:user_id", teamHandler.RemoveMember)
