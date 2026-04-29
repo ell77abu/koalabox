@@ -79,8 +79,8 @@ func (s *teamService) Create(ctx context.Context, ownerID uint64, req CreateTeam
 	return team, nil
 }
 
-func (s *teamService) ListMine(ctx context.Context, userID uint64) ([]model.TeamWithRole, error) {
-	return s.teamRepo.ListByUserID(ctx, userID)
+func (s *teamService) ListMine(ctx context.Context, userID uint64, search string) ([]model.TeamWithRole, error) {
+	return s.teamRepo.ListByUserID(ctx, userID, search)
 }
 
 func (s *teamService) Update(ctx context.Context, operatorID, teamID uint64, req UpdateTeamRequest) error {
