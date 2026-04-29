@@ -33,7 +33,7 @@ type UpdateTeamMemberRoleRequest struct {
 
 type TeamService interface {
 	Create(ctx context.Context, ownerID uint64, req CreateTeamRequest) (*model.Team, error)
-	ListMine(ctx context.Context, userID uint64) ([]model.TeamWithRole, error)
+	ListMine(ctx context.Context, userID uint64, search string) ([]model.TeamWithRole, error)
 	AddMember(ctx context.Context, operatorID, teamID uint64, req AddTeamMemberRequest) (*model.TeamMember, error)
 	RemoveMember(ctx context.Context, operatorID, teamID, targetUserID uint64) error
 	UpdateMemberRole(ctx context.Context, operatorID, teamID, targetUserID uint64, req UpdateTeamMemberRoleRequest) (*model.TeamMember, error)
@@ -74,8 +74,8 @@ func (s *teamService) Create(ctx context.Context, ownerID uint64, req CreateTeam
 	return team, nil
 }
 
-func (s *teamService) ListMine(ctx context.Context, userID uint64) ([]model.TeamWithRole, error) {
-	return s.teamRepo.ListByUserID(ctx, userID)
+func (s *teamService) ListMine(ctx context.Context, userID uint64, search string) ([]model.TeamWithRole, error) {
+	return s.teamRepo.ListByUserID(ctx, userID, search)
 }
 
 func (s *teamService) AddMember(ctx context.Context, operatorID, teamID uint64, req AddTeamMemberRequest) (*model.TeamMember, error) {
