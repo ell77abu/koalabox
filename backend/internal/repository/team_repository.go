@@ -14,6 +14,7 @@ type TeamRepository interface {
 	Create(ctx context.Context, team *model.Team) error
 	ListByUserID(ctx context.Context, userID uint64) ([]model.TeamWithRole, error)
 	GetByID(ctx context.Context, teamID uint64) (*model.Team, error)
+	UpdateName(ctx context.Context, teamID uint64, name string) error
 	AddMember(ctx context.Context, member *model.TeamMember) error
 	RemoveMember(ctx context.Context, teamID, userID uint64) error
 	UpdateMemberRole(ctx context.Context, teamID, userID uint64, role model.TeamRole) error
@@ -63,6 +64,21 @@ func (r *teamRepository) GetByID(ctx context.Context, teamID uint64) (*model.Tea
 		return nil, err
 	}
 	return &team, nil
+}
+
+func (r *teamRepository) UpdateName(ctx context.Context, teamID uint64, name string) error {
+	res := r.db.WithContext(ctx).
+		Model(&model.Team{}).
+		Where("id = ?", teamID).
+		Where("deleted_at IS NULL").
+		Updates(map[string]interface{}{"name": name})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (r *teamRepository) AddMember(ctx context.Context, member *model.TeamMember) error {
