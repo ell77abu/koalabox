@@ -30,6 +30,15 @@ const (
 	TeamRoleMember TeamRole = "Member"
 )
 
+// InvitationStatus 表示邀请/分配确认状态。
+type InvitationStatus string
+
+const (
+	InvitationStatusPending  InvitationStatus = "PENDING"
+	InvitationStatusAccepted InvitationStatus = "ACCEPTED"
+	InvitationStatusDeclined InvitationStatus = "DECLINED"
+)
+
 // User 映射 users 表。
 type User struct {
 	ID    uint64 `json:"id" db:"id"`
@@ -79,6 +88,17 @@ type TeamMember struct {
 	DeletedAt *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`
 }
 
+// TeamInvitation 映射 team_invitations 表。
+type TeamInvitation struct {
+	ID        uint64           `json:"id" db:"id"`
+	TeamID    uint64           `json:"team_id" db:"team_id"`
+	InviterID uint64           `json:"inviter_id" db:"inviter_id"`
+	InviteeID uint64           `json:"invitee_id" db:"invitee_id"`
+	Status    InvitationStatus `json:"status" db:"status"`
+	CreatedAt time.Time        `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time        `json:"updated_at" db:"updated_at"`
+}
+
 // TeamWithRole 用于“我的团队”列表返回。
 type TeamWithRole struct {
 	TeamID uint64   `json:"team_id" db:"team_id"`
@@ -91,6 +111,42 @@ type TeamMemberDetail struct {
 	UserID   uint64   `json:"user_id" db:"user_id"`
 	Username string   `json:"username" db:"username"`
 	Role     TeamRole `json:"role" db:"role"`
+}
+
+// TeamInvitationDetail 用于待确认邀请列表。
+type TeamInvitationDetail struct {
+	ID              uint64           `json:"id" db:"id"`
+	TeamID          uint64           `json:"team_id" db:"team_id"`
+	TeamName        string           `json:"team_name" db:"team_name"`
+	InviterID       uint64           `json:"inviter_id" db:"inviter_id"`
+	InviterUsername string           `json:"inviter_username" db:"inviter_username"`
+	Status          InvitationStatus `json:"status" db:"status"`
+	CreatedAt       time.Time        `json:"created_at" db:"created_at"`
+}
+
+// TaskAssignmentRequest 映射 task_assignment_requests 表。
+type TaskAssignmentRequest struct {
+	ID          uint64           `json:"id" db:"id"`
+	TaskID      uint64           `json:"task_id" db:"task_id"`
+	TeamID      uint64           `json:"team_id" db:"team_id"`
+	RequesterID uint64           `json:"requester_id" db:"requester_id"`
+	AssigneeID  uint64           `json:"assignee_id" db:"assignee_id"`
+	Status      InvitationStatus `json:"status" db:"status"`
+	CreatedAt   time.Time        `json:"created_at" db:"created_at"`
+	UpdatedAt   time.Time        `json:"updated_at" db:"updated_at"`
+}
+
+// TaskAssignmentRequestDetail 用于待确认分配列表。
+type TaskAssignmentRequestDetail struct {
+	ID                uint64           `json:"id" db:"id"`
+	TaskID            uint64           `json:"task_id" db:"task_id"`
+	TaskTitle         string           `json:"task_title" db:"task_title"`
+	TeamID            uint64           `json:"team_id" db:"team_id"`
+	TeamName          string           `json:"team_name" db:"team_name"`
+	RequesterID       uint64           `json:"requester_id" db:"requester_id"`
+	RequesterUsername string           `json:"requester_username" db:"requester_username"`
+	Status            InvitationStatus `json:"status" db:"status"`
+	CreatedAt         time.Time        `json:"created_at" db:"created_at"`
 }
 
 // TaskAuditLog 映射 task_audit_logs 表。

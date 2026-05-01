@@ -10,12 +10,13 @@ import (
 )
 
 var (
-	ErrInvalidTeamName   = errors.New("invalid team name")
-	ErrInvalidTeamRole   = errors.New("invalid team role")
-	ErrInvalidTeamMember = errors.New("invalid team member")
-	ErrTeamOwnerOnly     = errors.New("only owner can manage team members")
-	ErrCannotRemoveSelf  = errors.New("owner cannot remove self from team")
-	ErrCannotModifyOwner = errors.New("owner role cannot be changed")
+	ErrInvalidTeamName      = errors.New("invalid team name")
+	ErrInvalidTeamRole      = errors.New("invalid team role")
+	ErrInvalidTeamMember    = errors.New("invalid team member")
+	ErrTeamOwnerOnly        = errors.New("only owner can manage team members")
+	ErrCannotRemoveSelf     = errors.New("owner cannot remove self from team")
+	ErrCannotModifyOwner    = errors.New("owner role cannot be changed")
+	ErrInvitationNotPending = errors.New("invitation is not pending")
 )
 
 type CreateTeamRequest struct {
@@ -43,15 +44,19 @@ type TeamService interface {
 	RemoveMember(ctx context.Context, operatorID, teamID, targetUserID uint64) error
 	UpdateMemberRole(ctx context.Context, operatorID, teamID, targetUserID uint64, req UpdateTeamMemberRoleRequest) (*model.TeamMember, error)
 	ListMembers(ctx context.Context, operatorID, teamID uint64) ([]model.TeamMemberDetail, error)
+	ListPendingInvitations(ctx context.Context, userID uint64) ([]model.TeamInvitationDetail, error)
+	AcceptInvitation(ctx context.Context, userID, invitationID uint64) error
+	DeclineInvitation(ctx context.Context, userID, invitationID uint64) error
 }
 
 type teamService struct {
-	teamRepo repository.TeamRepository
-	userRepo repository.UserRepository
+	teamRepo   repository.TeamRepository
+	userRepo   repository.UserRepository
+	inviteRepo repository.TeamInvitationRepository
 }
 
-func NewTeamService(teamRepo repository.TeamRepository, userRepo repository.UserRepository) TeamService {
-	return &teamService{teamRepo: teamRepo, userRepo: userRepo}
+func NewTeamService(teamRepo repository.TeamRepository, userRepo repository.UserRepository, inviteRepo repository.TeamInvitationRepository) TeamService {
+	return &teamService{teamRepo: teamRepo, userRepo: userRepo, inviteRepo: inviteRepo}
 }
 
 func (s *teamService) Create(ctx context.Context, ownerID uint64, req CreateTeamRequest) (*model.Team, error) {
@@ -140,15 +145,34 @@ func (s *teamService) AddMember(ctx context.Context, operatorID, teamID uint64, 
 		return nil, err
 	}
 
-	member := &model.TeamMember{
+	isMember, err := s.teamRepo.IsMember(ctx, teamID, targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if isMember {
+		return nil, repository.ErrConflict
+	}
+
+	if _, err := s.inviteRepo.GetPendingByTeamAndInvitee(ctx, teamID, targetUserID); err == nil {
+		return nil, repository.ErrConflict
+	} else if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		return nil, err
+	}
+
+	invite := &model.TeamInvitation{
+		TeamID:    teamID,
+		InviterID: operatorID,
+		InviteeID: targetUserID,
+		Status:    model.InvitationStatusPending,
+	}
+	if err := s.inviteRepo.Create(ctx, invite); err != nil {
+		return nil, err
+	}
+	return &model.TeamMember{
 		TeamID: teamID,
 		UserID: targetUserID,
 		Role:   model.TeamRoleMember,
-	}
-	if err := s.teamRepo.AddMember(ctx, member); err != nil {
-		return nil, err
-	}
-	return member, nil
+	}, nil
 }
 
 func (s *teamService) RemoveMember(ctx context.Context, operatorID, teamID, targetUserID uint64) error {
@@ -235,6 +259,59 @@ func (s *teamService) ListMembers(ctx context.Context, operatorID, teamID uint64
 	}
 
 	return s.teamRepo.ListMembers(ctx, teamID)
+}
+
+func (s *teamService) ListPendingInvitations(ctx context.Context, userID uint64) ([]model.TeamInvitationDetail, error) {
+	return s.inviteRepo.ListPendingByInvitee(ctx, userID)
+}
+
+func (s *teamService) AcceptInvitation(ctx context.Context, userID, invitationID uint64) error {
+	invite, err := s.inviteRepo.GetByID(ctx, invitationID)
+	if err != nil {
+		return err
+	}
+	if invite.InviteeID != userID {
+		return repository.ErrForbidden
+	}
+	if invite.Status != model.InvitationStatusPending {
+		return ErrInvitationNotPending
+	}
+
+	if _, err := s.teamRepo.GetByID(ctx, invite.TeamID); err != nil {
+		return err
+	}
+
+	isMember, err := s.teamRepo.IsMember(ctx, invite.TeamID, userID)
+	if err != nil {
+		return err
+	}
+	if !isMember {
+		member := &model.TeamMember{
+			TeamID: invite.TeamID,
+			UserID: userID,
+			Role:   model.TeamRoleMember,
+		}
+		if err := s.teamRepo.AddMember(ctx, member); err != nil {
+			return err
+		}
+	}
+
+	return s.inviteRepo.UpdateStatus(ctx, invitationID, model.InvitationStatusAccepted)
+}
+
+func (s *teamService) DeclineInvitation(ctx context.Context, userID, invitationID uint64) error {
+	invite, err := s.inviteRepo.GetByID(ctx, invitationID)
+	if err != nil {
+		return err
+	}
+	if invite.InviteeID != userID {
+		return repository.ErrForbidden
+	}
+	if invite.Status != model.InvitationStatusPending {
+		return ErrInvitationNotPending
+	}
+
+	return s.inviteRepo.UpdateStatus(ctx, invitationID, model.InvitationStatusDeclined)
 }
 
 func isValidTeamRole(role model.TeamRole) bool {
