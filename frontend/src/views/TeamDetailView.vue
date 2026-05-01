@@ -541,6 +541,8 @@ const handleDissolveTeam = async () => {
 /* ================== 成员操作 ================== */
 const handleAddMember = async () => {
   if (!newMemberName.value) return;
+  // 新增内存锁：如果已经在提交中了，直接拦截所有后续的无效点击
+  if (submittingMember.value) return;
   submittingMember.value = true;
   try {
     const res = await addTeamMemberApi(teamId, { username: newMemberName.value });
@@ -548,6 +550,7 @@ const handleAddMember = async () => {
       showAddMemberModal.value = false;
       newMemberName.value = ''; 
       await loadTeamMembers();
+      alert('邀请已发送！');
     } else alert(res.data.message || '邀请失败');
   } catch (error) {
     alert(error.response?.data?.message || '请求失败，可能用户不存在或已在团队中');
