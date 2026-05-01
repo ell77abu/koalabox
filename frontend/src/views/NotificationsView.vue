@@ -77,10 +77,11 @@ const loadInvitations = async () => {
   loading.value = true;
   try {
     const res = await getInvitationsApi();
+    const list = res.data?.data || [];
     // 确保有数据才进行处理
-    if (res.data && Array.isArray(res.data)) {
+    if (Array.isArray(list)) {
       // 按照时间倒序排列，让最新的消息排在最上面
-      invitations.value = res.data.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      invitations.value = list.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     }
   } catch (error) {
     console.error('加载邀请失败', error);

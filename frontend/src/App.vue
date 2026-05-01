@@ -91,8 +91,9 @@ const checkPendingNotifications = async () => {
   if (!authStore.isLoggedIn.value) return;
   try {
     const res = await getInvitationsApi();
-    if (res.data && Array.isArray(res.data)) {
-      pendingCount.value = res.data.filter(inv => inv.status === 'PENDING').length;
+    const invitations = res.data?.data || [];
+    if (Array.isArray(invitations)) {
+      pendingCount.value = invitations.filter(inv => inv.status === 'PENDING').length;
     }
   } catch (error) {
     console.error('获取通知失败', error);
