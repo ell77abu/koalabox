@@ -6,7 +6,7 @@ export const getTeamsApi = () => http.get('/teams');
 
 export const getTeamMembersApi = (teamId) => http.get(`/teams/${teamId}/members`);
 
-export const addTeamMemberApi = (teamId, payload) => http.post(`/teams/${teamId}/members`, payload);
+export const addTeamMemberApi = (teamId, payload) => http.post(`/teams/${teamId}/invitations`, payload);
 
 export const deleteTeamMemberApi = (teamId, userId) => http.delete(`/teams/${teamId}/members/${userId}`);
 
@@ -17,3 +17,9 @@ export const getTeamTasksApi = (teamId) => http.get('/tasks', { params: { team_i
 export const updateTeamApi = (teamId, payload) => http.put(`/teams/${teamId}`, payload);
 
 export const dissolveTeamApi = (teamId) => http.delete(`/teams/${teamId}`);
+
+export const getInvitationsApi = () => http.get('/invitations?invitee_id=me');
+
+export const acceptInvitationApi = (invitationId) => http.post(`/invitations/${invitationId}/accept`);
+
+export const declineInvitationApi = (invitationId) => http.post(`/invitations/${invitationId}/decline`);
