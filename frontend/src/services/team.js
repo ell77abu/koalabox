@@ -23,3 +23,5 @@ export const getInvitationsApi = () => http.get('/teams/invitations/pending');
 export const acceptInvitationApi = (invitationId) => http.post(`/teams/invitations/${invitationId}/accept`);
 
 export const declineInvitationApi = (invitationId) => http.post(`/teams/invitations/${invitationId}/decline`);
+
+export const getAssignmentRequestsApi = () => http.get('/assignment-requests', { params: { assignee_id: 'me' } });

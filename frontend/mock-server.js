@@ -92,7 +92,34 @@ app.get('/api/v1/auth/session', verifyToken, (req, res) => {
   return res.status(200).json({ code: 0, data: { username: username, level: user.level ?? 0 } });
 });
 
-// ================== 原有任务模块 ==================
+// ================== 原有任务模块 (新增自动发送指派通知逻辑) ==================
+// 任务分配通知表与自增 ID
+const assignmentRequests = [];
+let assignReqIdCounter = 1;
+
+// 辅助函数：生成任务指派通知
+const createAssignmentNotification = (task, reqUser) => {
+  if (!task.assignee_ids && !task.assignee_id) return;
+  const assignees = task.assignee_ids || [task.assignee_id];
+  
+  assignees.forEach(assignee => {
+    if (!assignee || assignee === reqUser) return; // 不给自己发通知
+    // 防止重复发送未处理的通知
+    const exists = assignmentRequests.find(r => r.task_id === task.id && r.assignee_id === assignee);
+    if (!exists) {
+      assignmentRequests.push({
+        id: assignReqIdCounter++,
+        task_id: task.id,
+        task_title: task.title,
+        team_id: task.team_id,
+        requester_id: reqUser,
+        assignee_id: assignee,
+        status: 'PENDING', // 依据 API 文档默认状态
+        created_at: new Date().toISOString()
+      });
+    }
+  });
+};
 
 app.get('/api/v1/tasks', verifyToken, (req, res) => {
   const { username } = req.user;
@@ -102,7 +129,7 @@ app.get('/api/v1/tasks', verifyToken, (req, res) => {
 
   let filteredTasks = teamId 
     ? tasks.filter(t => t.team_id === teamId)
-    : tasks.filter(t => (t.user_id === username && !t.team_id) || t.assignee_id === username);
+    : tasks.filter(t => (t.user_id === username && !t.team_id) || (t.assignee_ids && t.assignee_ids.includes(username)) || t.assignee_id === username);
 
   const start = (page - 1) * size;
   return res.status(200).json({ code: 0, data: { list: filteredTasks.slice(start, start + size), total: filteredTasks.length }, page, size });
@@ -111,12 +138,18 @@ app.get('/api/v1/tasks', verifyToken, (req, res) => {
 app.post('/api/v1/tasks', verifyToken, (req, res) => {
   const newTask = { id: taskIdCounter++, ...req.body, user_id: req.user.username, created_at: new Date().toISOString() };
   tasks.unshift(newTask); 
+  // 👇 触发器：自动生成通知
+  createAssignmentNotification(newTask, req.user.username);
   return res.status(201).json({ code: 0, message: '任务创建成功', data: newTask });
 });
 
 app.put('/api/v1/tasks/:id', verifyToken, (req, res) => {
   const task = tasks.find(t => t.id === parseInt(req.params.id));
-  if (task) Object.assign(task, req.body);
+  if (task) {
+    Object.assign(task, req.body);
+    // 触发器：修改任务时如果变更了指派人，自动生成通知
+    createAssignmentNotification(task, req.user.username);
+  }
   return res.status(200).json({ code: 0, message: '任务更新成功' });
 });
 
@@ -127,7 +160,6 @@ app.delete('/api/v1/tasks/:id', verifyToken, (req, res) => {
 });
 
 // ================== 原有团队模块 ==================
-
 app.get('/api/v1/teams', verifyToken, (req, res) => {
   const myTeams = teamMembers.filter(tm => tm.user_id === req.user.username).map(tm => ({ ...teams.get(tm.team_id), role: tm.role }));
   res.status(200).json({ code: 0, data: { list: myTeams } });
@@ -146,75 +178,43 @@ app.get('/api/v1/teams/:id/members', verifyToken, (req, res) => {
 });
 
 // ================== 消息通知与邀请功能 ==================
-
 app.post('/api/v1/teams/:id/invitations', verifyToken, (req, res) => {
   const teamId = parseInt(req.params.id);
-  
-  // 强力兼容：不管前端传的是 user_id 还是 username，全收！并强行转字符串+去首尾空格
   const rawTarget = req.body.user_id || req.body.username || '';
   const targetUser = rawTarget.toString().trim(); 
   const team = teams.get(teamId);
-  
-  // 👇 调试监控探头
-  console.log(`\n--- 🕵️ 收到发起邀请请求 ---`);
-  console.log(`前端发来的原始数据:`, req.body);
-  console.log(`提取到的目标用户 ID: [${targetUser}]`);
-  console.log(`当前系统里注册的所有用户:`, Array.from(users.keys()));
-  console.log(`------------------------------\n`);
 
   if (!targetUser) return res.status(400).json({ code: 1, message: '缺少被邀请用户的信息' });
   if (!users.has(targetUser)) return res.status(404).json({ code: 1, message: `被邀请的用户 [${targetUser}] 不存在` });
   if (getUserRole(teamId, targetUser)) return res.status(400).json({ code: 1, message: '该用户已在团队中' });
 
-  // 🛡️ 防御1：防止重复发送邀请 (查重)
-  const existingInvite = invitations.find(i => 
-    i.team_id === teamId && 
-    i.invitee_id === targetUser && 
-    i.status === 'PENDING'
-  );
-  if (existingInvite) {
-    return res.status(400).json({ code: 1, message: '已向该用户发送过邀请，等待对方处理' });
-  }
+  const existingInvite = invitations.find(i => i.team_id === teamId && i.invitee_id === targetUser && i.status === 'PENDING');
+  if (existingInvite) return res.status(400).json({ code: 1, message: '已向该用户发送过邀请，等待对方处理' });
 
   const newInvite = {
-    id: inviteIdCounter++,
-    team_id: teamId,
-    team_name: team ? team.name : 'Unknown Team',
-    inviter_id: req.user.username,
-    invitee_id: targetUser,
-    status: 'PENDING',
-    created_at: new Date().toISOString()
+    id: inviteIdCounter++, team_id: teamId, team_name: team ? team.name : 'Unknown Team',
+    inviter_id: req.user.username, invitee_id: targetUser, status: 'PENDING', created_at: new Date().toISOString()
   };
   invitations.push(newInvite);
-  
-  // 🛡️ 防御2：包裹 { code: 0, data: ... }，解决前端报错弹窗问题
   res.status(200).json({ code: 0, message: '邀请发送成功', data: newInvite }); 
 });
 
 app.get('/api/v1/invitations', verifyToken, (req, res) => {
   const myInvites = invitations.filter(inv => inv.invitee_id === req.user.username);
-  // 注意：这个接口大部分前端写的是直接读数组，如果前端没有报错，这里保持原样返回数组即可
   res.status(200).json(myInvites); 
 });
 
 app.post('/api/v1/invitations/:id/accept', verifyToken, (req, res) => {
   const invite = invitations.find(i => i.id === parseInt(req.params.id));
-  
   if (invite && invite.status === 'PENDING') {
-    // 🛡️ 防御3：同意前再次检查是否已在队伍中 (防止重复加入)
     if (getUserRole(invite.team_id, req.user.username)) {
       invite.status = 'ACCEPTED'; 
       return res.status(400).json({ code: 1, message: '您已加入该团队，请勿重复操作' });
     }
-
     invite.status = 'ACCEPTED';
     teamMembers.push({ team_id: invite.team_id, user_id: req.user.username, role: 'Member' });
-    
-    // 同样包裹 code: 0
     res.status(200).json({ code: 0, message: '已加入团队', data: { invitation_id: invite.id, status: 'ACCEPTED' } }); 
-  } else {
-    res.status(400).json({ code: 1, message: '邀请无效或已处理' });
-  }
+  } else res.status(400).json({ code: 1, message: '邀请无效或已处理' });
 });
 
 app.post('/api/v1/invitations/:id/decline', verifyToken, (req, res) => {
@@ -222,9 +222,13 @@ app.post('/api/v1/invitations/:id/decline', verifyToken, (req, res) => {
   if (invite && invite.status === 'PENDING') {
     invite.status = 'DECLINED';
     res.status(200).json({ code: 0, message: '已拒绝邀请', data: { invitation_id: invite.id, status: 'DECLINED' } });
-  } else {
-    res.status(400).json({ code: 1, message: '邀请无效或已处理' });
-  }
+  } else res.status(400).json({ code: 1, message: '邀请无效或已处理' });
+});
+
+// API：查询当前用户的任务指派通知 (严格符合 API 文档)
+app.get('/api/v1/assignment-requests', verifyToken, (req, res) => {
+  const myRequests = assignmentRequests.filter(reqItem => reqItem.assignee_id === req.user.username);
+  res.status(200).json(myRequests); 
 });
 
 app.listen(PORT, () => {
