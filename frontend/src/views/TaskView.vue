@@ -52,9 +52,9 @@
           <p>加载中...</p>
         </div>
 
-        <div v-else-if="displayedTasks.length === 0" class="empty-state">
-          <p v-if="isSearching">未找到匹配的任务。</p>
-          <p v-else>暂无任务，创建一个新任务开始吧！</p>
+        <!-- 只有当账户里【彻底一个任务都没有】时，才显示全局大空状态 -->
+        <div v-else-if="taskStore.tasks.length === 0" class="empty-state">
+          <p>暂无任务，创建一个新任务开始吧！</p>
         </div>
 
         <div v-else class="task-list">
@@ -64,6 +64,42 @@
                 <h3>待办任务</h3>
               </div>
               <div class="task-group-actions">
+                <!-- 筛选下拉控件 -->
+                <div class="sort-control">
+                  <span class="sort-fab" aria-hidden="true" style="background: #10b981;"> <!-- 用绿色区分筛选 -->
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <!-- 漏斗图标 -->
+                      <path d="M3 4c0-.55.45-1 1-1h16c.55 0 1 .45 1 1v1.59c0 .27-.11.52-.29.71L15 13v6c0 .55-.45 1-1 1h-4c-.55 0-1-.45-1-1v-6L3.29 6.3A.996.996 0 0 1 3 5.59V4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </span>
+                  <div ref="filterDropdownRef" class="sort-dropdown">
+                    <button
+                      type="button"
+                      class="sort-trigger"
+                      :aria-expanded="filterOpen"
+                      @click="toggleFilterMenu"
+                    >
+                      <span>{{ currentFilterLabel }}</span>
+                      <span class="sort-caret" :class="{ open: filterOpen }"></span>
+                    </button>
+
+                    <transition name="sort-menu-fade">
+                      <ul v-if="filterOpen" class="sort-menu" role="listbox" aria-label="任务筛选">
+                        <li v-for="option in filterOptions" :key="option.value">
+                          <button
+                            type="button"
+                            class="sort-option"
+                            :class="{ active: filterOption === option.value }"
+                            @click="selectFilterOption(option.value)"
+                          >
+                            {{ option.label }}
+                          </button>
+                        </li>
+                      </ul>
+                    </transition>
+                  </div>
+                </div>
+
                 <div class="sort-control">
                   <span class="sort-fab" aria-hidden="true">
                     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -108,7 +144,14 @@
               </div>
             </div>
 
-            <div v-if="incompleteTasks.length" class="task-group-list">
+            <!-- 当前分类/搜索下，一个任务都没 -->
+            <div v-if="displayedTasks.length === 0" class="sub-empty-state">
+              <p v-if="isSearching">未找到包含关键词的匹配任务。</p>
+              <p v-else>当前分类下暂无任务。</p>
+            </div>
+
+            <!-- 有任务，且有【未完成】的任务 -->
+            <div v-else-if="incompleteTasks.length > 0" class="task-group-list">
               <div
                 v-for="task in incompleteTasks"
                 :key="task.id"
@@ -182,6 +225,7 @@
               </div>
             </div>
 
+            <!-- 有任务，全都是【已完成】的任务 -->
             <div v-else class="sub-empty-state">
               <p>当前没有未完成任务。</p>
             </div>
@@ -408,6 +452,31 @@ const searchQuery = ref('');
 const sortOption = ref('default');
 const sortOpen = ref(false);
 const sortDropdownRef = ref(null);
+// 筛选专用的状态变量
+const filterOption = ref('all');
+const filterOpen = ref(false);
+const filterDropdownRef = ref(null);
+const filterOptions = [
+  { value: 'all', label: '全部任务' },
+  { value: 'personal', label: '个人任务' },
+  { value: 'team', label: '团队任务' },
+];
+
+const currentFilterLabel = computed(() => {
+  const option = filterOptions.find((item) => item.value === filterOption.value);
+  return option ? option.label : '全部任务';
+});
+
+const toggleFilterMenu = () => {
+  filterOpen.value = !filterOpen.value;
+  if (filterOpen.value) sortOpen.value = false; // 打开筛选时，自动关闭排序菜单
+};
+
+const selectFilterOption = (value) => {
+  filterOption.value = value;
+  filterOpen.value = false;
+};
+
 const showCompletedHistory = ref(false);
 const celebrationTaskId = ref(null);
 const completingTaskId = ref(null);
@@ -428,8 +497,10 @@ const currentSortLabel = computed(() => {
   return option ? option.label : '默认顺序';
 });
 
+// 让两个菜单不会同时重叠打开
 const toggleSortMenu = () => {
   sortOpen.value = !sortOpen.value;
+  if (sortOpen.value) filterOpen.value = false;
 };
 
 const selectSortOption = (value) => {
@@ -437,19 +508,34 @@ const selectSortOption = (value) => {
   sortOpen.value = false;
 };
 
-const handleSortOutsideClick = (event) => {
+// 兼容两个下拉菜单的外部点击关闭事件
+const handleOutsideClick = (event) => {
   if (sortDropdownRef.value && !sortDropdownRef.value.contains(event.target)) {
     sortOpen.value = false;
   }
+  if (filterDropdownRef.value && !filterDropdownRef.value.contains(event.target)) {
+    filterOpen.value = false;
+  }
 };
 
+// 核心计算属性 (添加筛选管道)
 const displayedTasks = computed(() => {
-  const list = [...taskStore.tasks.value];
+  let list = [...taskStore.tasks.value];
+
+  // 拦截层：按个人/团队筛选
+  if (filterOption.value === 'personal') {
+    list = list.filter(task => !task.team_id); // 没有 team_id 的是个人任务
+  } else if (filterOption.value === 'team') {
+    list = list.filter(task => !!task.team_id); // 有 team_id 的是团队任务
+  }
+
+  // 拦截层：按关键词搜索
   const keyword = searchQuery.value.trim().toLowerCase();
-  const filtered = keyword
+  let filtered = keyword
     ? list.filter((task) => String(task.title || '').toLowerCase().includes(keyword))
     : list;
 
+  // 拦截层：排序逻辑
   if (sortOption.value === 'deadline') {
     return filtered.sort((a, b) => {
       const aTime = a.deadline ? new Date(a.deadline).getTime() : Number.POSITIVE_INFINITY;
@@ -750,7 +836,7 @@ const priorityLabel = (priority) => {
 
 // 页面加载时获取任务列表
 onMounted(() => {
-  document.addEventListener('click', handleSortOutsideClick);
+  document.addEventListener('click', handleOutsideClick);
   fetchUserTeams(); // 👇 新增：挂载时加载团队
   loadTasks();
 });
@@ -760,7 +846,7 @@ watch(sortOption, async () => {
 });
 
 onBeforeUnmount(() => {
-  document.removeEventListener('click', handleSortOutsideClick);
+  document.removeEventListener('click', handleOutsideClick);
   if (celebrationTimer) {
     clearTimeout(celebrationTimer);
   }
