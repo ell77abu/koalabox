@@ -14,9 +14,13 @@ import (
 type TaskRepository interface {
 	Create(ctx context.Context, task *model.Task) error
 	ListPersonalAndAssignedTeam(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error)
+	ListPersonalOnly(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error)
+	ListAssignedTeamOnly(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error)
 	ListByTeamID(ctx context.Context, teamID uint64, page, size int) ([]model.Task, int64, error)
 	ListByUserID(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error)
 	ListAll(ctx context.Context, page, size int) ([]model.Task, int64, error)
+	ListAllPersonal(ctx context.Context, page, size int) ([]model.Task, int64, error)
+	ListAllTeam(ctx context.Context, page, size int) ([]model.Task, int64, error)
 	// 新增：支持排序的两个方法
 	ListByUserIDWithOrder(ctx context.Context, userID uint64, page, size int, orderBy string) ([]model.Task, int64, error)
 	ListAllWithOrder(ctx context.Context, page, size int, orderBy string) ([]model.Task, int64, error)
@@ -44,40 +48,56 @@ func (r *taskRepository) Create(ctx context.Context, task *model.Task) error {
 }
 
 func (r *taskRepository) ListPersonalAndAssignedTeam(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error) {
-	if page <= 0 {
-		page = 1
-	}
-	if size <= 0 {
-		size = 10
-	}
-	if size > 100 {
-		size = 100
-	}
-	offset := (page - 1) * size
+	return r.listWithPaging(ctx, page, size, func(query *gorm.DB) *gorm.DB {
+		return query.Where(
+			"(team_id IS NULL AND user_id = ?) OR (team_id IS NOT NULL AND assignee_id = ?)",
+			userID,
+			userID,
+		)
+	})
+}
 
-	query := r.db.WithContext(ctx).
-		Model(&model.Task{}).
-		Where("deleted_at IS NULL").
-		Where("(team_id IS NULL AND user_id = ?) OR (team_id IS NOT NULL AND assignee_id = ?)", userID, userID)
+func (r *taskRepository) ListPersonalOnly(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error) {
+	return r.listWithPaging(ctx, page, size, func(query *gorm.DB) *gorm.DB {
+		return query.Where("team_id IS NULL").Where("user_id = ?", userID)
+	})
+}
 
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
-	tasks := make([]model.Task, 0)
-	err := query.
-		Order("created_at DESC").
-		Limit(size).
-		Offset(offset).
-		Find(&tasks).Error
-	if err != nil {
-		return nil, 0, err
-	}
-	return tasks, total, nil
+func (r *taskRepository) ListAssignedTeamOnly(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error) {
+	return r.listWithPaging(ctx, page, size, func(query *gorm.DB) *gorm.DB {
+		return query.Where("team_id IS NOT NULL").Where("assignee_id = ?", userID)
+	})
 }
 
 func (r *taskRepository) ListByTeamID(ctx context.Context, teamID uint64, page, size int) ([]model.Task, int64, error) {
+	return r.listWithPaging(ctx, page, size, func(query *gorm.DB) *gorm.DB {
+		return query.Where("team_id = ?", teamID)
+	})
+}
+
+func (r *taskRepository) ListAll(ctx context.Context, page, size int) ([]model.Task, int64, error) {
+	return r.listWithPaging(ctx, page, size, func(query *gorm.DB) *gorm.DB {
+		return query
+	})
+}
+
+func (r *taskRepository) ListAllPersonal(ctx context.Context, page, size int) ([]model.Task, int64, error) {
+	return r.listWithPaging(ctx, page, size, func(query *gorm.DB) *gorm.DB {
+		return query.Where("team_id IS NULL")
+	})
+}
+
+func (r *taskRepository) ListAllTeam(ctx context.Context, page, size int) ([]model.Task, int64, error) {
+	return r.listWithPaging(ctx, page, size, func(query *gorm.DB) *gorm.DB {
+		return query.Where("team_id IS NOT NULL")
+	})
+}
+
+func (r *taskRepository) listWithPaging(
+	ctx context.Context,
+	page, size int,
+	applyFilter func(query *gorm.DB) *gorm.DB,
+) ([]model.Task, int64, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -91,8 +111,8 @@ func (r *taskRepository) ListByTeamID(ctx context.Context, teamID uint64, page, 
 
 	query := r.db.WithContext(ctx).
 		Model(&model.Task{}).
-		Where("team_id = ?", teamID).
 		Where("deleted_at IS NULL")
+	query = applyFilter(query)
 
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -126,39 +146,6 @@ func (r *taskRepository) ListByUserID(ctx context.Context, userID uint64, page, 
 	query := r.db.WithContext(ctx).
 		Model(&model.Task{}).
 		Where("user_id = ?", userID).
-		Where("deleted_at IS NULL")
-
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
-	var tasks []model.Task
-	err := query.
-		Order("created_at DESC").
-		Limit(size).
-		Offset(offset).
-		Find(&tasks).Error
-	if err != nil {
-		return nil, 0, err
-	}
-	return tasks, total, nil
-}
-
-func (r *taskRepository) ListAll(ctx context.Context, page, size int) ([]model.Task, int64, error) {
-	if page <= 0 {
-		page = 1
-	}
-	if size <= 0 {
-		size = 10
-	}
-	if size > 100 {
-		size = 100
-	}
-	offset := (page - 1) * size
-
-	query := r.db.WithContext(ctx).
-		Model(&model.Task{}).
 		Where("deleted_at IS NULL")
 
 	var total int64

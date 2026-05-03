@@ -44,12 +44,13 @@ func (h *TaskHandler) List(c *gin.Context) {
 		teamID = &parsed
 	}
 
-	list, total, fixedPage, fixedSize, err := h.taskService.List(c.Request.Context(), userID, userLevel, page, size, teamID)
+	scope := service.TaskScope(c.DefaultQuery("task_scope", ""))
+	list, total, fixedPage, fixedSize, err := h.taskService.List(c.Request.Context(), userID, userLevel, page, size, teamID, scope)
 	if errors.Is(err, repository.ErrForbidden) {
 		response.Forbidden(c, "forbidden")
 		return
 	}
-	if errors.Is(err, service.ErrInvalidTeamID) {
+	if errors.Is(err, service.ErrInvalidTeamID) || errors.Is(err, service.ErrInvalidTaskScope) {
 		response.BadRequest(c, err.Error())
 		return
 	}

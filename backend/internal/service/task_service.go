@@ -22,6 +22,15 @@ var (
 	ErrTeamRoleDenied       = errors.New("insufficient team role permission")
 	ErrMemberStatusOnly     = errors.New("member can only update status for assigned task")
 	ErrAssignmentNotPending = errors.New("assignment request is not pending")
+	ErrInvalidTaskScope     = errors.New("invalid task scope")
+)
+
+type TaskScope string
+
+const (
+	TaskScopeAll      TaskScope = ""
+	TaskScopePersonal TaskScope = "personal"
+	TaskScopeTeam     TaskScope = "team"
 )
 
 type CreateTaskRequest struct {
@@ -70,7 +79,7 @@ type UpdateTaskRequest struct {
 }
 
 type TaskService interface {
-	List(ctx context.Context, userID uint64, userLevel uint8, page, size int, teamID *uint64) ([]model.Task, int64, int, int, error)
+	List(ctx context.Context, userID uint64, userLevel uint8, page, size int, teamID *uint64, scope TaskScope) ([]model.Task, int64, int, int, error)
 	Create(ctx context.Context, userID uint64, req CreateTaskRequest) (*model.Task, error)
 	Update(ctx context.Context, userID uint64, taskID uint64, req UpdateTaskRequest) (*model.Task, error)
 	Delete(ctx context.Context, userID uint64, userLevel uint8, taskID uint64) error
@@ -90,7 +99,7 @@ func NewTaskService(taskRepo repository.TaskRepository, teamRepo repository.Team
 	return &taskService{taskRepo: taskRepo, teamRepo: teamRepo, userRepo: userRepo, assignRepo: assignRepo}
 }
 
-func (s *taskService) List(ctx context.Context, userID uint64, userLevel uint8, page, size int, teamID *uint64) ([]model.Task, int64, int, int, error) {
+func (s *taskService) List(ctx context.Context, userID uint64, userLevel uint8, page, size int, teamID *uint64, scope TaskScope) ([]model.Task, int64, int, int, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -99,6 +108,9 @@ func (s *taskService) List(ctx context.Context, userID uint64, userLevel uint8, 
 	}
 	if size > 100 {
 		size = 100
+	}
+	if !isValidTaskScope(scope) {
+		return nil, 0, 0, 0, ErrInvalidTaskScope
 	}
 
 	var (
@@ -111,7 +123,7 @@ func (s *taskService) List(ctx context.Context, userID uint64, userLevel uint8, 
 		if teamID != nil {
 			list, total, err = s.taskRepo.ListByTeamID(ctx, *teamID, page, size)
 		} else {
-			list, total, err = s.taskRepo.ListAll(ctx, page, size)
+			list, total, err = s.listAdminTasksByScope(ctx, page, size, scope)
 		}
 	} else if teamID != nil {
 		if _, err = s.teamRepo.GetByID(ctx, *teamID); err != nil {
@@ -128,7 +140,7 @@ func (s *taskService) List(ctx context.Context, userID uint64, userLevel uint8, 
 
 		list, total, err = s.taskRepo.ListByTeamID(ctx, *teamID, page, size)
 	} else {
-		list, total, err = s.taskRepo.ListPersonalAndAssignedTeam(ctx, userID, page, size)
+		list, total, err = s.listUserTasksByScope(ctx, userID, page, size, scope)
 	}
 	if err != nil {
 		return nil, 0, 0, 0, err
@@ -137,6 +149,28 @@ func (s *taskService) List(ctx context.Context, userID uint64, userLevel uint8, 
 		list = make([]model.Task, 0)
 	}
 	return list, total, page, size, nil
+}
+
+func (s *taskService) listAdminTasksByScope(ctx context.Context, page, size int, scope TaskScope) ([]model.Task, int64, error) {
+	switch scope {
+	case TaskScopePersonal:
+		return s.taskRepo.ListAllPersonal(ctx, page, size)
+	case TaskScopeTeam:
+		return s.taskRepo.ListAllTeam(ctx, page, size)
+	default:
+		return s.taskRepo.ListAll(ctx, page, size)
+	}
+}
+
+func (s *taskService) listUserTasksByScope(ctx context.Context, userID uint64, page, size int, scope TaskScope) ([]model.Task, int64, error) {
+	switch scope {
+	case TaskScopePersonal:
+		return s.taskRepo.ListPersonalOnly(ctx, userID, page, size)
+	case TaskScopeTeam:
+		return s.taskRepo.ListAssignedTeamOnly(ctx, userID, page, size)
+	default:
+		return s.taskRepo.ListPersonalAndAssignedTeam(ctx, userID, page, size)
+	}
 }
 
 func (s *taskService) Create(ctx context.Context, userID uint64, req CreateTaskRequest) (*model.Task, error) {
@@ -507,4 +541,13 @@ func parseDeadline(input string) (*time.Time, error) {
 	}
 
 	return nil, ErrInvalidTaskDeadline
+}
+
+func isValidTaskScope(scope TaskScope) bool {
+	switch scope {
+	case TaskScopeAll, TaskScopePersonal, TaskScopeTeam:
+		return true
+	default:
+		return false
+	}
 }
