@@ -2,6 +2,8 @@ package handler
 
 import (
 	"errors"
+	"log"
+	"runtime/debug"
 	"strconv"
 	"strings"
 
@@ -141,6 +143,12 @@ func (h *TeamHandler) AddMember(c *gin.Context) {
 		return
 	}
 
+	// 输入校验：要求至少提供 user_id 或 username 中的一个
+	if req.UserID == 0 && strings.TrimSpace(req.Username) == "" {
+		response.BadRequest(c, "user_id or username is required")
+		return
+	}
+
 	member, err := h.teamService.AddMember(c.Request.Context(), userID, teamID, req)
 	if errors.Is(err, service.ErrInvalidTeamMember) {
 		response.BadRequest(c, err.Error())
@@ -167,6 +175,8 @@ func (h *TeamHandler) AddMember(c *gin.Context) {
 		return
 	}
 	if err != nil {
+		// 记录详细错误与堆栈到服务器日志，便于排查；对外只返回统一的内部错误信息
+		log.Printf("AddMember error: %v\n%s", err, debug.Stack())
 		response.InternalError(c, "add member failed")
 		return
 	}
