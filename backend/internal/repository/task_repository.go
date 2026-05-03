@@ -101,6 +101,7 @@ func (r *taskRepository) ListByTeamID(ctx context.Context, teamID uint64, page, 
 
 	tasks := make([]model.Task, 0)
 	err := query.
+		Order("priority DESC").
 		Order("created_at DESC").
 		Limit(size).
 		Offset(offset).

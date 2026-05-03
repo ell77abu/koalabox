@@ -466,14 +466,16 @@ const handleUpdateTask = async () => {
   if (submittingTask.value) return;
   submittingTask.value = true;
   try {
-    const payload = {
-      title: editingTask.value.title,
-      description: editingTask.value.description || null,
-      status: editingTask.value.status,
-      priority: Number(editingTask.value.priority),
-      deadline: parseDateInput(editingTask.value.deadline),
-      assignee_id: editingTask.value.assignee_id || null // <- 关键修改
-    };
+    const payload = myRole.value === 'Member'
+      ? { status: editingTask.value.status }
+      : {
+          title: editingTask.value.title,
+          description: editingTask.value.description || null,
+          status: editingTask.value.status,
+          priority: Number(editingTask.value.priority),
+          deadline: parseDateInput(editingTask.value.deadline),
+          assignee_id: editingTask.value.assignee_id || null // <- 关键修改
+        };
 
     const res = await updateTaskApi(editingTask.value.id, payload);
     if (res.data.code === 0) {
