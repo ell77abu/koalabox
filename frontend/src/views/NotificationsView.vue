@@ -40,7 +40,7 @@
                   用户 <strong>{{ item.inviter_id }}</strong> 邀请你加入该团队。
                 </template>
                 <template v-else>
-                  用户 <strong>{{ item.requester_id }}</strong> 将一项团队任务指派给了你。
+                  用户 <strong>{{ item.requester_username || item.requester_id }}</strong> 将一项团队任务指派给了你。
                 </template>
                 <br>
                 <span class="time-text">发送时间: {{ formatDate(item.created_at) }}</span>
