@@ -180,14 +180,13 @@
             <input v-model.trim="newTask.deadline" type="datetime-local" class="form-input" />
           </div>
 
-          <label style="font-size: 14px; font-weight: 600; color: #475569; margin-top: 10px;">指派给成员 (可多选):</label>
-          <div class="assignee-checkbox-list">
-            <label v-for="m in members" :key="m.user_id" class="assignee-checkbox-item">
-              <input type="checkbox" :value="m.user_id" v-model="newTask.assignee_ids" />
-              {{ m.username }} ({{ m.role }})
-            </label>
-            <span v-if="members.length === 0" style="color: #94a3b8; font-size: 0.85rem;">暂无团队成员</span>
-          </div>
+          <!-- 下拉单选菜单 -->
+          <select v-model="newTask.assignee_id" class="form-input">
+            <option :value="null">任务指派：暂不指派 (留入团队池)</option>
+            <option v-for="m in members" :key="m.user_id" :value="m.user_id">
+              指派给: {{ m.username }} ({{ m.role }})
+            </option>
+          </select>
 
           <div class="modal-actions">
             <button type="button" class="btn btn-outline" @click="showCreateTaskModal = false">取消</button>
@@ -244,13 +243,13 @@
               :disabled="myRole === 'Member'"
             />
             
-            <div class="assignee-checkbox-list">
-              <label v-for="m in members" :key="m.user_id" class="assignee-checkbox-item" :class="{ 'is-disabled': myRole === 'Member' }">
-                <input type="checkbox" :value="m.user_id" v-model="editingTask.assignee_ids" :disabled="myRole === 'Member'" />
-                {{ m.username }} ({{ m.role }})
-              </label>
-              <span v-if="members.length === 0" style="color: #94a3b8; font-size: 0.85rem;">暂无团队成员</span>
-            </div>
+            <!-- 下拉单选菜单，且依然受角色权限控制 -->
+            <select v-model="editingTask.assignee_id" class="form-input" :disabled="myRole === 'Member'">
+              <option :value="null">任务指派：暂不指派 (留入团队池)</option>
+              <option v-for="m in members" :key="m.user_id" :value="m.user_id">
+                指派给: {{ m.username }} ({{ m.role }})
+              </option>
+            </select>
           </div>
 
           <div class="modal-actions">
@@ -315,8 +314,9 @@ const showCreateTaskModal = ref(false);
 const showEditTaskModal = ref(false);
 const submittingTask = ref(false);
 
-const newTask = ref({ title: '', description: '', priority: '2', deadline: '', assignee_ids: [] });
-const editingTask = ref({ id: null, title: '', description: '', status: 'TODO', priority: '2', deadline: '', assignee_ids: [] });
+// 将 assignee_ids 数组替换为单数变量 assignee_id: null
+const newTask = ref({ title: '', description: '', priority: '2', deadline: '', assignee_id: null });
+const editingTask = ref({ id: null, title: '', description: '', status: 'TODO', priority: '2', deadline: '', assignee_id: null });
 
 // 成员管理状态
 const members = ref([]);
@@ -353,13 +353,12 @@ const roleTextClass = (role) => {
   return 'text-blue-600 font-bold';
 };
 
-// 👇 新增：权限判断函数：是否有资格点击“编辑”按钮
+// 权限判断函数：是否有资格点击“编辑”按钮
+// 精简编辑权限验证：只用验证单一的 assignee_id
 const canEditTask = (task) => {
   if (myRole.value === 'Owner' || myRole.value === 'Admin') return true;
-  // 普通 Member 只能操作分派给自己的任务
-  const assigneeIds = task.assignee_ids || (task.assignee_id ? [task.assignee_id] : []);
   const currentMember = members.value.find(m => m.username === authStore.username.value);
-  return currentMember ? assigneeIds.includes(currentMember.user_id) : false;
+  return currentMember ? task.assignee_id === currentMember.user_id : false;
 };
 
 // 日期解析转换
@@ -420,7 +419,9 @@ const loadTeamMembers = async () => {
 };
 
 /* ================== 任务操作 ================== */
+// handleCreateTask: 提交时发送单数属性
 const handleCreateTask = async () => {
+  if (submittingTask.value) return; // 加上咱们之前聊过的防抖锁
   submittingTask.value = true;
   try {
     const payload = {
@@ -428,12 +429,13 @@ const handleCreateTask = async () => {
       priority: Number(newTask.value.priority),
       deadline: parseDateInput(newTask.value.deadline),
       team_id: teamId, 
-      status: 'TODO'
+      status: 'TODO',
+      assignee_id: newTask.value.assignee_id || null // <- 关键修改
     };
     const res = await createTaskApi(payload);
     if (res.data.code === 0) {
       showCreateTaskModal.value = false;
-      newTask.value = { title: '', description: '', priority: '2', deadline: '', assignee_ids: [] };
+      newTask.value = { title: '', description: '', priority: '2', deadline: '', assignee_id: null }; // <- 还原也要重置为 null
       await loadTeamTasks();
     } else alert(res.data.message || '发布失败');
   } catch (error) {
@@ -443,7 +445,8 @@ const handleCreateTask = async () => {
   }
 };
 
-// 👇 新增：打开编辑任务面板
+// 打开编辑任务面板
+// startEdit: 从后端读出单数属性填入表单
 const startEdit = (task) => {
   editingTask.value = {
     id: task.id,
@@ -452,13 +455,15 @@ const startEdit = (task) => {
     status: task.status,
     priority: String(task.priority),
     deadline: task.deadline ? formatDateForInput(task.deadline) : '',
-    assignee_ids: task.assignee_ids || (task.assignee_id ? [task.assignee_id] : [])
+    assignee_id: task.assignee_id || null // <- 关键修改
   };
   showEditTaskModal.value = true;
 };
 
-// 👇 新增：保存更新任务
+// 保存更新任务
+// handleUpdateTask: 更新时发送单数属性
 const handleUpdateTask = async () => {
+  if (submittingTask.value) return;
   submittingTask.value = true;
   try {
     const payload = {
@@ -467,7 +472,7 @@ const handleUpdateTask = async () => {
       status: editingTask.value.status,
       priority: Number(editingTask.value.priority),
       deadline: parseDateInput(editingTask.value.deadline),
-      assignee_ids: editingTask.value.assignee_ids || []
+      assignee_id: editingTask.value.assignee_id || null // <- 关键修改
     };
 
     const res = await updateTaskApi(editingTask.value.id, payload);
@@ -707,11 +712,13 @@ onMounted(() => {
 .danger-zone h3 { color: #b91c1c; }
 
 /* 多选指派成员 */
+/*---暂时删除
 .assignee-checkbox-list { display: flex; flex-wrap: wrap; gap: 0.5rem; padding: 0.5rem 0; }
 .assignee-checkbox-item { display: flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.75rem; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.85rem; color: #0f172a; cursor: pointer; transition: all 0.15s; user-select: none; }
 .assignee-checkbox-item:hover { border-color: #93c5fd; background: #eff6ff; }
 .assignee-checkbox-item input[type="checkbox"] { width: 16px; height: 16px; accent-color: #3b82f6; cursor: pointer; }
 .assignee-checkbox-item.is-disabled { opacity: 0.5; cursor: not-allowed; }
+*/
 
 /* === 深色模式适配补丁 === */
 :global([data-theme="dark"]) .manage-card { background: #1e293b; border-color: #334155; }

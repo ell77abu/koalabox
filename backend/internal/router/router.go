@@ -57,6 +57,14 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			taskGroup.POST("/assignments/:request_id/decline", taskHandler.DeclineAssignment)
 		}
 
+		assignmentGroup := apiV1.Group("/assignment-requests")
+		assignmentGroup.Use(middleware.JWTAuth(cfg.JWT.Secret))
+		{
+			assignmentGroup.GET("", taskHandler.ListPendingAssignments)
+			assignmentGroup.POST("/:request_id/accept", taskHandler.AcceptAssignment)
+			assignmentGroup.POST("/:request_id/decline", taskHandler.DeclineAssignment)
+		}
+
 		teamGroup := apiV1.Group("/teams")
 		teamGroup.Use(middleware.JWTAuth(cfg.JWT.Secret))
 		{
@@ -65,6 +73,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			teamGroup.POST("", teamHandler.Create)
 			teamGroup.PUT("/:team_id", teamHandler.Update)
 			teamGroup.POST("/:team_id/members", teamHandler.AddMember)
+			teamGroup.POST("/:team_id/invitations", teamHandler.AddMember)
 			teamGroup.GET("/:team_id/members", teamHandler.ListMembers)
 			teamGroup.DELETE("/:team_id/members/:user_id", teamHandler.RemoveMember)
 			teamGroup.PUT("/:team_id/members/:user_id", teamHandler.UpdateMemberRole)
@@ -72,6 +81,14 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			teamGroup.GET("/invitations/pending", teamHandler.ListPendingInvitations)
 			teamGroup.POST("/invitations/:invitation_id/accept", teamHandler.AcceptInvitation)
 			teamGroup.POST("/invitations/:invitation_id/decline", teamHandler.DeclineInvitation)
+		}
+
+		invitationGroup := apiV1.Group("/invitations")
+		invitationGroup.Use(middleware.JWTAuth(cfg.JWT.Secret))
+		{
+			invitationGroup.GET("", teamHandler.ListPendingInvitations)
+			invitationGroup.POST("/:invitation_id/accept", teamHandler.AcceptInvitation)
+			invitationGroup.POST("/:invitation_id/decline", teamHandler.DeclineInvitation)
 		}
 	}
 

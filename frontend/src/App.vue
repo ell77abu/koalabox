@@ -61,7 +61,8 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { RouterView, RouterLink, useRoute } from 'vue-router';
 import { authStore } from './stores/auth';
-import { getInvitationsApi } from './services/team';
+// 引入双重 API
+import { getInvitationsApi, getAssignmentRequestsApi } from './services/team';
 
 const route = useRoute();
 const avatarUrl = computed(
@@ -73,7 +74,7 @@ const levelLabel = computed(() => (Number(authStore.level.value) === 1 ? '管理
 const theme = ref('light');
 const themeLabel = computed(() => (theme.value === 'light' ? '深色模式' : '浅色模式'));
 
-// 未读消息数量状态
+// 未处理消息总数量状态
 const pendingCount = ref(0);
 
 const applyTheme = (value) => {
@@ -86,17 +87,34 @@ const toggleTheme = () => {
   applyTheme(theme.value);
 };
 
-// 获取未处理邀请数量
+// 雷达：并行拉取团队邀请与任务指派的数量并进行汇总计算
 const checkPendingNotifications = async () => {
   if (!authStore.isLoggedIn.value) return;
+  
   try {
-    const res = await getInvitationsApi();
-    const invitations = res.data?.data || [];
-    if (Array.isArray(invitations)) {
-      pendingCount.value = invitations.filter(inv => inv.status === 'PENDING').length;
+    // 使用 Promise.allSettled 并行请求，防止其中一个接口报错卡死整个流程
+    const [invRes, assignRes] = await Promise.allSettled([
+      getInvitationsApi(),
+      getAssignmentRequestsApi()
+    ]);
+
+    let count = 0;
+
+    // 1. 累加团队邀请里的 PENDING 数量
+    if (invRes.status === 'fulfilled') {
+      const invList = Array.isArray(invRes.value.data) ? invRes.value.data : (invRes.value.data?.data || []);
+      count += invList.filter(inv => inv.status === 'PENDING').length;
     }
+
+    // 2. 累加任务指派里的 PENDING 数量
+    if (assignRes.status === 'fulfilled') {
+      const assignList = Array.isArray(assignRes.value.data) ? assignRes.value.data : (assignRes.value.data?.data || []);
+      count += assignList.filter(assign => assign.status === 'PENDING').length;
+    }
+
+    pendingCount.value = count;
   } catch (error) {
-    console.error('获取通知失败', error);
+    console.error('获取全局通知角标失败', error);
   }
 };
 
@@ -113,7 +131,7 @@ onMounted(() => {
   checkPendingNotifications();
 });
 
-// 监听路由变化，及时刷新小红点
+// 监听路由变化，实现每次导航后自动刷新红点数量
 watch(route, () => {
   checkPendingNotifications();
 });
@@ -121,6 +139,7 @@ watch(route, () => {
 </script>
 
 <style scoped>
+/* 样式原封不动，保持你设计的精美 UI */
 .app-layout {
   display: flex;
   height: 100vh;
@@ -188,16 +207,14 @@ watch(route, () => {
   margin: 0 auto;
 }
 
-/* ================= 统一右上角布局 ================= */
 .page-topbar {
   display: flex;
-  justify-content: flex-end; /* 强制全部靠右对齐 */
+  justify-content: flex-end; 
   align-items: center;
-  gap: 16px; /* 元素之间的舒适间距 */
+  gap: 16px; 
   margin-bottom: 18px;
 }
 
-/* 消息铃铛按钮 (圆形设计，和胶囊区分开，更有层次感) */
 .notification-trigger {
   position: relative;
   display: inline-flex;
@@ -220,7 +237,6 @@ watch(route, () => {
   box-shadow: 0 8px 16px rgba(15, 23, 42, 0.12);
 }
 
-/* 动态小红点 */
 .red-dot {
   position: absolute;
   top: -4px;
@@ -237,17 +253,15 @@ watch(route, () => {
   align-items: center;
   justify-content: center;
   box-shadow: 0 2px 6px rgba(239, 68, 68, 0.4);
-  border: 2px solid var(--app-bg); /* 与背景色融为一体的镂空边框 */
+  border: 2px solid var(--app-bg); 
 }
 
-/* 深色模式下的红点边框适配 */
 :global([data-theme="dark"]) .red-dot {
   border-color: #0f172a; 
 }
 
-/* ================= 个人中心与主题切换 ================= */
 .theme-toggle {
-  height: 40px; /* 和消息铃铛保持统一高度 */
+  height: 40px; 
   padding: 0 16px;
   border-radius: 999px;
   border: 1px solid var(--pill-border);
