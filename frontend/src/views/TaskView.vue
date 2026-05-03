@@ -548,6 +548,13 @@ const displayedTasks = computed(() => {
       return aTime - bTime;
     });
   }
+  if (sortOption.value === 'priority') {
+    return filtered.sort((a, b) => {
+      const priorityDiff = Number(b.priority || 0) - Number(a.priority || 0);
+      if (priorityDiff !== 0) return priorityDiff;
+      return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+    });
+  }
 
   return filtered;
 });
@@ -633,13 +640,15 @@ const onUpdateTask = async () => {
   updatingId.value = editingTask.id;
   updateError.value = '';
   try {
-    const payload = {
-      title: editingTask.title,
-      description: editingTask.description || null,
-      status: editingTask.status,
-      priority: parseInt(editingTask.priority),
-      deadline: toBackendDeadline(editingTask.deadline),
-    };
+    const payload = canEditTaskDetails(editingTask)
+      ? {
+          title: editingTask.title,
+          description: editingTask.description || null,
+          status: editingTask.status,
+          priority: parseInt(editingTask.priority),
+          deadline: toBackendDeadline(editingTask.deadline),
+        }
+      : { status: editingTask.status };
 
     const response = await updateTaskApi(editingTask.id, payload);
     if (response.data.code === 0) {
@@ -683,13 +692,15 @@ const markTaskDone = async (task) => {
 
   updatingId.value = task.id;
   try {
-    const payload = {
-      title: task.title,
-      description: task.description || null,
-      status: 'DONE',
-      priority: parseInt(task.priority),
-      deadline: task.deadline || null,
-    };
+    const payload = canEditTaskDetails(task)
+      ? {
+          title: task.title,
+          description: task.description || null,
+          status: 'DONE',
+          priority: parseInt(task.priority),
+          deadline: task.deadline || null,
+        }
+      : { status: 'DONE' };
 
     const response = await updateTaskApi(task.id, payload);
     if (response.data.code === 0) {
