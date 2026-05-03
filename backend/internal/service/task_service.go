@@ -183,9 +183,6 @@ func (s *taskService) Create(ctx context.Context, userID uint64, req CreateTaskR
 		}
 	}
 
-	pendingAssignment := false
-	var pendingAssigneeID uint64
-
 	if req.AssigneeID != nil {
 		if _, err := s.userRepo.GetByID(ctx, *req.AssigneeID); err != nil {
 			return nil, ErrInvalidAssigneeID
@@ -199,25 +196,12 @@ func (s *taskService) Create(ctx context.Context, userID uint64, req CreateTaskR
 				return nil, ErrAssigneeNotInTeam
 			}
 		}
-		if req.TeamID != nil && *req.AssigneeID != userID {
-			pendingAssignment = true
-			pendingAssigneeID = *req.AssigneeID
-		}
-	}
-
-	var assigneeID *uint64
-	if req.AssigneeID != nil {
-		if pendingAssignment {
-			assigneeID = nil
-		} else {
-			assigneeID = req.AssigneeID
-		}
 	}
 
 	task := &model.Task{
 		UserID:      userID,
 		TeamID:      req.TeamID,
-		AssigneeID:  assigneeID,
+		AssigneeID:  req.AssigneeID,
 		Title:       title,
 		Description: req.Description,
 		Status:      status,
@@ -227,18 +211,8 @@ func (s *taskService) Create(ctx context.Context, userID uint64, req CreateTaskR
 	if err := s.taskRepo.Create(ctx, task); err != nil {
 		return nil, err
 	}
-
-	if pendingAssignment {
-		assignReq := &model.TaskAssignmentRequest{
-			TaskID:      task.ID,
-			TeamID:      *req.TeamID,
-			RequesterID: userID,
-			AssigneeID:  pendingAssigneeID,
-			Status:      model.InvitationStatusPending,
-		}
-		if err := s.assignRepo.Create(ctx, assignReq); err != nil {
-			return nil, err
-		}
+	if err := s.createAssignmentNotification(ctx, task, userID, nil, nil); err != nil {
+		return nil, err
 	}
 	return task, nil
 }
@@ -325,6 +299,8 @@ func (s *taskService) Delete(ctx context.Context, userID uint64, userLevel uint8
 }
 
 func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.Task, req UpdateTaskRequest, operatorID uint64) (*model.Task, error) {
+	originalAssigneeID := task.AssigneeID
+	originalTeamID := task.TeamID
 	if req.Title != nil {
 		title := strings.TrimSpace(*req.Title)
 		if title == "" || len(title) > 120 {
@@ -365,9 +341,6 @@ func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.T
 	if req.AssigneeID.Set {
 		if !req.AssigneeID.Valid {
 			task.AssigneeID = nil
-			if err := s.assignRepo.DeclinePendingByTaskID(ctx, task.ID); err != nil {
-				return nil, err
-			}
 		} else {
 			assigneeID := req.AssigneeID.Value
 			if _, err := s.userRepo.GetByID(ctx, assigneeID); err != nil {
@@ -382,31 +355,28 @@ func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.T
 					return nil, ErrAssigneeNotInTeam
 				}
 			}
-			if task.TeamID != nil && assigneeID != operatorID {
-				if err := s.assignRepo.DeclinePendingByTaskID(ctx, task.ID); err != nil {
-					return nil, err
-				}
-				assignReq := &model.TaskAssignmentRequest{
-					TaskID:      task.ID,
-					TeamID:      *task.TeamID,
-					RequesterID: operatorID,
-					AssigneeID:  assigneeID,
-					Status:      model.InvitationStatusPending,
-				}
-				if err := s.assignRepo.Create(ctx, assignReq); err != nil {
-					return nil, err
-				}
-				task.AssigneeID = nil
-			} else {
-				task.AssigneeID = &assigneeID
-			}
+			task.AssigneeID = &assigneeID
 		}
 	}
+
+	assigneeChanged := !isSameUint64Ptr(originalAssigneeID, task.AssigneeID)
 
 	if err := s.taskRepo.UpdateByID(ctx, task); err != nil {
 		return nil, err
 	}
-	return s.taskRepo.GetByID(ctx, task.ID)
+	if assigneeChanged && task.TeamID != nil {
+		if err := s.assignRepo.DeclinePendingByTaskID(ctx, task.ID); err != nil {
+			return nil, err
+		}
+	}
+	updatedTask, err := s.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.createAssignmentNotification(ctx, updatedTask, operatorID, originalAssigneeID, originalTeamID); err != nil {
+		return nil, err
+	}
+	return updatedTask, nil
 }
 
 func (s *taskService) ListPendingAssignments(ctx context.Context, userID uint64) ([]model.TaskAssignmentRequestDetail, error) {
@@ -462,8 +432,53 @@ func (s *taskService) DeclineAssignment(ctx context.Context, userID, requestID u
 	return s.assignRepo.UpdateStatus(ctx, requestID, model.InvitationStatusDeclined)
 }
 
+func (s *taskService) createAssignmentNotification(ctx context.Context, task *model.Task, requesterID uint64, originalAssigneeID, originalTeamID *uint64) error {
+	if task.TeamID == nil || task.AssigneeID == nil {
+		return nil
+	}
+	if *task.AssigneeID == requesterID {
+		return nil
+	}
+
+	assigneeChanged := true
+	teamChanged := true
+	if originalAssigneeID != nil && *originalAssigneeID == *task.AssigneeID {
+		assigneeChanged = false
+	}
+	if originalTeamID != nil && *originalTeamID == *task.TeamID {
+		teamChanged = false
+	}
+	if originalAssigneeID != nil || originalTeamID != nil {
+		if !assigneeChanged && !teamChanged {
+			return nil
+		}
+	}
+
+	req := &model.TaskAssignmentRequest{
+		TaskID:      task.ID,
+		TeamID:      *task.TeamID,
+		RequesterID: requesterID,
+		AssigneeID:  *task.AssigneeID,
+		Status:      model.InvitationStatusAccepted,
+	}
+	if err := s.assignRepo.Create(ctx, req); err != nil {
+		if errors.Is(err, repository.ErrConflict) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
 func hasMemberRestrictedFields(req UpdateTaskRequest) bool {
 	return req.Title != nil || req.Description != nil || req.Priority != nil || req.Deadline != nil || req.TeamID != nil || req.AssigneeID.Set
+}
+
+func isSameUint64Ptr(left, right *uint64) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
 }
 
 func canManageTeamTasks(role model.TeamRole) bool {

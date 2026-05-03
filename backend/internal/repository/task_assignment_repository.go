@@ -79,7 +79,7 @@ func (r *taskAssignmentRepository) ListPendingByAssignee(ctx context.Context, as
 		Joins("JOIN teams tm ON tm.id = tar.team_id").
 		Joins("JOIN users u ON u.id = tar.requester_id AND u.deleted_at IS NULL").
 		Where("tar.assignee_id = ?", assigneeID).
-		Where("tar.status = ?", model.InvitationStatusPending).
+		Where("tar.status IN ?", []model.InvitationStatus{model.InvitationStatusPending, model.InvitationStatusAccepted}).
 		Order("tar.created_at DESC").
 		Find(&list).Error
 	if err != nil {
