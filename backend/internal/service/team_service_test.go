@@ -121,6 +121,8 @@ func (m *userRepoMock) UpdatePasswordByID(ctx context.Context, id uint64, passwo
 type inviteRepoMock struct {
 	getPendingByTeamAndInviteeFn func(ctx context.Context, teamID, inviteeID uint64) (*model.TeamInvitation, error)
 	createFn                     func(ctx context.Context, invite *model.TeamInvitation) error
+	getByIDFn                    func(ctx context.Context, id uint64) (*model.TeamInvitation, error)
+	updateStatusFn               func(ctx context.Context, id uint64, status model.InvitationStatus) error
 }
 
 func (m *inviteRepoMock) Create(ctx context.Context, invite *model.TeamInvitation) error {
@@ -131,7 +133,10 @@ func (m *inviteRepoMock) Create(ctx context.Context, invite *model.TeamInvitatio
 }
 
 func (m *inviteRepoMock) GetByID(ctx context.Context, id uint64) (*model.TeamInvitation, error) {
-	panic("unexpected call to GetByID")
+	if m.getByIDFn == nil {
+		panic("unexpected call to GetByID")
+	}
+	return m.getByIDFn(ctx, id)
 }
 
 func (m *inviteRepoMock) GetPendingByTeamAndInvitee(ctx context.Context, teamID, inviteeID uint64) (*model.TeamInvitation, error) {
@@ -146,7 +151,10 @@ func (m *inviteRepoMock) ListPendingByInvitee(ctx context.Context, inviteeID uin
 }
 
 func (m *inviteRepoMock) UpdateStatus(ctx context.Context, id uint64, status model.InvitationStatus) error {
-	panic("unexpected call to UpdateStatus")
+	if m.updateStatusFn == nil {
+		panic("unexpected call to UpdateStatus")
+	}
+	return m.updateStatusFn(ctx, id, status)
 }
 
 func TestTeamServiceAddMemberCreatesPendingInvitationByUsername(t *testing.T) {
@@ -257,4 +265,80 @@ func TestTeamServiceAddMemberRejectsNonOwner(t *testing.T) {
 	_, err := svc.AddMember(context.Background(), 1, 2, AddTeamMemberRequest{UserID: 3})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrTeamOwnerOnly))
+}
+
+func TestTeamServiceAcceptInvitationAddsMemberAndUpdatesStatus(t *testing.T) {
+	const (
+		userID       = uint64(41)
+		invitationID = uint64(51)
+		teamID       = uint64(61)
+	)
+
+	addMemberCalled := false
+	updateStatusCalled := false
+
+	svc := NewTeamService(
+		&teamRepoMock{
+			getByIDFn: func(ctx context.Context, gotTeamID uint64) (*model.Team, error) {
+				assert.Equal(t, teamID, gotTeamID)
+				return &model.Team{ID: gotTeamID}, nil
+			},
+			isMemberFn: func(ctx context.Context, gotTeamID, gotUserID uint64) (bool, error) {
+				assert.Equal(t, teamID, gotTeamID)
+				assert.Equal(t, userID, gotUserID)
+				return false, nil
+			},
+			addMemberFn: func(ctx context.Context, member *model.TeamMember) error {
+				addMemberCalled = true
+				assert.Equal(t, teamID, member.TeamID)
+				assert.Equal(t, userID, member.UserID)
+				assert.Equal(t, model.TeamRoleMember, member.Role)
+				return nil
+			},
+		},
+		&userRepoMock{},
+		&inviteRepoMock{
+			getByIDFn: func(ctx context.Context, id uint64) (*model.TeamInvitation, error) {
+				assert.Equal(t, invitationID, id)
+				return &model.TeamInvitation{
+					ID:        invitationID,
+					TeamID:    teamID,
+					InviteeID: userID,
+					Status:    model.InvitationStatusPending,
+				}, nil
+			},
+			updateStatusFn: func(ctx context.Context, id uint64, status model.InvitationStatus) error {
+				updateStatusCalled = true
+				assert.Equal(t, invitationID, id)
+				assert.Equal(t, model.InvitationStatusAccepted, status)
+				return nil
+			},
+		},
+	)
+
+	err := svc.AcceptInvitation(context.Background(), userID, invitationID)
+	require.NoError(t, err)
+	assert.True(t, addMemberCalled)
+	assert.True(t, updateStatusCalled)
+}
+
+func TestTeamServiceAcceptInvitationRejectsWrongInvitee(t *testing.T) {
+	svc := NewTeamService(
+		&teamRepoMock{},
+		&userRepoMock{},
+		&inviteRepoMock{
+			getByIDFn: func(ctx context.Context, id uint64) (*model.TeamInvitation, error) {
+				return &model.TeamInvitation{
+					ID:        id,
+					TeamID:    2,
+					InviteeID: 99,
+					Status:    model.InvitationStatusPending,
+				}, nil
+			},
+		},
+	)
+
+	err := svc.AcceptInvitation(context.Background(), 1, 7)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, repository.ErrForbidden)
 }
