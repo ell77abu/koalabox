@@ -51,9 +51,16 @@ app.post('/api/v1/auth/register', (req, res) => {
   const { username, password } = req.body;
   if (users.has(username)) return res.status(409).json({ code: 1, message: '用户名已存在' });
   users.set(username, { password, level: 0 });
+  // 初始化用户的任务列表
+  tasks.set(username, []);
+
   return res.status(201).json({ code: 0, message: '注册成功' });
 });
 
+/**
+ * 用户登录
+ * POST /api/v1/auth/login
+ */
 app.post('/api/v1/auth/login', (req, res) => {
   const { username, password } = req.body;
   const user = users.get(username);
@@ -63,13 +70,26 @@ app.post('/api/v1/auth/login', (req, res) => {
   return res.status(200).json({ code: 0, data: { token, username, level: user.level ?? 0 } });
 });
 
+/**
+ * 用户修改密码
+ * PUT /api/v1/auth/password
+ */
 app.put('/api/v1/auth/password', verifyToken, (req, res) => {
   const { username } = req.user;
   const { old_password, new_password } = req.body;
+
+  if (!old_password || !new_password) {
+    return res.status(400).json({ code: 1, message: '旧密码和新密码不能为空' });
+  }
+
   const user = users.get(username);
   if (user.password !== old_password) return res.status(401).json({ code: 1, message: '旧密码错误' });
   user.password = new_password;
-  return res.status(200).json({ code: 0, message: '密码修改成功' });
+
+  return res.status(200).json({
+    code: 0,
+    message: '密码修改成功',
+  });
 });
 
 app.get('/api/v1/auth/session', verifyToken, (req, res) => {
@@ -103,7 +123,6 @@ const createAssignmentNotification = (task, reqUser) => {
 
 app.get('/api/v1/tasks', verifyToken, (req, res) => {
   const { username } = req.user;
-  const teamId = req.query.team_id ? parseInt(req.query.team_id) : null;
   const page = parseInt(req.query.page) || 1;
   const size = parseInt(req.query.size) || 10;
 
@@ -230,5 +249,5 @@ app.post('/api/v1/assignment-requests/:id/accept', verifyToken, (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Lab2 Mock Backend 运行中: http://localhost:${PORT}`);
+  console.log(`Mock backend running on http://localhost:${PORT}`);
 });
