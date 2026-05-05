@@ -28,25 +28,30 @@ ALTER SCHEMA public OWNER TO admin1;
 ```
 创建对应表结构  
 使用`backend/db/schema_postgres.sql`中语句进行创建。
-#### 安装`Go`环境和`Node.js`
+#### 安装`Go`环境
 ```bash
 sudo apt install golang-go
+```
+#### 安装`Node.js`
+```
 sudo apt install nodejs npm
 ```
 ### 后端配置
+#### 修改配置文件
 打开文件`backend/configs/config.yaml`
 修改`database`的`dsn`为本地dsn：
 ```
 "host=127.0.0.1 port=5432 user=admin1 password=0123456 dbname=debugsql sslmode=disable TimeZone=Asia/Shanghai"
 ```
+#### 启动
 在后端`backend`目录下，直接进行控制台指令：
 ```bash
-cd backend
-go run ./cmd/server
+go run main.go
 ```
 看到 `Listening and serving HTTP on 0.0.0.0:8080` 就说明后端已成功启动，不要关闭这个终端窗口。
 
 ### 前端配置
+#### 配置文件修改
 新开一个 WSL 终端，进入前端目录（`cd /frontend`）。
 打开`/.env.production`,确保有
 ```
@@ -59,9 +64,6 @@ npm install   # 安装依赖
 npm run dev   # 启动本地开发服务器
 ```
 完成后，终端会提示有监听地址，浏览器打开该地址即可。
-
-
-
 
 ## 服务器部署
 - 示例服务器参数：Ubuntu Server 24.04 LTS 64bit

@@ -1,7 +1,6 @@
 <template>
   <div class="page-shell">
     <section class="card card-wide">
-      <!-- 页头 -->
       <header class="task-header">
         <div class="task-title">
           <h1>任务管理</h1>
@@ -36,7 +35,6 @@
         </div>
       </header>
 
-      <!-- 任务列表 -->
       <div class="list-section">
         <div class="list-header">
           <h2>任务列表</h2>
@@ -50,7 +48,6 @@
           </p>
         </div>
 
-        <!-- 加载状态 -->
         <div v-if="loading" class="loading-state">
           <p>加载中...</p>
         </div>
@@ -60,13 +57,11 @@
           <p>暂无任务，创建一个新任务开始吧！</p>
         </div>
 
-        <!-- 任务列表 -->
         <div v-else class="task-list">
           <section class="task-group">
             <div class="task-group-header">
               <div>
                 <h3>待办任务</h3>
-                <!-- <p>优先展示待做和进行中的任务</p> -->
               </div>
               <div class="task-group-actions">
                 <!-- 筛选下拉控件 -->
@@ -177,6 +172,9 @@
                 <div class="task-main">
                   <div class="task-title-section">
                     <h3>{{ task.title }}</h3>
+                    <span v-if="task.team_id" class="priority-badge" style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;">
+                      👥 团队任务
+                    </span>
                     <span class="status-badge" :class="`status-${task.status.toLowerCase()}`">
                       {{ statusLabel(task.status) }}
                     </span>
@@ -216,6 +214,7 @@
                     编辑
                   </button>
                   <button
+                    v-if="canEditTaskDetails(task)"
                     class="btn btn-small btn-danger"
                     @click="onDeleteTask(task.id)"
                     :disabled="deletingId === task.id"
@@ -244,7 +243,6 @@
               </div>
               <div class="history-toggle-meta">
                 <span class="task-group-count done">{{ completedTasks.length }}</span>
-                <!-- <span class="history-toggle-text">{{ showCompletedHistory ? '收起' : '展开' }}</span> -->
               </div>
             </button>
 
@@ -270,6 +268,9 @@
                   <div class="task-main">
                     <div class="task-title-section">
                       <h3>{{ task.title }}</h3>
+                      <span v-if="task.team_id" class="priority-badge" style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;">
+                        👥 团队任务
+                      </span>
                       <span class="status-badge" :class="`status-${task.status.toLowerCase()}`">
                         {{ statusLabel(task.status) }}
                       </span>
@@ -302,6 +303,7 @@
                       编辑
                     </button>
                     <button
+                      v-if="canEditTaskDetails(task)"
                       class="btn btn-small btn-danger"
                       @click="onDeleteTask(task.id)"
                       :disabled="deletingId === task.id"
@@ -318,11 +320,8 @@
             </div>
           </section>
         </div>
-
-
       </div>
 
-      <!-- 编辑模态框 -->
       <div v-if="editingTask.id" class="modal-overlay" @click="cancelEdit">
         <div class="modal" @click.stop>
           <h2>编辑任务</h2>
@@ -333,13 +332,19 @@
               placeholder="任务标题"
               required
               class="form-input"
+              :disabled="!canEditTaskDetails(editingTask)"
             />
 
             <textarea
               v-model.trim="editingTask.description"
               placeholder="任务描述"
               class="form-input form-textarea"
+              :disabled="!canEditTaskDetails(editingTask)"
             ></textarea>
+            
+            <p v-if="!canEditTaskDetails(editingTask)" style="color: #ef4444; font-size: 13px; margin: 0; font-weight: 600;">
+              * 作为该团队成员，您仅有权限修改此任务的执行状态。
+            </p>
 
             <select v-model="editingTask.status" class="form-input">
               <option value="TODO">状态：待做</option>
@@ -347,7 +352,7 @@
               <option value="DONE">状态：已完成</option>
             </select>
 
-            <select v-model="editingTask.priority" class="form-input">
+            <select v-model="editingTask.priority" class="form-input" :disabled="!canEditTaskDetails(editingTask)">
               <option value="1">优先级：低</option>
               <option value="2">优先级：中</option>
               <option value="3">优先级：高</option>
@@ -357,6 +362,7 @@
               v-model.trim="editingTask.deadline"
               type="datetime-local"
               class="form-input date-input"
+              :disabled="!canEditTaskDetails(editingTask)"
             />
 
             <div class="modal-actions">
@@ -386,7 +392,35 @@ import {
   deleteTaskApi,
 } from '../services/task';
 
+// 👇 新增：引入团队数据与接口
+import { teamStore } from '../stores/team';
+import { getTeamsApi } from '../services/team';
+
 const router = useRouter();
+
+// === Lab2 权限控制逻辑 ===
+// 进页面时拉取用户的团队列表
+const fetchUserTeams = async () => {
+  try {
+    const res = await getTeamsApi();
+    if (res.data.code === 0) {
+      teamStore.setTeams(res.data.data.list || []);
+    }
+  } catch (err) {
+    console.error('加载团队列表失败', err);
+  }
+};
+
+// 判断当前用户在这个任务中，是否有高级编辑权限（修改标题、删除等）
+const canEditTaskDetails = (task) => {
+  if (!task.team_id) return true; // 个人任务完全放权
+  
+  const team = teamStore.teams.value.find(t => t.team_id === task.team_id);
+  const role = team ? team.role : 'Member'; 
+  
+  return role === 'Owner' || role === 'Admin';
+};
+// === Lab2 逻辑结束 ===
 
 // 新任务表单
 const newTask = reactive({
@@ -404,6 +438,7 @@ const editingTask = reactive({
   status: 'TODO',
   priority: '2',
   deadline: '',
+  team_id: null, // 👇 新增
 });
 
 // 状态管理
@@ -730,6 +765,7 @@ const startEdit = (task) => {
   editingTask.status = task.status;
   editingTask.priority = String(task.priority);
   editingTask.deadline = task.deadline ? formatDateForInput(task.deadline) : '';
+  editingTask.team_id = task.team_id || null; // 👇 新增：记录 team_id
 };
 
 // 取消编辑
@@ -740,6 +776,7 @@ const cancelEdit = () => {
   editingTask.status = 'TODO';
   editingTask.priority = '2';
   editingTask.deadline = '';
+  editingTask.team_id = null; // 👇 新增
 };
 
 
@@ -873,6 +910,12 @@ onBeforeUnmount(() => {
   background: var(--primary);
   color: #fff;
   text-decoration: none;
+  
+  border: none;
+  padding: 0;
+  outline: none;
+  cursor: pointer;
+  
   box-shadow: 0 4px 10px rgba(28, 126, 214, 0.28);
   transition: transform 0.2s, box-shadow 0.2s;
   flex-shrink: 0;
@@ -887,7 +930,7 @@ onBeforeUnmount(() => {
   font-size: 30px;
   font-weight: 600 ;
   line-height: 1;
-  margin-top: -6px; /* 微调视觉中心 */
+  margin-top: -6px;
 }
 
 .sort-control {
