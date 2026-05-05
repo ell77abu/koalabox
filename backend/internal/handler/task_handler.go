@@ -16,10 +16,12 @@ type TaskHandler struct {
 	taskService service.TaskService
 }
 
+// NewTaskHandler 创建任务模块的 HTTP 处理器。
 func NewTaskHandler(taskService service.TaskService) *TaskHandler {
 	return &TaskHandler{taskService: taskService}
 }
 
+// List 查询当前用户可见的个人任务或团队任务列表。
 func (h *TaskHandler) List(c *gin.Context) {
 	userID, ok := getUserIDFromContext(c)
 	if !ok {
@@ -61,6 +63,7 @@ func (h *TaskHandler) List(c *gin.Context) {
 	response.SuccessPage(c, "query success", list, fixedPage, fixedSize, total)
 }
 
+// Create 创建个人任务或团队任务，并在需要时生成任务分配通知。
 func (h *TaskHandler) Create(c *gin.Context) {
 	userID, ok := getUserIDFromContext(c)
 	if !ok {
@@ -94,6 +97,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 	response.Created(c, "create success", task)
 }
 
+// Update 更新任务内容，并根据用户角色限制团队成员可修改的字段范围。
 func (h *TaskHandler) Update(c *gin.Context) {
 	userID, ok := getUserIDFromContext(c)
 	if !ok {
@@ -141,6 +145,7 @@ func (h *TaskHandler) Update(c *gin.Context) {
 	response.Success(c, "update success", task)
 }
 
+// Delete 删除任务，并对普通用户执行任务归属或团队角色校验。
 func (h *TaskHandler) Delete(c *gin.Context) {
 	userID, ok := getUserIDFromContext(c)
 	if !ok {
@@ -178,6 +183,7 @@ func (h *TaskHandler) Delete(c *gin.Context) {
 	response.Success(c, "delete success", nil)
 }
 
+// ListPendingAssignments 返回当前用户待处理的团队任务分配请求。
 func (h *TaskHandler) ListPendingAssignments(c *gin.Context) {
 	userID, ok := getUserIDFromContext(c)
 	if !ok {
@@ -193,6 +199,7 @@ func (h *TaskHandler) ListPendingAssignments(c *gin.Context) {
 	response.Success(c, "query success", list)
 }
 
+// AcceptAssignment 接受一个团队任务分配请求。
 func (h *TaskHandler) AcceptAssignment(c *gin.Context) {
 	userID, ok := getUserIDFromContext(c)
 	if !ok {
@@ -226,6 +233,7 @@ func (h *TaskHandler) AcceptAssignment(c *gin.Context) {
 	response.Success(c, "assignment accepted", nil)
 }
 
+// DeclineAssignment 拒绝一个团队任务分配请求。
 func (h *TaskHandler) DeclineAssignment(c *gin.Context) {
 	userID, ok := getUserIDFromContext(c)
 	if !ok {

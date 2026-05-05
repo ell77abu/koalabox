@@ -37,7 +37,7 @@
               
               <p class="task-description">
                 <template v-if="item.type === 'INVITATION'">
-                  用户 <strong>{{ item.inviter_id }}</strong> 邀请你加入该团队。
+                  用户 <strong>{{ item.inviter_username || item.inviter_id }}</strong> 邀请你加入该团队。
                 </template>
                 <template v-else>
                   用户 <strong>{{ item.requester_username || item.requester_id }}</strong> 将一项团队任务指派给了你。
