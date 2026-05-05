@@ -68,9 +68,12 @@ CREATE TABLE IF NOT EXISTS team_invitations (
   status VARCHAR(10) NOT NULL DEFAULT 'PENDING',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT chk_team_invite_status CHECK (status IN ('PENDING', 'ACCEPTED', 'DECLINED')),
-  CONSTRAINT uk_team_invite_team_user_status UNIQUE (team_id, invitee_id, status)
+  CONSTRAINT chk_team_invite_status CHECK (status IN ('PENDING', 'ACCEPTED', 'DECLINED'))
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_team_invite_team_user_pending
+  ON team_invitations (team_id, invitee_id)
+  WHERE status = 'PENDING';
 
 CREATE INDEX IF NOT EXISTS idx_team_invite_invitee ON team_invitations (invitee_id, status);
 CREATE INDEX IF NOT EXISTS idx_team_invite_team ON team_invitations (team_id);
