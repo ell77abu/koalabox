@@ -14,7 +14,8 @@ import (
 func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery())
+	// 全局使用自定义恢复中间件，记录 panic 堆栈并对外返回统一 500 错误
+	r.Use(gin.Logger(), middleware.RecoverWithLog())
 
 	healthHandler := handler.NewHealthHandler()
 	userRepo := repository.NewUserRepository(db)

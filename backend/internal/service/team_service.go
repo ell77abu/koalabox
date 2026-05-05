@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"task-backend/internal/model"
@@ -85,7 +86,14 @@ func (s *teamService) Create(ctx context.Context, ownerID uint64, req CreateTeam
 }
 
 func (s *teamService) ListMine(ctx context.Context, userID uint64, search string) ([]model.TeamWithRole, error) {
-	return s.teamRepo.ListByUserID(ctx, userID, search)
+	list, err := s.teamRepo.ListByUserID(ctx, userID, search)
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = make([]model.TeamWithRole, 0)
+	}
+	return list, nil
 }
 
 func (s *teamService) Update(ctx context.Context, operatorID, teamID uint64, req UpdateTeamRequest) error {
@@ -136,7 +144,8 @@ func (s *teamService) AddMember(ctx context.Context, operatorID, teamID uint64, 
 		}
 		targetUser, err := s.userRepo.GetByUsername(ctx, username)
 		if err != nil {
-			return nil, err
+			// 包装下游错误，保留原始错误以便上层判断，同时提供更明确的错误上下文
+			return nil, fmt.Errorf("get user by username %s: %w", username, err)
 		}
 		targetUserID = targetUser.ID
 	}

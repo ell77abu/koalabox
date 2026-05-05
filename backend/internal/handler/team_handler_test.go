@@ -1,0 +1,164 @@
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+
+	"task-backend/internal/middleware"
+	"task-backend/internal/model"
+	"task-backend/internal/service"
+	"task-backend/pkg/response"
+)
+
+type mockTeamService struct {
+	addMemberFn func(ctx context.Context, operatorID, teamID uint64, req service.AddTeamMemberRequest) (*model.TeamMember, error)
+}
+
+func (m *mockTeamService) Create(ctx context.Context, ownerID uint64, req service.CreateTeamRequest) (*model.Team, error) {
+	panic("not used")
+}
+
+func (m *mockTeamService) ListMine(ctx context.Context, userID uint64, search string) ([]model.TeamWithRole, error) {
+	panic("not used")
+}
+
+func (m *mockTeamService) Update(ctx context.Context, operatorID, teamID uint64, req service.UpdateTeamRequest) error {
+	panic("not used")
+}
+
+func (m *mockTeamService) AddMember(ctx context.Context, operatorID, teamID uint64, req service.AddTeamMemberRequest) (*model.TeamMember, error) {
+	if m.addMemberFn == nil {
+		panic("addMemberFn not set")
+	}
+	return m.addMemberFn(ctx, operatorID, teamID, req)
+}
+
+func (m *mockTeamService) RemoveMember(ctx context.Context, operatorID, teamID, targetUserID uint64) error {
+	panic("not used")
+}
+
+func (m *mockTeamService) UpdateMemberRole(ctx context.Context, operatorID, teamID, targetUserID uint64, req service.UpdateTeamMemberRoleRequest) (*model.TeamMember, error) {
+	panic("not used")
+}
+
+func (m *mockTeamService) ListMembers(ctx context.Context, operatorID, teamID uint64) ([]model.TeamMemberDetail, error) {
+	panic("not used")
+}
+
+func (m *mockTeamService) ListPendingInvitations(ctx context.Context, userID uint64) ([]model.TeamInvitationDetail, error) {
+	panic("not used")
+}
+
+func (m *mockTeamService) AcceptInvitation(ctx context.Context, userID, invitationID uint64) error {
+	panic("not used")
+}
+
+func (m *mockTeamService) DeclineInvitation(ctx context.Context, userID, invitationID uint64) error {
+	panic("not used")
+}
+
+func TestTeamHandler_AddMember_Success(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	operatorID := uint64(9)
+	teamID := uint64(123)
+	assigneeID := uint64(22)
+
+	mock := &mockTeamService{
+		addMemberFn: func(ctx context.Context, gotOperatorID, gotTeamID uint64, req service.AddTeamMemberRequest) (*model.TeamMember, error) {
+			assert.Equal(t, operatorID, gotOperatorID)
+			assert.Equal(t, teamID, gotTeamID)
+			assert.Equal(t, assigneeID, req.UserID)
+			return &model.TeamMember{TeamID: teamID, UserID: assigneeID, Role: model.TeamRoleMember}, nil
+		},
+	}
+
+	h := NewTeamHandler(mock)
+	r := gin.New()
+	r.POST("/teams/:team_id/members", func(c *gin.Context) {
+		c.Set(middleware.ContextUserIDKey, operatorID)
+		h.AddMember(c)
+	})
+
+	body := `{"user_id": 22}`
+	req := httptest.NewRequest(http.MethodPost, "/teams/123/members", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusCreated, rr.Code)
+
+	var resp response.Common
+	assert.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, 0, resp.Code)
+	assert.Equal(t, "invitation sent", resp.Message)
+
+	data, ok := resp.Data.(map[string]interface{})
+	if assert.True(t, ok) {
+		assert.EqualValues(t, teamID, data["team_id"])
+		assert.EqualValues(t, assigneeID, data["user_id"])
+		assert.Equal(t, string(model.TeamRoleMember), data["role"])
+		assert.Equal(t, string(model.InvitationStatusPending), data["status"])
+	}
+}
+
+func TestTeamHandler_AddMember_InvalidBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mock := &mockTeamService{}
+	h := NewTeamHandler(mock)
+	r := gin.New()
+	r.POST("/teams/:team_id/members", func(c *gin.Context) {
+		c.Set(middleware.ContextUserIDKey, uint64(1))
+		h.AddMember(c)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/teams/1/members", strings.NewReader("not-json"))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+
+	var resp response.Common
+	assert.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, 400, resp.Code)
+	assert.Equal(t, "invalid request body", resp.Message)
+}
+
+func TestTeamHandler_AddMember_Forbidden(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mock := &mockTeamService{
+		addMemberFn: func(ctx context.Context, operatorID, teamID uint64, req service.AddTeamMemberRequest) (*model.TeamMember, error) {
+			return nil, service.ErrTeamOwnerOnly
+		},
+	}
+
+	h := NewTeamHandler(mock)
+	r := gin.New()
+	r.POST("/teams/:team_id/members", func(c *gin.Context) {
+		c.Set(middleware.ContextUserIDKey, uint64(1))
+		h.AddMember(c)
+	})
+
+	body := `{"user_id": 2}`
+	req := httptest.NewRequest(http.MethodPost, "/teams/1/members", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+
+	var resp response.Common
+	assert.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, 403, resp.Code)
+	assert.Equal(t, "forbidden", resp.Message)
+}
