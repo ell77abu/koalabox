@@ -21,10 +21,25 @@ CREATE TABLE IF NOT EXISTS users (
     CHECK (username REGEXP '^[A-Za-z0-9_]{4,20}$')
 ) ENGINE=InnoDB;
 
+-- Teams
+CREATE TABLE IF NOT EXISTS teams (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  name VARCHAR(100) NOT NULL,
+  owner_id BIGINT UNSIGNED NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL,
+  PRIMARY KEY (id),
+  CONSTRAINT fk_teams_owner_id FOREIGN KEY (owner_id) REFERENCES users(id),
+  INDEX idx_teams_owner_id (owner_id)
+) ENGINE=InnoDB;
+
 -- Tasks (owned by user)
 CREATE TABLE IF NOT EXISTS tasks (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id BIGINT UNSIGNED NOT NULL,
+  team_id BIGINT UNSIGNED NULL,
+  assignee_id BIGINT UNSIGNED NULL,
   title VARCHAR(120) NOT NULL,
   description TEXT NULL,
   status ENUM('TODO', 'DOING', 'DONE', 'ERROR') NOT NULL DEFAULT 'TODO',
@@ -35,11 +50,32 @@ CREATE TABLE IF NOT EXISTS tasks (
   deleted_at DATETIME NULL,
   PRIMARY KEY (id),
   CONSTRAINT fk_tasks_user_id FOREIGN KEY (user_id) REFERENCES users(id),
+  CONSTRAINT fk_tasks_team_id FOREIGN KEY (team_id) REFERENCES teams(id),
+  CONSTRAINT fk_tasks_assignee_id FOREIGN KEY (assignee_id) REFERENCES users(id),
   CONSTRAINT chk_tasks_priority CHECK (priority IN (1, 2, 3)),
   INDEX idx_tasks_user_deleted_created (user_id, deleted_at, created_at DESC),
   INDEX idx_tasks_user_status (user_id, status),
   INDEX idx_tasks_user_deadline (user_id, deadline),
-  INDEX idx_tasks_user_priority (user_id, priority)
+  INDEX idx_tasks_user_priority (user_id, priority),
+  INDEX idx_tasks_team_id (team_id),
+  INDEX idx_tasks_assignee_id (assignee_id)
+) ENGINE=InnoDB;
+
+-- Team members
+CREATE TABLE IF NOT EXISTS team_members (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  team_id BIGINT UNSIGNED NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  role ENUM('Owner', 'Admin', 'Member') NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL,
+  PRIMARY KEY (id),
+  CONSTRAINT fk_team_members_team_id FOREIGN KEY (team_id) REFERENCES teams(id),
+  CONSTRAINT fk_team_members_user_id FOREIGN KEY (user_id) REFERENCES users(id),
+  UNIQUE KEY uk_team_members_team_user (team_id, user_id),
+  INDEX idx_team_members_team_id (team_id),
+  INDEX idx_team_members_user_id (user_id)
 ) ENGINE=InnoDB;
 
 -- Optional audit log for task operations (recommended for collaboration traceability)

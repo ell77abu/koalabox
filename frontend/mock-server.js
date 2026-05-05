@@ -6,326 +6,229 @@ const app = express();
 const PORT = 3001;
 const JWT_SECRET = 'lab1_mock_secret_key';
 
-// 内存数据库
-const users = new Map();
-const tasks = new Map(); // { username: [task1, task2, ...] }
+// ================== 内存数据库 ==================
+const users = new Map(); 
+const tasks = []; 
+const teams = new Map(); 
+const teamMembers = [];  
+const invitations = [];  
+const assignmentRequests = []; // 任务分配通知表
+
 let taskIdCounter = 1;
+let teamIdCounter = 1;
+let inviteIdCounter = 1;
+let assignReqIdCounter = 1;
 
 app.use(cors());
 app.use(express.json());
 
-/**
- * 验证 JWT Token 的中间件
- */
+// ================== 全自动 Token 校验 ==================
 const verifyToken = (req, res, next) => {
+  let token = '';
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ code: 1, message: '未授权：缺少 Token' });
+  if (authHeader && authHeader.startsWith('Bearer ')) token = authHeader.substring(7);
+  else if (req.headers.cookie) {
+    const match = req.headers.cookie.match(/token=([^;]+)/);
+    if (match) token = match[1];
   }
+  if (!token) return res.status(401).json({ code: 1, message: '未授权：缺少 Token' });
 
-  const token = authHeader.substring(7);
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded;
+    req.user = jwt.verify(token, JWT_SECRET);
     next();
   } catch (error) {
     return res.status(401).json({ code: 1, message: '未授权：Token 无效或已过期' });
   }
 };
 
-/**
- * 用户注册
- * POST /api/v1/auth/register
- */
+const getUserRole = (teamId, username) => {
+  const member = teamMembers.find(tm => tm.team_id === teamId && tm.user_id === username);
+  return member ? member.role : null;
+};
+
+// ================== 基础认证 ==================
 app.post('/api/v1/auth/register', (req, res) => {
   const { username, password } = req.body;
-
-  // 基础验证
-  if (!username || typeof username !== 'string') {
-    return res.status(400).json({ code: 1, message: 'username required' });
-  }
-
-  if (!password || typeof password !== 'string') {
-    return res.status(400).json({ code: 1, message: 'password required' });
-  }
-
-  // 用户名格式检查
-  if (!/^[a-zA-Z0-9_]{4,20}$/.test(username)) {
-    return res.status(400).json({ code: 1, message: '用户名需为 4~20 位，仅允许字母、数字、下划线' });
-  }
-
-  // 密码长度检查
-  if (password.length < 6) {
-    return res.status(400).json({ code: 1, message: '密码长度不能少于 6 位' });
-  }
-
-  // 检查密码是否包含字母和数字
-  const hasLetter = /[a-zA-Z]/.test(password);
-  const hasNumber = /\d/.test(password);
-  if (!hasLetter || !hasNumber) {
-    return res.status(400).json({ code: 1, message: '密码必须同时包含字母和数字' });
-  }
-
-  // 检查用户是否已存在
-  if (users.has(username)) {
-    return res.status(409).json({ code: 1, message: '用户名已存在' });
-  }
-
-  // 存储用户（实际应该加盐哈希密码，这里 mock 简化处理）
+  if (users.has(username)) return res.status(409).json({ code: 1, message: '用户名已存在' });
   users.set(username, { password, level: 0 });
-  // 初始化用户的任务列表
-  tasks.set(username, []);
-
   return res.status(201).json({ code: 0, message: '注册成功' });
 });
 
-/**
- * 用户登录
- * POST /api/v1/auth/login
- */
 app.post('/api/v1/auth/login', (req, res) => {
   const { username, password } = req.body;
-
-  if (!username || !password) {
-    return res.status(400).json({ code: 1, message: '用户名和密码不能为空' });
-  }
-
   const user = users.get(username);
-  if (!user || user.password !== password) {
-    return res.status(401).json({ code: 1, message: '用户名或密码错误' });
-  }
-
-  // 确保用户有任务列表
-  if (!tasks.has(username)) {
-    tasks.set(username, []);
-  }
-
-  // 生成 JWT Token
+  if (!user || user.password !== password) return res.status(401).json({ code: 1, message: '用户名或密码错误' });
   const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '7d' });
-
-  return res.status(200).json({
-    code: 0,
-    data: {
-      token,
-      username,
-      level: user.level ?? 0,
-    },
-  });
+  res.cookie('token', token, { path: '/' });
+  return res.status(200).json({ code: 0, data: { token, username, level: user.level ?? 0 } });
 });
 
-/**
- * 用户修改密码
- * PUT /api/v1/auth/password
- */
 app.put('/api/v1/auth/password', verifyToken, (req, res) => {
   const { username } = req.user;
   const { old_password, new_password } = req.body;
-
-  if (!old_password || !new_password) {
-    return res.status(400).json({ code: 1, message: '旧密码和新密码不能为空' });
-  }
-
   const user = users.get(username);
-  if (!user) {
-    return res.status(404).json({ code: 1, message: '用户不存在' });
-  }
-
-  if (user.password !== old_password) {
-    return res.status(401).json({ code: 1, message: '旧密码错误' });
-  }
-
-  if (new_password.length < 6) {
-    return res.status(400).json({ code: 1, message: '密码长度不能少于 6 位' });
-  }
-
-  const hasLetter = /[a-zA-Z]/.test(new_password);
-  const hasNumber = /\d/.test(new_password);
-  if (!hasLetter || !hasNumber) {
-    return res.status(400).json({ code: 1, message: '密码必须同时包含字母和数字' });
-  }
-
+  if (user.password !== old_password) return res.status(401).json({ code: 1, message: '旧密码错误' });
   user.password = new_password;
-
-  return res.status(200).json({
-    code: 0,
-    message: '密码修改成功',
-  });
+  return res.status(200).json({ code: 0, message: '密码修改成功' });
 });
 
-/**
- * 获取任务列表
- * GET /api/v1/tasks?page=1&size=10
- */
+app.get('/api/v1/auth/session', verifyToken, (req, res) => {
+  const { username } = req.user;
+  const user = users.get(username);
+  if (!user) return res.status(401).json({ code: 1, message: '用户已注销' });
+  return res.status(200).json({ code: 0, data: { username: username, level: user.level ?? 0 } });
+});
+
+// ================== 任务模块与自动通知 ==================
+// 辅助函数：根据 assignee_id 生成任务指派通知
+const createAssignmentNotification = (task, reqUser) => {
+  const assignee = task.assignee_id;
+  if (!assignee || assignee === reqUser) return; // 不发给自己，没指派人也不发
+
+  // 查重：防止对同一个人重复发同一条任务的 PENDING 提示
+  const exists = assignmentRequests.find(r => r.task_id === task.id && r.assignee_id === assignee && r.status === 'PENDING');
+  if (!exists) {
+    assignmentRequests.push({
+      id: assignReqIdCounter++,
+      task_id: task.id,
+      task_title: task.title,
+      team_id: task.team_id,
+      requester_id: reqUser,
+      assignee_id: assignee,
+      status: 'PENDING', // 虽然前端不做处理，但后台存为 PENDING
+      created_at: new Date().toISOString()
+    });
+  }
+};
+
 app.get('/api/v1/tasks', verifyToken, (req, res) => {
   const { username } = req.user;
+  const teamId = req.query.team_id ? parseInt(req.query.team_id) : null;
   const page = parseInt(req.query.page) || 1;
   const size = parseInt(req.query.size) || 10;
 
-  const userTasks = tasks.get(username) || [];
-  // 简单分页
+  let filteredTasks = teamId 
+    ? tasks.filter(t => t.team_id === teamId)
+    : tasks.filter(t => (t.user_id === username && !t.team_id) || t.assignee_id === username);
+
   const start = (page - 1) * size;
-  const end = start + size;
-  const paginatedTasks = userTasks.slice(start, end);
-
-  return res.status(200).json({
-    code: 0,
-    data: paginatedTasks,
-    total: userTasks.length,
-    page,
-    size,
-  });
+  return res.status(200).json({ code: 0, data: { list: filteredTasks.slice(start, start + size), total: filteredTasks.length }, page, size });
 });
 
-/**
- * 创建任务
- * POST /api/v1/tasks
- */
 app.post('/api/v1/tasks', verifyToken, (req, res) => {
-  const { username } = req.user;
-  const { title, description, status, priority, deadline } = req.body;
-
-  // 验证必填字段
-  if (!title || typeof title !== 'string' || title.trim().length === 0) {
-    return res.status(400).json({ code: 1, message: '任务标题不能为空' });
-  }
-
-  if (title.length > 100) {
-    return res.status(400).json({ code: 1, message: '任务标题不能超过 100 字符' });
-  }
-
-  if (priority && ![1, 2, 3].includes(parseInt(priority))) {
-    return res.status(400).json({ code: 1, message: '优先级值无效' });
-  }
-
-  // 构建新任务
-  const newTask = {
-    id: taskIdCounter++,
-    title: title.trim(),
-    description: description || null,
-    status: status || 'TODO',
-    priority: priority ? parseInt(priority) : 1,
-    deadline: deadline || null,
-    user_id: username, // 标记为当前用户
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+  const newTask = { 
+    id: taskIdCounter++, 
+    ...req.body, 
+    user_id: req.user.username, 
+    created_at: new Date().toISOString() 
   };
-
-  // 添加到用户的任务列表
-  if (!tasks.has(username)) {
-    tasks.set(username, []);
-  }
-  tasks.get(username).push(newTask);
-
-  return res.status(201).json({
-    code: 0,
-    message: '任务创建成功',
-    data: newTask,
-  });
+  tasks.unshift(newTask); 
+  // 发送通知
+  createAssignmentNotification(newTask, req.user.username);
+  return res.status(201).json({ code: 0, message: '任务创建成功', data: newTask });
 });
 
-/**
- * 更新任务
- * PUT /api/v1/tasks/:id
- */
 app.put('/api/v1/tasks/:id', verifyToken, (req, res) => {
-  const { username } = req.user;
-  const taskId = parseInt(req.params.id);
-  const { title, description, status, priority, deadline } = req.body;
-
-  const userTasks = tasks.get(username);
-  if (!userTasks) {
-    return res.status(404).json({ code: 1, message: '任务不存在' });
+  const task = tasks.find(t => t.id === parseInt(req.params.id));
+  if (task) {
+    Object.assign(task, req.body);
+    // 变更指派人时，发送通知
+    createAssignmentNotification(task, req.user.username);
   }
-
-  const task = userTasks.find((t) => t.id === taskId);
-  if (!task) {
-    return res.status(404).json({ code: 1, message: '任务不存在' });
-  }
-
-  // 验证权限（用户只能修改自己的任务）
-  if (task.user_id !== username) {
-    return res.status(403).json({ code: 1, message: '无权修改他人任务' });
-  }
-
-  // 更新字段
-  if (title !== undefined) {
-    if (!title || typeof title !== 'string' || title.trim().length === 0) {
-      return res.status(400).json({ code: 1, message: '任务标题不能为空' });
-    }
-    task.title = title.trim();
-  }
-
-  if (description !== undefined) {
-    task.description = description;
-  }
-
-  if (status !== undefined) {
-    if (!['TODO', 'DOING', 'DONE'].includes(status)) {
-      return res.status(400).json({ code: 1, message: '状态值无效' });
-    }
-    task.status = status;
-  }
-
-  if (priority !== undefined) {
-    if (![1, 2, 3].includes(parseInt(priority))) {
-      return res.status(400).json({ code: 1, message: '优先级值无效' });
-    }
-    task.priority = parseInt(priority);
-  }
-
-  if (deadline !== undefined) {
-    task.deadline = deadline;
-  }
-
-  task.updated_at = new Date().toISOString();
-
-  return res.status(200).json({
-    code: 0,
-    message: '任务更新成功',
-    data: task,
-  });
+  return res.status(200).json({ code: 0, message: '任务更新成功' });
 });
 
-/**
- * 删除任务
- * DELETE /api/v1/tasks/:id
- */
 app.delete('/api/v1/tasks/:id', verifyToken, (req, res) => {
-  const { username } = req.user;
-  const taskId = parseInt(req.params.id);
-
-  const userTasks = tasks.get(username);
-  if (!userTasks) {
-    return res.status(404).json({ code: 1, message: '任务不存在' });
-  }
-
-  const taskIndex = userTasks.findIndex((t) => t.id === taskId);
-  if (taskIndex === -1) {
-    return res.status(404).json({ code: 1, message: '任务不存在' });
-  }
-
-  const task = userTasks[taskIndex];
-
-  // 验证权限（用户只能删除自己的任务）
-  if (task.user_id !== username) {
-    return res.status(403).json({ code: 1, message: '无权删除他人任务' });
-  }
-
-  // 删除任务
-  userTasks.splice(taskIndex, 1);
-
-  return res.status(200).json({
-    code: 0,
-    message: '任务删除成功',
-  });
+  const index = tasks.findIndex(t => t.id === parseInt(req.params.id));
+  if (index > -1) tasks.splice(index, 1);
+  return res.status(200).json({ code: 0, message: '任务删除成功' });
 });
 
+// ================== 团队模块 ==================
+app.get('/api/v1/teams', verifyToken, (req, res) => {
+  const myTeams = teamMembers.filter(tm => tm.user_id === req.user.username).map(tm => ({ ...teams.get(tm.team_id), role: tm.role }));
+  res.status(200).json({ code: 0, data: { list: myTeams } });
+});
 
-// 健康检查
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
+app.post('/api/v1/teams', verifyToken, (req, res) => {
+  const newTeam = { team_id: teamIdCounter++, name: req.body.name, owner_id: req.user.username };
+  teams.set(newTeam.team_id, newTeam);
+  teamMembers.push({ team_id: newTeam.team_id, user_id: req.user.username, role: 'Owner' });
+  res.status(201).json({ code: 0, message: '团队创建成功' });
+});
+
+app.get('/api/v1/teams/:id/members', verifyToken, (req, res) => {
+  const members = teamMembers.filter(tm => tm.team_id === parseInt(req.params.id)).map(tm => ({ user_id: tm.user_id, username: tm.user_id, role: tm.role }));
+  res.status(200).json({ code: 0, data: members });
+});
+
+// ================== 消息通知与邀请功能 ==================
+app.post('/api/v1/teams/:id/invitations', verifyToken, (req, res) => {
+  const teamId = parseInt(req.params.id);
+  const rawTarget = req.body.user_id || req.body.username || '';
+  const targetUser = rawTarget.toString().trim(); 
+  const team = teams.get(teamId);
+
+  if (!targetUser) return res.status(400).json({ code: 1, message: '缺少被邀请用户的信息' });
+  if (!users.has(targetUser)) return res.status(404).json({ code: 1, message: `被邀请的用户 [${targetUser}] 不存在` });
+  if (getUserRole(teamId, targetUser)) return res.status(400).json({ code: 1, message: '该用户已在团队中' });
+
+  const existingInvite = invitations.find(i => i.team_id === teamId && i.invitee_id === targetUser && i.status === 'PENDING');
+  if (existingInvite) return res.status(400).json({ code: 1, message: '已向该用户发送过邀请，等待对方处理' });
+
+  const newInvite = {
+    id: inviteIdCounter++, team_id: teamId, team_name: team ? team.name : 'Unknown Team',
+    inviter_id: req.user.username, invitee_id: targetUser, status: 'PENDING', created_at: new Date().toISOString()
+  };
+  invitations.push(newInvite);
+  res.status(200).json({ code: 0, message: '邀请发送成功', data: newInvite }); 
+});
+
+app.get('/api/v1/invitations', verifyToken, (req, res) => {
+  const myInvites = invitations.filter(inv => inv.invitee_id === req.user.username);
+  res.status(200).json(myInvites); 
+});
+
+app.post('/api/v1/invitations/:id/accept', verifyToken, (req, res) => {
+  const invite = invitations.find(i => i.id === parseInt(req.params.id));
+  if (invite && invite.status === 'PENDING') {
+    if (getUserRole(invite.team_id, req.user.username)) {
+      invite.status = 'ACCEPTED'; 
+      return res.status(400).json({ code: 1, message: '您已加入该团队，请勿重复操作' });
+    }
+    invite.status = 'ACCEPTED';
+    teamMembers.push({ team_id: invite.team_id, user_id: req.user.username, role: 'Member' });
+    res.status(200).json({ code: 0, message: '已加入团队', data: { invitation_id: invite.id, status: 'ACCEPTED' } }); 
+  } else res.status(400).json({ code: 1, message: '邀请无效或已处理' });
+});
+
+app.post('/api/v1/invitations/:id/decline', verifyToken, (req, res) => {
+  const invite = invitations.find(i => i.id === parseInt(req.params.id));
+  if (invite && invite.status === 'PENDING') {
+    invite.status = 'DECLINED';
+    res.status(200).json({ code: 0, message: '已拒绝邀请', data: { invitation_id: invite.id, status: 'DECLINED' } });
+  } else res.status(400).json({ code: 1, message: '邀请无效或已处理' });
+});
+
+// API：查询当前用户的任务指派通知
+app.get('/api/v1/assignment-requests', verifyToken, (req, res) => {
+  const myRequests = assignmentRequests.filter(reqItem => reqItem.assignee_id === req.user.username);
+  res.status(200).json(myRequests); 
+});
+
+// 配合前端的“静默已读”机制，消除小红点
+app.post('/api/v1/assignment-requests/:id/accept', verifyToken, (req, res) => {
+  const reqId = parseInt(req.params.id);
+  const assignmentReq = assignmentRequests.find(r => r.id === reqId);
+
+  if (assignmentReq && assignmentReq.status === 'PENDING') {
+    assignmentReq.status = 'ACCEPTED'; // 将状态标记为已读，App.vue 里的红点雷达就不会再扫到它了
+    res.status(200).json({ code: 0, message: '静默已读成功' });
+  } else {
+    res.status(400).json({ code: 1, message: '请求无效' });
+  }
 });
 
 app.listen(PORT, () => {
-  console.log(`Mock backend running on http://localhost:${PORT}`);
+  console.log(`🚀 Lab2 Mock Backend 运行中: http://localhost:${PORT}`);
 });

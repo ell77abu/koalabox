@@ -41,6 +41,7 @@
 <script setup>
 import { computed } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
+import { logoutApi } from '../services/auth';
 import { authStore } from '../stores/auth';
 
 const router = useRouter();
@@ -51,8 +52,13 @@ const avatarUrl = computed(
 
 const levelLabel = computed(() => (Number(authStore.level.value) === 1 ? '管理员' : '普通用户'));
 
-const onLogout = () => {
+const onLogout = async () => {
   if (confirm('确定要退出登录吗？')) {
+    try {
+      await logoutApi();
+    } catch (error) {
+      // Ignore API logout errors and clear local state anyway.
+    }
     authStore.clearAuth();
     router.replace('/login');
   }

@@ -1,10 +1,14 @@
 <template>
   <div v-if="authStore.isLoggedIn.value" class="app-layout">
+    <!-- 侧边栏保持不变 -->
     <aside class="sidebar">
       <div class="logo">Koalabox</div>
       <nav class="nav-menu">
         <RouterLink to="/tasks" class="nav-item" active-class="active">
           <span class="icon">📋</span> 任务中心
+        </RouterLink>
+        <RouterLink to="/teams" class="nav-item" active-class="active">
+          <span class="icon">👥</span> 我的团队
         </RouterLink>
       </nav>
     </aside>
@@ -12,9 +16,20 @@
     <main class="main-container">
       <div class="content-wrapper">
         <header class="page-topbar">
+          
+          <!-- 消息通知 -->
+          <RouterLink to="/notifications" class="notification-trigger" title="系统消息">
+            <span class="icon" style="margin: 0; font-size: 18px;">🔔</span>
+            <!-- 动态小红点 -->
+            <span v-if="pendingCount > 0" class="red-dot">{{ pendingCount }}</span>
+          </RouterLink>
+
+          <!-- 主题切换 (胶囊按钮) -->
           <button class="theme-toggle" type="button" @click="toggleTheme">
             {{ themeLabel }}
           </button>
+
+          <!--  个人中心 (悬浮胶囊) -->
           <div class="profile-entry">
             <div class="profile-trigger">
               <img :src="avatarUrl" alt="用户头像" class="profile-avatar" />
@@ -31,6 +46,8 @@
             </div>
           </div>
         </header>
+
+        <!-- 路由出口 -->
         <RouterView />
       </div>
     </main>
@@ -41,10 +58,13 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
-import { RouterView, RouterLink } from 'vue-router';
+import { computed, onMounted, ref, watch } from 'vue';
+import { RouterView, RouterLink, useRoute } from 'vue-router';
 import { authStore } from './stores/auth';
+// 引入双重 API
+import { getInvitationsApi, getAssignmentRequestsApi } from './services/team';
 
+const route = useRoute();
 const avatarUrl = computed(
   () => `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(authStore.username.value || 'user')}`
 );
@@ -53,6 +73,9 @@ const levelLabel = computed(() => (Number(authStore.level.value) === 1 ? '管理
 
 const theme = ref('light');
 const themeLabel = computed(() => (theme.value === 'light' ? '深色模式' : '浅色模式'));
+
+// 未处理消息总数量状态
+const pendingCount = ref(0);
 
 const applyTheme = (value) => {
   document.documentElement.setAttribute('data-theme', value);
@@ -64,6 +87,37 @@ const toggleTheme = () => {
   applyTheme(theme.value);
 };
 
+// 雷达：并行拉取团队邀请与任务指派的数量并进行汇总计算
+const checkPendingNotifications = async () => {
+  if (!authStore.isLoggedIn.value) return;
+  
+  try {
+    // 使用 Promise.allSettled 并行请求，防止其中一个接口报错卡死整个流程
+    const [invRes, assignRes] = await Promise.allSettled([
+      getInvitationsApi(),
+      getAssignmentRequestsApi()
+    ]);
+
+    let count = 0;
+
+    // 1. 累加团队邀请里的 PENDING 数量
+    if (invRes.status === 'fulfilled') {
+      const invList = Array.isArray(invRes.value.data) ? invRes.value.data : (invRes.value.data?.data || []);
+      count += invList.filter(inv => inv.status === 'PENDING').length;
+    }
+
+    // 2. 累加任务指派里的 PENDING 数量
+    if (assignRes.status === 'fulfilled') {
+      const assignList = Array.isArray(assignRes.value.data) ? assignRes.value.data : (assignRes.value.data?.data || []);
+      count += assignList.filter(assign => assign.status === 'PENDING').length;
+    }
+
+    pendingCount.value = count;
+  } catch (error) {
+    console.error('获取全局通知角标失败', error);
+  }
+};
+
 onMounted(() => {
   const saved = localStorage.getItem('theme');
   if (saved === 'light' || saved === 'dark') {
@@ -72,10 +126,20 @@ onMounted(() => {
     theme.value = 'dark';
   }
   applyTheme(theme.value);
+  
+  // 页面挂载时检查未读消息
+  checkPendingNotifications();
 });
+
+// 监听路由变化，实现每次导航后自动刷新红点数量
+watch(route, () => {
+  checkPendingNotifications();
+});
+
 </script>
 
 <style scoped>
+/* 样式原封不动，保持你设计的精美 UI */
 .app-layout {
   display: flex;
   height: 100vh;
@@ -132,11 +196,6 @@ onMounted(() => {
   background: var(--sidebar-item-active-bg);
 }
 
-.icon {
-  margin-right: 12px;
-  font-size: 18px;
-}
-
 .main-container {
   flex: 1;
   overflow-y: auto;
@@ -150,52 +209,60 @@ onMounted(() => {
 
 .page-topbar {
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-end; 
   align-items: center;
-  gap: 12px;
+  gap: 16px; 
   margin-bottom: 18px;
 }
 
-.profile-entry {
+.notification-trigger {
   position: relative;
-}
-
-.profile-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border-radius: 999px;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
   background: var(--pill-bg);
   border: 1px solid var(--pill-border);
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
-  transition: transform 0.24s ease, box-shadow 0.24s ease;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05);
+  text-decoration: none;
+  color: var(--pill-text);
+  transition: all 0.24s ease;
   backdrop-filter: blur(10px);
 }
 
-.profile-entry:hover .profile-trigger {
-  transform: translateY(-4px);
-  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.14);
+.notification-trigger:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.12);
 }
 
-.profile-avatar {
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-  display: block;
-  border: 2px solid #dbeafe;
-  background: #fff;
+.red-dot {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background-color: #ef4444;
+  color: white;
+  font-size: 11px;
+  font-weight: bold;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.4);
+  border: 2px solid var(--app-bg); 
 }
 
-.profile-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--pill-text);
+:global([data-theme="dark"]) .red-dot {
+  border-color: #0f172a; 
 }
 
 .theme-toggle {
-  height: 38px;
-  padding: 0 14px;
+  height: 40px; 
+  padding: 0 16px;
   border-radius: 999px;
   border: 1px solid var(--pill-border);
   background: var(--pill-bg);
@@ -207,8 +274,46 @@ onMounted(() => {
 }
 
 .theme-toggle:hover {
-  transform: translateY(-1px);
+  transform: translateY(-2px);
   box-shadow: 0 8px 16px rgba(15, 23, 42, 0.12);
+}
+
+.profile-entry {
+  position: relative;
+}
+
+.profile-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--pill-bg);
+  border: 1px solid var(--pill-border);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05);
+  transition: transform 0.24s ease, box-shadow 0.24s ease;
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+}
+
+.profile-entry:hover .profile-trigger {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.12);
+}
+
+.profile-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: block;
+  border: 2px solid #dbeafe;
+  background: #fff;
+}
+
+.profile-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--pill-text);
 }
 
 .profile-popover {
