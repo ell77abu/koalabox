@@ -180,13 +180,24 @@
             <input v-model.trim="newTask.deadline" type="datetime-local" class="form-input" />
           </div>
 
-          <!-- 下拉单选菜单 -->
           <select v-model="newTask.assignee_id" class="form-input">
             <option :value="null">任务指派：暂不指派 (留入团队池)</option>
             <option v-for="m in members" :key="m.user_id" :value="m.user_id">
               指派给: {{ m.username }} ({{ m.role }})
             </option>
           </select>
+
+          <div class="dependency-section" style="margin-top: 8px;">
+            <label style="font-size: 14px; color: #475569; font-weight: 600; display: block; margin-bottom: 5px;">📌 设置前置依赖 (仅限本团队任务)</label>
+            <div style="display: flex; flex-direction: column; gap: 6px; max-height: 140px; overflow-y: auto; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc;">
+              <label v-for="t in tasks" :key="t.id" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #1e293b; cursor: pointer;">
+                <input type="checkbox" :value="t.id" v-model="newTask.predecessor_ids" style="accent-color: #3b82f6; width: 14px; height: 14px; cursor: pointer;" />
+                {{ t.title }}
+                <span class="status-badge" :class="`status-${t.status.toLowerCase()}`" style="transform: scale(0.8); transform-origin: left;">{{ statusLabel(t.status) }}</span>
+              </label>
+              <span v-if="tasks.length === 0" style="font-size: 13px; color: #94a3b8;">团队暂无其他任务</span>
+            </div>
+          </div>
 
           <div class="modal-actions">
             <button type="button" class="btn btn-outline" @click="showCreateTaskModal = false">取消</button>
@@ -243,13 +254,24 @@
               :disabled="myRole === 'Member'"
             />
             
-            <!-- 下拉单选菜单，且依然受角色权限控制 -->
             <select v-model="editingTask.assignee_id" class="form-input" :disabled="myRole === 'Member'">
               <option :value="null">任务指派：暂不指派 (留入团队池)</option>
               <option v-for="m in members" :key="m.user_id" :value="m.user_id">
                 指派给: {{ m.username }} ({{ m.role }})
               </option>
             </select>
+          </div>
+
+          <div v-if="myRole === 'Owner' || myRole === 'Admin'" class="dependency-section" style="margin-top: 8px;">
+            <label style="font-size: 14px; color: #475569; font-weight: 600; display: block; margin-bottom: 5px;">📌 设置前置依赖 (仅限本团队任务)</label>
+            <div style="display: flex; flex-direction: column; gap: 6px; max-height: 140px; overflow-y: auto; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc;">
+              <label v-for="t in tasks.filter(task => task.id !== editingTask.id)" :key="t.id" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #1e293b; cursor: pointer;">
+                <input type="checkbox" :value="t.id" v-model="editingTask.predecessor_ids" style="accent-color: #3b82f6; width: 14px; height: 14px; cursor: pointer;" />
+                {{ t.title }}
+                <span class="status-badge" :class="`status-${t.status.toLowerCase()}`" style="transform: scale(0.8); transform-origin: left;">{{ statusLabel(t.status) }}</span>
+              </label>
+              <span v-if="tasks.length <= 1" style="font-size: 13px; color: #94a3b8;">团队暂无可依赖的其他任务</span>
+            </div>
           </div>
 
           <div class="modal-actions">
@@ -281,7 +303,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-// 👇 新增引入：当前登录用户信息 (用于判断该任务是否分配给自己)
 import { authStore } from '../stores/auth'; 
 import { teamStore } from '../stores/team';
 import {
@@ -294,8 +315,15 @@ import {
   updateTeamApi,
   dissolveTeamApi
 } from '../services/team';
-// 👇 新增引入：修改和删除任务的 API
-import { createTaskApi, updateTaskApi, deleteTaskApi } from '../services/task';
+// 引入：修改任务、删除任务以及依赖 API
+import { 
+  createTaskApi, 
+  updateTaskApi, 
+  deleteTaskApi,
+  getTaskDependenciesApi, 
+  addTaskDependencyApi, 
+  removeTaskDependencyApi
+} from '../services/task';
 
 const route = useRoute();
 const router = useRouter();
@@ -303,29 +331,26 @@ const teamId = Number(route.params.team_id);
 
 const activeTab = ref('tasks');
 
-// 权限与基础数据
 const currentTeam = computed(() => teamStore.teams.value.find(t => t.team_id === teamId));
 const myRole = computed(() => currentTeam.value ? currentTeam.value.role : 'Member');
 
-// 团队任务状态
 const tasks = ref([]);
 const loadingTasks = ref(false);
 const showCreateTaskModal = ref(false);
 const showEditTaskModal = ref(false);
 const submittingTask = ref(false);
 
-// 将 assignee_ids 数组替换为单数变量 assignee_id: null
-const newTask = ref({ title: '', description: '', priority: '2', deadline: '', assignee_id: null });
-const editingTask = ref({ id: null, title: '', description: '', status: 'TODO', priority: '2', deadline: '', assignee_id: null });
+// Lab3：在表单状态中增加依赖追踪
+const newTask = ref({ title: '', description: '', priority: '2', deadline: '', assignee_id: null, predecessor_ids: [] });
+const editingTask = ref({ id: null, title: '', description: '', status: 'TODO', priority: '2', deadline: '', assignee_id: null, predecessor_ids: [] });
+const editingDependencies = ref([]); // 用于比对 Diff
 
-// 成员管理状态
 const members = ref([]);
 const loadingMembers = ref(false);
 const showAddMemberModal = ref(false);
 const submittingMember = ref(false);
 const newMemberName = ref('');
 
-// 团队管理状态
 const newTeamName = ref('');
 const renamingTeam = ref(false);
 const dissolvingTeam = ref(false);
@@ -340,7 +365,6 @@ const roleBadgeClass = (role) => {
   return 'priority-1';
 };
 
-// 通过成员列表中的 user_id 查找对应的 username
 const getAssigneeName = (assigneeId) => {
   if (!assigneeId) return '';
   const member = members.value.find(m => m.user_id === assigneeId);
@@ -353,15 +377,12 @@ const roleTextClass = (role) => {
   return 'text-blue-600 font-bold';
 };
 
-// 权限判断函数：是否有资格点击“编辑”按钮
-// 精简编辑权限验证：只用验证单一的 assignee_id
 const canEditTask = (task) => {
   if (myRole.value === 'Owner' || myRole.value === 'Admin') return true;
   const currentMember = members.value.find(m => m.username === authStore.username.value);
   return currentMember ? task.assignee_id === currentMember.user_id : false;
 };
 
-// 日期解析转换
 const parseDateInput = (value) => {
   if (!value) return null;
   const match = String(value).trim().replace(/\//g, '-').match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/);
@@ -382,7 +403,6 @@ const formatDateForInput = (dateStr) => {
 };
 
 /* ================== 数据加载 ================== */
-
 const loadTeams = async () => {
   try {
     const res = await getTeamsApi();
@@ -419,23 +439,38 @@ const loadTeamMembers = async () => {
 };
 
 /* ================== 任务操作 ================== */
-// handleCreateTask: 提交时发送单数属性
+// 升级：创建团队任务与关联依赖
 const handleCreateTask = async () => {
-  if (submittingTask.value) return; // 加上咱们之前聊过的防抖锁
+  if (submittingTask.value) return; 
   submittingTask.value = true;
   try {
     const payload = {
-      ...newTask.value,
+      title: newTask.value.title,
+      description: newTask.value.description || null,
       priority: Number(newTask.value.priority),
       deadline: parseDateInput(newTask.value.deadline),
       team_id: teamId, 
       status: 'TODO',
-      assignee_id: newTask.value.assignee_id || null // <- 关键修改
+      assignee_id: newTask.value.assignee_id || null
     };
+    
     const res = await createTaskApi(payload);
+    
     if (res.data.code === 0) {
+      const newTaskId = res.data.data?.id;
+      // 🪄 如果勾选了前置依赖，循环添加
+      if (newTaskId && newTask.value.predecessor_ids.length > 0) {
+        for (const predId of newTask.value.predecessor_ids) {
+          try {
+            await addTaskDependencyApi(newTaskId, predId);
+          } catch (err) {
+            console.error('添加依赖失败', err);
+          }
+        }
+      }
+
       showCreateTaskModal.value = false;
-      newTask.value = { title: '', description: '', priority: '2', deadline: '', assignee_id: null }; // <- 还原也要重置为 null
+      newTask.value = { title: '', description: '', priority: '2', deadline: '', assignee_id: null, predecessor_ids: [] }; 
       await loadTeamTasks();
     } else alert(res.data.message || '发布失败');
   } catch (error) {
@@ -445,9 +480,8 @@ const handleCreateTask = async () => {
   }
 };
 
-// 打开编辑任务面板
-// startEdit: 从后端读出单数属性填入表单
-const startEdit = (task) => {
+// 升级：打开弹窗时异步拉取并回显依赖
+const startEdit = async (task) => {
   editingTask.value = {
     id: task.id,
     title: task.title,
@@ -455,13 +489,27 @@ const startEdit = (task) => {
     status: task.status,
     priority: String(task.priority),
     deadline: task.deadline ? formatDateForInput(task.deadline) : '',
-    assignee_id: task.assignee_id || null // <- 关键修改
+    assignee_id: task.assignee_id || null,
+    predecessor_ids: []
   };
+  editingDependencies.value = [];
+
+  // 拉取已有依赖回显
+  try {
+    const res = await getTaskDependenciesApi(task.id);
+    if (res.data && res.data.code === 0) {
+      const preds = res.data.data.predecessors || [];
+      editingDependencies.value = preds.map(p => p.id);
+      editingTask.value.predecessor_ids = [...editingDependencies.value];
+    }
+  } catch (err) {
+    console.error('获取依赖失败', err);
+  }
+
   showEditTaskModal.value = true;
 };
 
-// 保存更新任务
-// handleUpdateTask: 更新时发送单数属性
+// 升级：编辑任务提交、依赖 Diff 更新与 409 异常拦截
 const handleUpdateTask = async () => {
   if (submittingTask.value) return;
   submittingTask.value = true;
@@ -474,24 +522,42 @@ const handleUpdateTask = async () => {
           status: editingTask.value.status,
           priority: Number(editingTask.value.priority),
           deadline: parseDateInput(editingTask.value.deadline),
-          assignee_id: editingTask.value.assignee_id || null // <- 关键修改
+          assignee_id: editingTask.value.assignee_id || null
         };
 
     const res = await updateTaskApi(editingTask.value.id, payload);
     if (res.data.code === 0) {
+      // 🪄 只有 Owner 和 Admin 有权修改依赖关系
+      if (myRole.value === 'Owner' || myRole.value === 'Admin') {
+        const toAdd = editingTask.value.predecessor_ids.filter(id => !editingDependencies.value.includes(id));
+        const toRemove = editingDependencies.value.filter(id => !editingTask.value.predecessor_ids.includes(id));
+
+        for (const id of toAdd) {
+          try { await addTaskDependencyApi(editingTask.value.id, id); } 
+          catch (err) { if (err.response?.status === 400) alert(`⚠️ 无法添加依赖: ${err.response.data.message}`); }
+        }
+        for (const id of toRemove) {
+          try { await removeTaskDependencyApi(editingTask.value.id, id); } catch (e) { console.error(e); }
+        }
+      }
+
       showEditTaskModal.value = false;
       await loadTeamTasks();
     } else {
       alert(res.data.message || '更新失败');
     }
   } catch (error) {
-    alert(error.response?.data?.message || '更新失败，可能是权限不足');
+    //  拦截 409：任务依赖未满足阻挡更新
+    if (error.response?.status === 409) {
+      alert(`⚠️ 无法保存：${error.response.data.message || '尚有前置任务未完成'}`);
+    } else {
+      alert(error.response?.data?.message || '更新失败，可能是权限不足');
+    }
   } finally {
     submittingTask.value = false;
   }
 };
 
-// 👇 新增：删除团队任务
 const handleDeleteTask = async (taskId) => {
   if (!confirm('确定要删除这个团队任务吗？此操作不可撤销。')) return;
   try {
@@ -548,7 +614,6 @@ const handleDissolveTeam = async () => {
 /* ================== 成员操作 ================== */
 const handleAddMember = async () => {
   if (!newMemberName.value) return;
-  // 新增内存锁：如果已经在提交中了，直接拦截所有后续的无效点击
   if (submittingMember.value) return;
   submittingMember.value = true;
   try {
@@ -596,6 +661,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* 样式保留你的原版所有配置，一点都没改 */
 .task-header { margin-bottom: 1.5rem; padding-bottom: 1rem; }
 .task-title-row { display: flex; align-items: center; gap: 1rem; }
 .back-btn { min-height: 38px; padding: 0 14px; border: 1px solid #c9ddff; border-radius: 999px; background: #f8fbff; color: #1d4ed8; cursor: pointer; font-size: 14px; font-weight: 600; }
@@ -603,18 +669,15 @@ onMounted(() => {
 .title-text h1 { margin: 0; font-size: 1.5rem; color: var(--text); }
 .hint { margin: 4px 0 0; color: var(--muted); font-size: 0.85rem; }
 
-/* 选项卡样式 */
 .tabs-container { display: flex; gap: 1.5rem; border-bottom: 2px solid #e5e7eb; margin-bottom: 1.5rem; padding-left: 10px; }
 .tab-btn { padding: 0.5rem 0.5rem 0.75rem; border: none; background: transparent; color: #64748b; font-size: 1rem; font-weight: 600; cursor: pointer; border-bottom: 3px solid transparent; transition: all 0.2s; margin-bottom: -2px; }
 .tab-btn:hover { color: #3b82f6; }
 .tab-btn.active { color: #2563eb; border-bottom-color: #2563eb; }
 
-/* 列表容器 */
 .list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
 .list-header h2 { font-size: 1.1rem; color: var(--text); font-weight: 700; margin: 0; }
 .empty-state, .loading-state { text-align: center; padding: 3rem; color: #6b7280; background: #f8fafc; border-radius: 0.5rem; border: 1px dashed #cbd5e1; }
 
-/* 卡片 */
 .task-list { display: flex; flex-direction: column; gap: 1rem; }
 .task-item { display: flex; justify-content: space-between; align-items: center; padding: 1.2rem; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; transition: transform 0.2s, box-shadow 0.2s; }
 .task-item:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08); border-color: #cbd5e1; }
@@ -623,7 +686,6 @@ onMounted(() => {
 .task-title-section h3 { margin: 0; font-size: 1.05rem; color: #0f172a; font-weight: 600; }
 .task-description { margin: 0; font-size: 0.85rem; color: #64748b; }
 
-/* 徽章 */
 .priority-badge { padding: 0.2rem 0.5rem; border-radius: 6px; font-size: 0.75rem; font-weight: 600; }
 .priority-1 { background: #e0e7ff; color: #4338ca; }
 .priority-2 { background: #fef08a; color: #92400e; }
@@ -633,7 +695,6 @@ onMounted(() => {
 .status-doing { background: #fef08a; color: #92400e; }
 .status-done { background: #dcfce7; color: #166534; }
 
-/* 按钮 */
 .btn { padding: 0.5rem 1rem; font-size: 0.85rem; font-weight: 600; border-radius: 8px; cursor: pointer; border: none; transition: all 0.2s ease; }
 .btn-small { padding: 0.4rem 0.8rem; font-size: 0.8rem; }
 .btn-primary { background: #3b82f6; color: white; }
@@ -647,43 +708,18 @@ onMounted(() => {
 .btn-danger { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
 .btn-danger:hover { background: #fecaca; }
 
-/* 模态框 */
-/*弹窗 (Modal) 核心控制层*/
 .modal-overlay { 
-  position: fixed; 
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.45); /* 半透明黑色遮罩 */
-  backdrop-filter: blur(3px); /* 背景模糊效果 */
-  display: flex; 
-  justify-content: center; 
-  align-items: center; 
-  z-index: 9999; /* 强制置于页面最顶层 */
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.45); backdrop-filter: blur(3px); 
+  display: flex; justify-content: center; align-items: center; z-index: 9999; 
 }
-
 .modal { 
-  background: #fff; 
-  padding: 2.5rem; 
-  border-radius: 16px; 
-  width: 90%; 
-  max-width: 650px; /* 宽敞的表单尺寸 */
-  max-height: 90vh; /* 防止屏幕较小导致弹窗撑爆，允许内部滚动 */
-  overflow-y: auto;
-  box-shadow: 0 24px 50px rgba(0, 0, 0, 0.2); 
-  animation: modal-pop 0.3s cubic-bezier(0.16, 1, 0.3, 1); /* 增加一点弹出的动效 */
+  background: #fff; padding: 2.5rem; border-radius: 16px; width: 90%; max-width: 650px; 
+  max-height: 90vh; overflow-y: auto; box-shadow: 0 24px 50px rgba(0, 0, 0, 0.2); 
+  animation: modal-pop 0.3s cubic-bezier(0.16, 1, 0.3, 1); 
 }
+.modal h2 { margin-top: 0; color: var(--text); text-align: center; margin-bottom: 1.5rem; font-size: 1.4rem; }
 
-.modal h2 { 
-  margin-top: 0; 
-  color: var(--text); 
-  text-align: center; 
-  margin-bottom: 1.5rem; 
-  font-size: 1.4rem; 
-}
-
-/* ================== 弹窗内部表单 ================== */
 .task-form { display: flex; flex-direction: column; gap: 1.25rem; }
 .form-input { padding: 0.8rem; border: 1px solid #cbd5e1; border-radius: 8px; font-family: inherit; font-size: 0.95rem; }
 .form-input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15); }
@@ -692,7 +728,6 @@ onMounted(() => {
 .modal-actions { display: flex; gap: 1rem; margin-top: 1.5rem; }
 .modal-actions button { flex: 1; padding: 0.8rem; border-radius: 8px; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s ease; }
 
-/* 弹窗弹出的丝滑小动效 */
 @keyframes modal-pop {
   0% { opacity: 0; transform: scale(0.95) translateY(10px); }
   100% { opacity: 1; transform: scale(1) translateY(0); }
@@ -703,7 +738,6 @@ onMounted(() => {
 .text-blue-600 { color: #2563eb; }
 .font-bold { font-weight: bold; }
 
-/* 团队管理 */
 .manage-section { display: flex; flex-direction: column; gap: 1.5rem; }
 .manage-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 1.5rem; }
 .manage-card h3 { margin: 0 0 0.75rem; font-size: 1.05rem; color: #0f172a; }
@@ -713,23 +747,12 @@ onMounted(() => {
 .danger-zone { border-color: #fecaca; background: #fef2f2; }
 .danger-zone h3 { color: #b91c1c; }
 
-/* 多选指派成员 */
-/*---暂时删除
-.assignee-checkbox-list { display: flex; flex-wrap: wrap; gap: 0.5rem; padding: 0.5rem 0; }
-.assignee-checkbox-item { display: flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.75rem; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.85rem; color: #0f172a; cursor: pointer; transition: all 0.15s; user-select: none; }
-.assignee-checkbox-item:hover { border-color: #93c5fd; background: #eff6ff; }
-.assignee-checkbox-item input[type="checkbox"] { width: 16px; height: 16px; accent-color: #3b82f6; cursor: pointer; }
-.assignee-checkbox-item.is-disabled { opacity: 0.5; cursor: not-allowed; }
-*/
-
-/* === 深色模式适配补丁 === */
 :global([data-theme="dark"]) .manage-card { background: #1e293b; border-color: #334155; }
 :global([data-theme="dark"]) .manage-card h3 { color: #f8fafc; }
 :global([data-theme="dark"]) .manage-card p { color: #94a3b8; }
 :global([data-theme="dark"]) .danger-zone { border-color: #7f1d1d; background: #1a0f0f; }
 :global([data-theme="dark"]) .danger-zone h3 { color: #fca5a5; }
 
-/* 深色模式：现有组件 */
 :global([data-theme="dark"]) .task-item { background: #1e293b; border-color: #334155; }
 :global([data-theme="dark"]) .task-title-section h3 { color: #f8fafc; }
 :global([data-theme="dark"]) .task-description { color: #94a3b8; }
