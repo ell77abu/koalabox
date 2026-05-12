@@ -64,6 +64,19 @@
         </label>
       </div>
 
+      <div class="dependency-section" style="margin-top: 10px; position: relative; z-index: 1;">
+        <label style="display: block; margin-bottom: 8px; color: #334155; font-size: 14px; font-weight: 600;">
+          📌 设置前置依赖 (可选)
+        </label>
+        <div class="checkbox-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 160px; overflow-y: auto; padding: 12px; background: rgba(255, 255, 255, 0.6); border: 1px solid #d7e2ef; border-radius: 12px;">
+          <label v-for="t in availablePersonalTasks" :key="t.id" style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #1e293b; cursor: pointer; font-weight: 500;">
+            <input type="checkbox" :value="t.id" v-model="newTask.predecessor_ids" style="accent-color: #3b82f6; width: 16px; height: 16px; cursor: pointer; margin: 0;" />
+            {{ t.title }}
+          </label>
+          <span v-if="availablePersonalTasks.length === 0" style="font-size: 13px; color: #94a3b8; font-weight: 400;">暂无可依赖的其他个人任务</span>
+        </div>
+      </div>
+
       <div class="actions">
         <button class="btn cancel-btn" type="button" @click="router.back()">取消</button>
         <button class="btn" type="submit" :disabled="submitting">
@@ -75,9 +88,11 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { onBeforeUnmount, onMounted, reactive, ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
-import { createTaskApi } from '../services/task';
+// 引入依赖管理相关的 API 与 Store
+import { createTaskApi, addTaskDependencyApi, getTasksApi } from '../services/task';
+import { taskStore } from '../stores/task';
 
 const router = useRouter();
 const submitting = ref(false);
@@ -87,6 +102,12 @@ const newTask = reactive({
   description: '',
   priority: 2,
   deadline: '',
+  predecessor_ids: [] // 新增：用来存储勾选的前置任务 ID
+});
+
+// 计算属性：过滤出所有的个人任务作为依赖选项 (严格隔离团队任务)
+const availablePersonalTasks = computed(() => {
+  return taskStore.tasks.value.filter(t => !t.team_id);
 });
 
 const priorityOpen = ref(false);
@@ -139,8 +160,20 @@ const toBackendDeadline = (value) => {
   return date.toISOString();
 };
 
-onMounted(() => {
+onMounted(async () => {
   document.addEventListener('click', handleOutsideClick);
+  
+  // 👇 确保进入页面时有任务数据供依赖勾选 (若 store 为空则拉取一次)
+  if (taskStore.tasks.value.length === 0) {
+    try {
+      const res = await getTasksApi(1, 1000);
+      if (res.data && res.data.code === 0) {
+        taskStore.setTasks(res.data.data.list || []);
+      }
+    } catch (e) {
+      console.error('预加载任务列表失败', e);
+    }
+  }
 });
 
 onBeforeUnmount(() => {
@@ -152,14 +185,29 @@ const onCreateTask = async () => {
   
   submitting.value = true;
   try {
-    // 转换日期格式为后端需要的字符串（如果后端需要 ISO 格式）
     const payload = {
-      ...newTask,
+      title: newTask.title,
+      description: newTask.description,
+      priority: newTask.priority,
       deadline: toBackendDeadline(newTask.deadline),
       status: 'TODO'
     };
     
-    await createTaskApi(payload);
+    // 1. 先调用 API 创建任务
+    const res = await createTaskApi(payload);
+    
+    // 2. 🪄 串联逻辑：创建成功后，如果有勾选依赖，则依次添加依赖
+    const newTaskId = res.data?.data?.id;
+    if (newTaskId && newTask.predecessor_ids.length > 0) {
+      for (const predId of newTask.predecessor_ids) {
+        try {
+          await addTaskDependencyApi(newTaskId, predId);
+        } catch (err) {
+          console.error(`关联依赖 ID:${predId} 失败`, err);
+        }
+      }
+    }
+
     router.push('/tasks');
   } catch (error) {
     alert(error.response?.data?.message || '创建任务失败');
@@ -170,6 +218,7 @@ const onCreateTask = async () => {
 </script>
 
 <style scoped>
+/* 原有样式保持 100% 不变 */
 .create-task-page {
   position: relative;
   max-width: 900px;

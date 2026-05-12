@@ -365,6 +365,22 @@
               :disabled="!canEditTaskDetails(editingTask)"
             />
 
+            <div v-if="!editingTask.team_id" class="dependency-section">
+              <label class="section-label" style="font-size: 0.9rem; font-weight: 600; color: #475569; display: block; margin-bottom: 0.5rem;">
+                设置前置依赖 (仅限个人任务)
+              </label>
+              <div class="checkbox-list" style="display: flex; flex-direction: column; gap: 0.5rem; max-height: 160px; overflow-y: auto; padding: 0.75rem; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 0.5rem;">
+                <label v-for="t in availablePersonalTasks" :key="t.id" class="checkbox-item" style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #1e293b; cursor: pointer;">
+                  <input type="checkbox" :value="t.id" v-model="editingTask.predecessor_ids" style="accent-color: #3b82f6; width: 16px; height: 16px; cursor: pointer;" />
+                  {{ t.title }}
+                  <span class="status-badge" :class="`status-${t.status.toLowerCase()}`" style="transform: scale(0.85); transform-origin: left;">
+                    {{ statusLabel(t.status) }}
+                  </span>
+                </label>
+                <span v-if="availablePersonalTasks.length === 0" style="font-size: 0.85rem; color: #94a3b8;">暂无可依赖的其他个人任务</span>
+              </div>
+            </div>
+
             <div class="modal-actions">
               <button type="button" class="btn btn-outline" @click="cancelEdit">取消</button>
               <button type="submit" class="btn btn-primary" :disabled="updatingId === editingTask.id">
@@ -390,9 +406,12 @@ import {
   createTaskApi,
   updateTaskApi,
   deleteTaskApi,
+  getTaskDependenciesApi,
+  addTaskDependencyApi,
+  removeTaskDependencyApi
 } from '../services/task';
 
-// 👇 新增：引入团队数据与接口
+// 团队数据与接口
 import { teamStore } from '../stores/team';
 import { getTeamsApi } from '../services/team';
 
@@ -438,7 +457,16 @@ const editingTask = reactive({
   status: 'TODO',
   priority: '2',
   deadline: '',
-  team_id: null, // 👇 新增
+  team_id: null,
+  predecessor_ids: [] // 用于绑定弹窗里的多选框（用于依赖设置）
+});
+
+//  记录打开弹窗时的原始依赖，用于比对增删
+const editingDependencies = ref([]); 
+
+// 过滤出“自己的其他个人任务”作为可选依赖池
+const availablePersonalTasks = computed(() => {
+  return taskStore.tasks.value.filter(t => !t.team_id && t.id !== editingTask.id);
 });
 
 // 状态管理
@@ -652,13 +680,33 @@ const onUpdateTask = async () => {
 
     const response = await updateTaskApi(editingTask.id, payload);
     if (response.data.code === 0) {
+      if (!editingTask.team_id) {
+        // 算出用户勾选了哪些新任务，取消了哪些老任务
+        const toAdd = editingTask.predecessor_ids.filter(id => !editingDependencies.value.includes(id));
+        const toRemove = editingDependencies.value.filter(id => !editingTask.predecessor_ids.includes(id));
+
+        for (const id of toAdd) {
+          try {
+            await addTaskDependencyApi(editingTask.id, id);
+          } catch (err) {
+            if (err.response?.status === 400) alert(`⚠️ 无法添加依赖: ${err.response.data.message}`);
+          }
+        }
+        for (const id of toRemove) {
+          try { await removeTaskDependencyApi(editingTask.id, id); } catch (e) { console.error(e); }
+        }
+      }
       cancelEdit();
       await loadTasks();
     } else {
       updateError.value = response.data.message || '更新失败';
     }
   } catch (error) {
-    updateError.value = error.response?.data?.message || '更新任务失败，请重试';
+    if (error.response?.status === 409) {
+      updateError.value = error.response.data.message || '操作失败：尚有前置任务未完成';
+    } else {
+      updateError.value = error.response?.data?.message || '更新任务失败，请重试';
+    }
   } finally {
     updatingId.value = null;
   }
@@ -730,7 +778,12 @@ const markTaskDone = async (task) => {
       alert(response.data.message || '更新失败');
     }
   } catch (error) {
-    alert(error.response?.data?.message || '完成任务失败，请重试');
+    // 新增：拦截 409 状态码，提示前置任务未完成
+    if (error.response?.status === 409) {
+      alert(`⚠️ 无法完成：${error.response.data.message || '该任务尚有前置任务未完成'}`);
+    } else {
+      alert(error.response?.data?.message || '完成任务失败，请重试');
+    }
   } finally {
     updatingId.value = null;
   }
@@ -758,14 +811,30 @@ const onDeleteTask = async (id) => {
 };
 
 // 开始编辑任务
-const startEdit = (task) => {
+const startEdit = async (task) => {
   editingTask.id = task.id;
   editingTask.title = task.title;
   editingTask.description = task.description || '';
   editingTask.status = task.status;
   editingTask.priority = String(task.priority);
   editingTask.deadline = task.deadline ? formatDateForInput(task.deadline) : '';
-  editingTask.team_id = task.team_id || null; // 👇 新增：记录 team_id
+  editingTask.team_id = task.team_id || null;
+  editingTask.predecessor_ids = []; // 清空重置
+  editingDependencies.value = [];   // 清空重置
+
+  // 如果是个人任务，从后端拉取现有前置依赖用于回显
+  if (!task.team_id) {
+    try {
+      const res = await getTaskDependenciesApi(task.id);
+      if (res.data && res.data.code === 0) {
+        const preds = res.data.data.predecessors || [];
+        editingDependencies.value = preds.map(p => p.id);
+        editingTask.predecessor_ids = [...editingDependencies.value]; // 绑定给多选框
+      }
+    } catch (err) {
+      console.error('获取依赖失败', err);
+    }
+  }
 };
 
 // 取消编辑
@@ -776,7 +845,9 @@ const cancelEdit = () => {
   editingTask.status = 'TODO';
   editingTask.priority = '2';
   editingTask.deadline = '';
-  editingTask.team_id = null; // 👇 新增
+  editingTask.team_id = null;
+  editingTask.predecessor_ids = [];
+  editingDependencies.value = [];
 };
 
 
