@@ -95,27 +95,23 @@ const loadNotifications = async () => {
 
     let invList = [];
     if (invRes.status === 'fulfilled') {
-      invList = Array.isArray(invRes.value.data) ? invRes.value.data : (invRes.value.data?.data || []);
+      // 兼容后端新旧两种格式：[...] 或 { code: 0, data: [...] }
+      const resData = invRes.value.data;
+      invList = Array.isArray(resData) ? resData : (resData?.data || []);
       invList = invList.map(item => ({ ...item, type: 'INVITATION' }));
     }
 
     let assignList = [];
     if (assignRes.status === 'fulfilled') {
-      assignList = Array.isArray(assignRes.value.data) ? assignRes.value.data : (assignRes.value.data?.data || []);
+      const resData = assignRes.value.data;
+      assignList = Array.isArray(resData) ? resData : (resData?.data || []);
       assignList = assignList.map(item => ({ ...item, type: 'ASSIGNMENT' }));
-
-      // 🪄 核心魔法：无感静默已读
+      
+      // 无感静默已读
       const pendingAssignments = assignList.filter(a => a.status === 'PENDING');
       if (pendingAssignments.length > 0) {
-        // 后台偷偷发送已读请求，不阻塞页面渲染
-        Promise.all(pendingAssignments.map(a => acceptAssignmentApi(a.id))).then(() => {
-          console.log(`已自动将 ${pendingAssignments.length} 条任务通知标记为已读`);
-        }).catch(err => console.error('自动标记已读失败', err));
-        
-        // 本地立即变更为已读状态
-        assignList.forEach(a => {
-          if (a.status === 'PENDING') a.status = 'ACCEPTED';
-        });
+        Promise.all(pendingAssignments.map(a => acceptAssignmentApi(a.id))).catch(e => e);
+        assignList.forEach(a => { if (a.status === 'PENDING') a.status = 'ACCEPTED'; });
       }
     }
 

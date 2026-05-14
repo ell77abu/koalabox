@@ -19,13 +19,19 @@ export const updateTeamApi = (teamId, payload) => http.put(`/teams/${teamId}`, p
 export const dissolveTeamApi = (teamId) => http.delete(`/teams/${teamId}`);
 
 // 团队邀请的三个接口
-export const getInvitationsApi = () => http.get('/invitations', { params: { invitee_id: 'me' } });
+export const getInvitationsApi = () => http.get('/teams/invitations/pending');
 
-export const acceptInvitationApi = (invitationId) => http.post(`/invitations/${invitationId}/accept`);
+export const acceptInvitationApi = (invitationId) => http.post(`/teams/invitations/${invitationId}/accept`);
 
-export const declineInvitationApi = (invitationId) => http.post(`/invitations/${invitationId}/decline`);
+export const declineInvitationApi = (invitationId) => http.post(`/teams/invitations/${invitationId}/decline`);
+
 
 // 任务指派：只暴露获取接口，前端不做同意/拒绝操作
 export const getAssignmentRequestsApi = () => http.get('/assignment-requests', { params: { assignee_id: 'me' } });
 // 供 静默已读 API
 export const acceptAssignmentApi = (requestId) => http.post(`/assignment-requests/${requestId}/accept`);
+
+// ==================== Lab3团队生命周期演化 ====================
+export const leaveTeamApi = (teamId) => http.post(`/teams/${teamId}/leave`);
+
+export const transferTeamApi = (teamId, payload) => http.post(`/teams/${teamId}/transfer`, payload);
