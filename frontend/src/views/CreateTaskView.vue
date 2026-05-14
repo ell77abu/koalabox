@@ -64,7 +64,7 @@
         </label>
       </div>
 
-      <div class="dependency-section" style="margin-top: 10px; position: relative; z-index: 1;">
+      <div class="dependency-section" style="margin-top: 10px;">
         <label style="display: block; margin-bottom: 8px; color: #334155; font-size: 14px; font-weight: 600;">
           📌 设置前置依赖 (可选)
         </label>
@@ -365,6 +365,7 @@ const onCreateTask = async () => {
 
 .priority-field {
   position: relative;
+  z-index: 10; /*强制提升层级，确保下拉菜单盖住下方的所有元素 */
 }
 
 .priority-dropdown {
