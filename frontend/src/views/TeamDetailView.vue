@@ -3,12 +3,23 @@
     <section class="card card-wide">
       
       <header class="task-header">
-        <div class="task-title-row">
-          <button class="back-btn" @click="router.back()">← 返回</button>
-          <div class="title-text">
-            <h1>{{ currentTeam ? currentTeam.name : '加载中...' }}</h1>
-            <p class="hint">团队空间 ID: #{{ teamId }} | 你的角色: <span :class="roleTextClass(myRole)">{{ myRole }}</span></p>
+        <div class="task-title-row" style="justify-content: space-between; width: 100%;">
+          <div style="display: flex; align-items: center; gap: 1rem;">
+            <button class="back-btn" @click="router.back()">← 返回</button>
+            <div class="title-text">
+              <h1>{{ currentTeam ? currentTeam.name : '加载中...' }}</h1>
+              <p class="hint">团队空间 ID: #{{ teamId }} | 你的角色: <span :class="roleTextClass(myRole)">{{ myRole }}</span></p>
+            </div>
           </div>
+          
+          <button 
+            v-if="myRole === 'Member' || myRole === 'Admin'" 
+            class="btn btn-outline btn-small" 
+            style="color: #dc2626; border-color: #fca5a5; background: #fef2f2;"
+            @click="handleLeaveTeam"
+          >
+            退出团队
+          </button>
         </div>
       </header>
 
@@ -74,9 +85,7 @@
             </div>
 
             <div class="task-actions" v-if="canEditTask(task)">
-              <button class="btn btn-small btn-edit" @click="startEdit(task)">
-                编辑
-              </button>
+              <button class="btn btn-small btn-edit" @click="startEdit(task)">编辑</button>
               <button 
                 v-if="myRole === 'Owner' || myRole === 'Admin'" 
                 class="btn btn-small btn-danger" 
@@ -85,7 +94,6 @@
                 删除
               </button>
             </div>
-
           </div>
         </div>
       </div>
@@ -115,14 +123,21 @@
               </div>
             </div>
 
-            <div class="task-actions" v-if="myRole === 'Owner' && member.role !== 'Owner'">
+            <div class="task-actions" v-if="canRemoveMember(member) || (myRole === 'Owner' && member.role !== 'Owner')">
+              
               <button 
+                v-if="myRole === 'Owner' && member.role !== 'Owner'"
                 class="btn btn-small btn-outline" 
                 @click="toggleAdminRole(member)"
               >
                 {{ member.role === 'Admin' ? '撤销管理员' : '设为管理员' }}
               </button>
-              <button class="btn btn-small btn-danger" @click="removeMember(member.user_id)">
+              
+              <button 
+                v-if="canRemoveMember(member)"
+                class="btn btn-small btn-danger" 
+                @click="removeMember(member.user_id)"
+              >
                 移除
               </button>
             </div>
@@ -148,6 +163,22 @@
               />
               <button type="submit" class="btn btn-primary" :disabled="renamingTeam">
                 {{ renamingTeam ? '保存中...' : '保存修改' }}
+              </button>
+            </form>
+          </div>
+
+          <div class="manage-card">
+            <h3>转让团队</h3>
+            <p>将团队所有权转让给其他成员。转让后，您将降级为管理员并可以退出团队。</p>
+            <form @submit.prevent="handleTransferTeam" class="rename-form">
+              <select v-model="newOwnerId" required class="form-input">
+                <option :value="null" disabled>请选择要转让的成员...</option>
+                <option v-for="m in members.filter(m => m.role !== 'Owner')" :key="m.user_id" :value="m.user_id">
+                  {{ m.username }} ({{ m.role }})
+                </option>
+              </select>
+              <button type="submit" class="btn btn-primary" :disabled="transferringTeam || !newOwnerId" style="background: #eab308;">
+                {{ transferringTeam ? '转让中...' : '确认转让' }}
               </button>
             </form>
           </div>
@@ -211,22 +242,8 @@
       <div class="modal" @click.stop>
         <h2>编辑任务</h2>
         <form @submit.prevent="handleUpdateTask" class="task-form">
-          
-          <input 
-            v-model.trim="editingTask.title" 
-            type="text" 
-            placeholder="任务标题" 
-            required 
-            class="form-input" 
-            :disabled="myRole === 'Member'"
-          />
-          
-          <textarea 
-            v-model.trim="editingTask.description" 
-            placeholder="任务描述" 
-            class="form-input form-textarea"
-            :disabled="myRole === 'Member'"
-          ></textarea>
+          <input v-model.trim="editingTask.title" type="text" placeholder="任务标题" required class="form-input" :disabled="myRole === 'Member'" />
+          <textarea v-model.trim="editingTask.description" placeholder="任务描述" class="form-input form-textarea" :disabled="myRole === 'Member'"></textarea>
           
           <p v-if="myRole === 'Member'" style="color: #ef4444; font-size: 13px; margin: 0; font-weight: 600;">
             * 您的角色为 Member，仅能修改分派给自己的任务状态。
@@ -238,7 +255,6 @@
               <option value="DOING">状态：进行中</option>
               <option value="DONE">状态：已完成</option>
             </select>
-
             <select v-model="editingTask.priority" class="form-input" :disabled="myRole === 'Member'">
               <option value="1">优先级：低</option>
               <option value="2">优先级：中</option>
@@ -247,13 +263,7 @@
           </div>
 
           <div class="form-row">
-            <input 
-              v-model.trim="editingTask.deadline" 
-              type="datetime-local" 
-              class="form-input date-input"
-              :disabled="myRole === 'Member'"
-            />
-            
+            <input v-model.trim="editingTask.deadline" type="datetime-local" class="form-input date-input" :disabled="myRole === 'Member'" />
             <select v-model="editingTask.assignee_id" class="form-input" :disabled="myRole === 'Member'">
               <option :value="null">任务指派：暂不指派 (留入团队池)</option>
               <option v-for="m in members" :key="m.user_id" :value="m.user_id">
@@ -288,7 +298,6 @@
         <form @submit.prevent="handleAddMember" class="task-form">
           <label style="font-size: 14px; color: #475569; margin-bottom: 5px;">请输入你要邀请的【用户名】：</label>
           <input v-model.trim="newMemberName" type="text" placeholder="例如: Alice123" required class="form-input" />
-
           <div class="modal-actions">
             <button type="button" class="btn btn-outline" @click="showAddMemberModal = false">取消</button>
             <button type="submit" class="btn btn-complete" :disabled="submittingMember">确认邀请</button>
@@ -306,23 +315,14 @@ import { useRoute, useRouter } from 'vue-router';
 import { authStore } from '../stores/auth'; 
 import { teamStore } from '../stores/team';
 import {
-  getTeamsApi,
-  getTeamMembersApi,
-  addTeamMemberApi,
-  deleteTeamMemberApi,
-  updateTeamMemberRoleApi,
-  getTeamTasksApi,
-  updateTeamApi,
-  dissolveTeamApi
+  getTeamsApi, getTeamMembersApi, addTeamMemberApi, deleteTeamMemberApi, updateTeamMemberRoleApi,
+  getTeamTasksApi, updateTeamApi, dissolveTeamApi,
+  // 👇 Lab3 引入：退出与转让 API
+  leaveTeamApi, transferTeamApi
 } from '../services/team';
-// 引入：修改任务、删除任务以及依赖 API
 import { 
-  createTaskApi, 
-  updateTaskApi, 
-  deleteTaskApi,
-  getTaskDependenciesApi, 
-  addTaskDependencyApi, 
-  removeTaskDependencyApi
+  createTaskApi, updateTaskApi, deleteTaskApi,
+  getTaskDependenciesApi, addTaskDependencyApi, removeTaskDependencyApi
 } from '../services/task';
 
 const route = useRoute();
@@ -340,10 +340,9 @@ const showCreateTaskModal = ref(false);
 const showEditTaskModal = ref(false);
 const submittingTask = ref(false);
 
-// Lab3：在表单状态中增加依赖追踪
 const newTask = ref({ title: '', description: '', priority: '2', deadline: '', assignee_id: null, predecessor_ids: [] });
 const editingTask = ref({ id: null, title: '', description: '', status: 'TODO', priority: '2', deadline: '', assignee_id: null, predecessor_ids: [] });
-const editingDependencies = ref([]); // 用于比对 Diff
+const editingDependencies = ref([]); 
 
 const members = ref([]);
 const loadingMembers = ref(false);
@@ -354,6 +353,10 @@ const newMemberName = ref('');
 const newTeamName = ref('');
 const renamingTeam = ref(false);
 const dissolvingTeam = ref(false);
+
+// 👇 Lab3 新增：转让团队状态
+const newOwnerId = ref(null);
+const transferringTeam = ref(false);
 
 /* ================== 工具函数 ================== */
 const statusLabel = (status) => ({ TODO: '待做', DOING: '进行中', DONE: '已完成' }[status] || status);
@@ -383,6 +386,13 @@ const canEditTask = (task) => {
   return currentMember ? task.assignee_id === currentMember.user_id : false;
 };
 
+// 👇 Lab3 新增：细化移除成员权限校验
+const canRemoveMember = (member) => {
+  if (myRole.value === 'Owner' && member.role !== 'Owner') return true;
+  if (myRole.value === 'Admin' && member.role === 'Member') return true;
+  return false;
+};
+
 const parseDateInput = (value) => {
   if (!value) return null;
   const match = String(value).trim().replace(/\//g, '-').match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/);
@@ -406,12 +416,8 @@ const formatDateForInput = (dateStr) => {
 const loadTeams = async () => {
   try {
     const res = await getTeamsApi();
-    if (res.data.code === 0) {
-      teamStore.setTeams(res.data.data.list || []);
-    }
-  } catch (error) {
-    console.error('加载团队列表失败', error);
-  }
+    if (res.data.code === 0) teamStore.setTeams(res.data.data.list || []);
+  } catch (error) { console.error('加载团队列表失败', error); }
 };
 
 const loadTeamTasks = async () => {
@@ -419,11 +425,8 @@ const loadTeamTasks = async () => {
   try {
     const res = await getTeamTasksApi(teamId);
     if (res.data.code === 0) tasks.value = res.data.data.list || [];
-  } catch (error) {
-    console.error('加载任务失败', error);
-  } finally {
-    loadingTasks.value = false;
-  }
+  } catch (error) { console.error('加载任务失败', error); } 
+  finally { loadingTasks.value = false; }
 };
 
 const loadTeamMembers = async () => {
@@ -431,85 +434,54 @@ const loadTeamMembers = async () => {
   try {
     const res = await getTeamMembersApi(teamId);
     if (res.data.code === 0) members.value = res.data.data || [];
-  } catch (error) {
-    console.error('加载成员失败', error);
-  } finally {
-    loadingMembers.value = false;
-  }
+  } catch (error) { console.error('加载成员失败', error); } 
+  finally { loadingMembers.value = false; }
 };
 
-/* ================== 任务操作 ================== */
-// 升级：创建团队任务与关联依赖
+/* ================== 任务操作 (含依赖) ================== */
 const handleCreateTask = async () => {
   if (submittingTask.value) return; 
   submittingTask.value = true;
   try {
     const payload = {
-      title: newTask.value.title,
-      description: newTask.value.description || null,
-      priority: Number(newTask.value.priority),
-      deadline: parseDateInput(newTask.value.deadline),
-      team_id: teamId, 
-      status: 'TODO',
-      assignee_id: newTask.value.assignee_id || null
+      title: newTask.value.title, description: newTask.value.description || null,
+      priority: Number(newTask.value.priority), deadline: parseDateInput(newTask.value.deadline),
+      team_id: teamId, status: 'TODO', assignee_id: newTask.value.assignee_id || null
     };
     
     const res = await createTaskApi(payload);
-    
     if (res.data.code === 0) {
       const newTaskId = res.data.data?.id;
-      // 🪄 如果勾选了前置依赖，循环添加
       if (newTaskId && newTask.value.predecessor_ids.length > 0) {
         for (const predId of newTask.value.predecessor_ids) {
-          try {
-            await addTaskDependencyApi(newTaskId, predId);
-          } catch (err) {
-            console.error('添加依赖失败', err);
-          }
+          try { await addTaskDependencyApi(newTaskId, predId); } catch (err) { console.error('添加依赖失败', err); }
         }
       }
-
       showCreateTaskModal.value = false;
       newTask.value = { title: '', description: '', priority: '2', deadline: '', assignee_id: null, predecessor_ids: [] }; 
       await loadTeamTasks();
     } else alert(res.data.message || '发布失败');
-  } catch (error) {
-    alert(error.response?.data?.message || '请求失败');
-  } finally {
-    submittingTask.value = false;
-  }
+  } catch (error) { alert(error.response?.data?.message || '请求失败'); } 
+  finally { submittingTask.value = false; }
 };
 
-// 升级：打开弹窗时异步拉取并回显依赖
 const startEdit = async (task) => {
   editingTask.value = {
-    id: task.id,
-    title: task.title,
-    description: task.description || '',
-    status: task.status,
-    priority: String(task.priority),
-    deadline: task.deadline ? formatDateForInput(task.deadline) : '',
-    assignee_id: task.assignee_id || null,
-    predecessor_ids: []
+    id: task.id, title: task.title, description: task.description || '',
+    status: task.status, priority: String(task.priority), deadline: task.deadline ? formatDateForInput(task.deadline) : '',
+    assignee_id: task.assignee_id || null, predecessor_ids: []
   };
   editingDependencies.value = [];
-
-  // 拉取已有依赖回显
   try {
     const res = await getTaskDependenciesApi(task.id);
     if (res.data && res.data.code === 0) {
-      const preds = res.data.data.predecessors || [];
-      editingDependencies.value = preds.map(p => p.id);
+      editingDependencies.value = (res.data.data.predecessors || []).map(p => p.id);
       editingTask.value.predecessor_ids = [...editingDependencies.value];
     }
-  } catch (err) {
-    console.error('获取依赖失败', err);
-  }
-
+  } catch (err) { console.error('获取依赖失败', err); }
   showEditTaskModal.value = true;
 };
 
-// 升级：编辑任务提交、依赖 Diff 更新与 409 异常拦截
 const handleUpdateTask = async () => {
   if (submittingTask.value) return;
   submittingTask.value = true;
@@ -517,62 +489,78 @@ const handleUpdateTask = async () => {
     const payload = myRole.value === 'Member'
       ? { status: editingTask.value.status }
       : {
-          title: editingTask.value.title,
-          description: editingTask.value.description || null,
-          status: editingTask.value.status,
-          priority: Number(editingTask.value.priority),
-          deadline: parseDateInput(editingTask.value.deadline),
-          assignee_id: editingTask.value.assignee_id || null
+          title: editingTask.value.title, description: editingTask.value.description || null,
+          status: editingTask.value.status, priority: Number(editingTask.value.priority),
+          deadline: parseDateInput(editingTask.value.deadline), assignee_id: editingTask.value.assignee_id || null
         };
 
     const res = await updateTaskApi(editingTask.value.id, payload);
     if (res.data.code === 0) {
-      // 🪄 只有 Owner 和 Admin 有权修改依赖关系
       if (myRole.value === 'Owner' || myRole.value === 'Admin') {
         const toAdd = editingTask.value.predecessor_ids.filter(id => !editingDependencies.value.includes(id));
         const toRemove = editingDependencies.value.filter(id => !editingTask.value.predecessor_ids.includes(id));
-
         for (const id of toAdd) {
           try { await addTaskDependencyApi(editingTask.value.id, id); } 
           catch (err) { if (err.response?.status === 400) alert(`⚠️ 无法添加依赖: ${err.response.data.message}`); }
         }
-        for (const id of toRemove) {
-          try { await removeTaskDependencyApi(editingTask.value.id, id); } catch (e) { console.error(e); }
-        }
+        for (const id of toRemove) { try { await removeTaskDependencyApi(editingTask.value.id, id); } catch (e) {} }
       }
-
       showEditTaskModal.value = false;
       await loadTeamTasks();
-    } else {
-      alert(res.data.message || '更新失败');
-    }
+    } else alert(res.data.message || '更新失败');
   } catch (error) {
-    //  拦截 409：任务依赖未满足阻挡更新
-    if (error.response?.status === 409) {
-      alert(`⚠️ 无法保存：${error.response.data.message || '尚有前置任务未完成'}`);
-    } else {
-      alert(error.response?.data?.message || '更新失败，可能是权限不足');
-    }
-  } finally {
-    submittingTask.value = false;
-  }
+    if (error.response?.status === 409) alert(`⚠️ 无法保存：${error.response.data.message || '尚有前置任务未完成'}`);
+    else alert(error.response?.data?.message || '更新失败，可能是权限不足');
+  } finally { submittingTask.value = false; }
 };
 
 const handleDeleteTask = async (taskId) => {
   if (!confirm('确定要删除这个团队任务吗？此操作不可撤销。')) return;
   try {
     const res = await deleteTaskApi(taskId);
+    if (res.data.code === 0) await loadTeamTasks();
+    else alert(res.data.message || '删除失败');
+  } catch (error) { alert(error.response?.data?.message || '无权删除'); }
+};
+
+/* ================== 团队管理生命周期操作 ================== */
+
+// 成员主动退出团队
+const handleLeaveTeam = async () => {
+  if (!confirm('确定要退出该团队吗？退出后您负责的未完成任务将退回团队池。')) return;
+  try {
+    const res = await leaveTeamApi(teamId);
     if (res.data.code === 0) {
-      await loadTeamTasks();
-    } else {
-      alert(res.data.message || '删除失败');
-    }
+      alert('已成功退出团队');
+      await loadTeams();
+      router.push('/teams');
+    } else alert(res.data.message || '退出失败');
   } catch (error) {
-    alert(error.response?.data?.message || '无权删除');
+    alert(error.response?.data?.message || '退出请求失败');
   }
 };
 
-/* ================== 团队管理操作 ================== */
+// 转让团队所有权
+const handleTransferTeam = async () => {
+  if (!newOwnerId.value) return;
+  if (!confirm('确定要将团队转让给该成员吗？转让后您将失去 Owner 权限。')) return;
+  transferringTeam.value = true;
+  try {
+    const res = await transferTeamApi(teamId, { new_owner_id: newOwnerId.value });
+    if (res.data.code === 0) {
+      alert('团队转让成功！');
+      newOwnerId.value = null;
+      await loadTeams(); 
+      await loadTeamMembers();
+      activeTab.value = 'tasks'; // 失去 Owner 权限后自动切回任务大厅
+    } else alert(res.data.message || '转让失败');
+  } catch (error) {
+    alert(error.response?.data?.message || '转让请求失败');
+  } finally {
+    transferringTeam.value = false;
+  }
+};
+
 const handleRenameTeam = async () => {
   if (!newTeamName.value) return;
   renamingTeam.value = true;
@@ -582,14 +570,9 @@ const handleRenameTeam = async () => {
       alert('团队名称修改成功');
       newTeamName.value = '';
       await loadTeams();
-    } else {
-      alert(res.data.message || '修改失败');
-    }
-  } catch (error) {
-    alert(error.response?.data?.message || '请求失败');
-  } finally {
-    renamingTeam.value = false;
-  }
+    } else alert(res.data.message || '修改失败');
+  } catch (error) { alert(error.response?.data?.message || '请求失败'); } 
+  finally { renamingTeam.value = false; }
 };
 
 const handleDissolveTeam = async () => {
@@ -601,20 +584,14 @@ const handleDissolveTeam = async () => {
       alert('团队已解散');
       await loadTeams();
       router.push('/teams');
-    } else {
-      alert(res.data.message || '解散失败');
-    }
-  } catch (error) {
-    alert(error.response?.data?.message || '请求失败');
-  } finally {
-    dissolvingTeam.value = false;
-  }
+    } else alert(res.data.message || '解散失败');
+  } catch (error) { alert(error.response?.data?.message || '请求失败'); } 
+  finally { dissolvingTeam.value = false; }
 };
 
-/* ================== 成员操作 ================== */
+/* ================== 成员邀请与移除操作 ================== */
 const handleAddMember = async () => {
-  if (!newMemberName.value) return;
-  if (submittingMember.value) return;
+  if (!newMemberName.value || submittingMember.value) return;
   submittingMember.value = true;
   try {
     const res = await addTeamMemberApi(teamId, { username: newMemberName.value });
@@ -624,22 +601,17 @@ const handleAddMember = async () => {
       await loadTeamMembers();
       alert('邀请已发送！');
     } else alert(res.data.message || '邀请失败');
-  } catch (error) {
-    alert(error.response?.data?.message || '请求失败，可能用户不存在或已在团队中');
-  } finally {
-    submittingMember.value = false;
-  }
+  } catch (error) { alert(error.response?.data?.message || '请求失败，可能用户不存在或已在团队中'); } 
+  finally { submittingMember.value = false; }
 };
 
 const removeMember = async (userId) => {
-  if (!confirm('确定要将该成员移出团队吗？')) return;
+  if (!confirm('确定要将该成员移出团队吗？其未完成的任务将被退回团队池。')) return;
   try {
     const res = await deleteTeamMemberApi(teamId, userId);
     if (res.data.code === 0) await loadTeamMembers();
     else alert(res.data.message || '移除失败');
-  } catch (error) {
-    alert(error.response?.data?.message || '无权操作或请求失败');
-  }
+  } catch (error) { alert(error.response?.data?.message || '无权操作或请求失败'); }
 };
 
 const toggleAdminRole = async (member) => {
@@ -648,9 +620,7 @@ const toggleAdminRole = async (member) => {
     const res = await updateTeamMemberRoleApi(teamId, member.user_id, { role: newRole });
     if (res.data.code === 0) await loadTeamMembers();
     else alert(res.data.message || '权限修改失败');
-  } catch (error) {
-    alert(error.response?.data?.message || '无权操作');
-  }
+  } catch (error) { alert(error.response?.data?.message || '无权操作'); }
 };
 
 onMounted(() => {
@@ -661,7 +631,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* 样式保留你的原版所有配置，一点都没改 */
+/* 样式依然原封不动保留！ */
 .task-header { margin-bottom: 1.5rem; padding-bottom: 1rem; }
 .task-title-row { display: flex; align-items: center; gap: 1rem; }
 .back-btn { min-height: 38px; padding: 0 14px; border: 1px solid #c9ddff; border-radius: 999px; background: #f8fbff; color: #1d4ed8; cursor: pointer; font-size: 14px; font-weight: 600; }
