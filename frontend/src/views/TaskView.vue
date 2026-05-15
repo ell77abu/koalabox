@@ -365,7 +365,7 @@
               :disabled="!canEditTaskDetails(editingTask)"
             />
 
-            <div v-if="!editingTask.team_id" class="dependency-section">
+            <div v-if="isPersonalTask(editingTask)" class="dependency-section">
               <label class="section-label" style="font-size: 0.9rem; font-weight: 600; color: #475569; display: block; margin-bottom: 0.5rem;">
                 设置前置依赖 (仅限个人任务)
               </label>
@@ -417,6 +417,11 @@ import { getTeamsApi } from '../services/team';
 
 const router = useRouter();
 
+const isPersonalTask = (task) => {
+  const teamId = task?.team_id;
+  return teamId === null || teamId === undefined || teamId === '' || teamId === 0 || teamId === '0';
+};
+
 // === Lab2 权限控制逻辑 ===
 // 进页面时拉取用户的团队列表
 const fetchUserTeams = async () => {
@@ -432,9 +437,10 @@ const fetchUserTeams = async () => {
 
 // 判断当前用户在这个任务中，是否有高级编辑权限（修改标题、删除等）
 const canEditTaskDetails = (task) => {
-  if (!task.team_id) return true; // 个人任务完全放权
+  if (isPersonalTask(task)) return true;
   
-  const team = teamStore.teams.value.find(t => t.team_id === task.team_id);
+  const teamId = Number(task.team_id);
+  const team = teamStore.teams.value.find(t => Number(t.team_id) === teamId);
   const role = team ? team.role : 'Member'; 
   
   return role === 'Owner' || role === 'Admin';
@@ -466,7 +472,7 @@ const editingDependencies = ref([]);
 
 // 过滤出“自己的其他个人任务”作为可选依赖池
 const availablePersonalTasks = computed(() => {
-  return taskStore.tasks.value.filter(t => !t.team_id && t.id !== editingTask.id);
+  return taskStore.tasks.value.filter(t => isPersonalTask(t) && t.id !== editingTask.id);
 });
 
 // 状态管理
@@ -552,9 +558,9 @@ const displayedTasks = computed(() => {
 
   // 拦截层：按个人/团队筛选
   if (filterOption.value === 'personal') {
-    list = list.filter(task => !task.team_id); // 没有 team_id 的是个人任务
+    list = list.filter(isPersonalTask); // 没有 team_id 的是个人任务
   } else if (filterOption.value === 'team') {
-    list = list.filter(task => !!task.team_id); // 有 team_id 的是团队任务
+    list = list.filter(task => !isPersonalTask(task)); // 有 team_id 的是团队任务
   }
 
   // 拦截层：按关键词搜索
@@ -680,7 +686,7 @@ const onUpdateTask = async () => {
 
     const response = await updateTaskApi(editingTask.id, payload);
     if (response.data.code === 0) {
-      if (!editingTask.team_id) {
+      if (isPersonalTask(editingTask)) {
         // 算出用户勾选了哪些新任务，取消了哪些老任务
         const toAdd = editingTask.predecessor_ids.filter(id => !editingDependencies.value.includes(id));
         const toRemove = editingDependencies.value.filter(id => !editingTask.predecessor_ids.includes(id));
@@ -818,12 +824,12 @@ const startEdit = async (task) => {
   editingTask.status = task.status;
   editingTask.priority = String(task.priority);
   editingTask.deadline = task.deadline ? formatDateForInput(task.deadline) : '';
-  editingTask.team_id = task.team_id || null;
+  editingTask.team_id = isPersonalTask(task) ? null : task.team_id;
   editingTask.predecessor_ids = []; // 清空重置
   editingDependencies.value = [];   // 清空重置
 
   // 如果是个人任务，从后端拉取现有前置依赖用于回显
-  if (!task.team_id) {
+  if (isPersonalTask(task)) {
     try {
       const res = await getTaskDependenciesApi(task.id);
       if (res.data && res.data.code === 0) {

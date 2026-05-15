@@ -72,6 +72,9 @@
           <label v-for="t in availablePersonalTasks" :key="t.id" style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #1e293b; cursor: pointer; font-weight: 500;">
             <input type="checkbox" :value="t.id" v-model="newTask.predecessor_ids" style="accent-color: #3b82f6; width: 16px; height: 16px; cursor: pointer; margin: 0;" />
             {{ t.title }}
+            <span class="status-badge" :class="taskStatusClass(t)">
+              {{ statusLabel(t.status) }}
+            </span>
           </label>
           <span v-if="availablePersonalTasks.length === 0" style="font-size: 13px; color: #94a3b8; font-weight: 400;">暂无可依赖的其他个人任务</span>
         </div>
@@ -106,9 +109,26 @@ const newTask = reactive({
 });
 
 // 计算属性：过滤出所有的个人任务作为依赖选项 (严格隔离团队任务)
+const isPersonalTask = (task) => {
+  const teamId = task?.team_id;
+  return teamId === null || teamId === undefined || teamId === '' || teamId === 0 || teamId === '0';
+};
+
 const availablePersonalTasks = computed(() => {
-  return taskStore.tasks.value.filter(t => !t.team_id);
+  return taskStore.tasks.value.filter(isPersonalTask);
 });
+
+const statusLabel = (status) => {
+  const map = {
+    TODO: '待做',
+    DOING: '进行中',
+    DONE: '已完成',
+    ERROR: '异常',
+  };
+  return map[status] || status || '未知';
+};
+
+const taskStatusClass = (task) => `status-${String(task?.status || 'TODO').toLowerCase()}`;
 
 const priorityOpen = ref(false);
 const priorityDropdownRef = ref(null);
@@ -515,6 +535,34 @@ const onCreateTask = async () => {
 .priority-menu-fade-leave-to {
   opacity: 0;
   transform: translateY(-4px);
+}
+
+.status-badge {
+  padding: 0.18rem 0.45rem;
+  border-radius: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.status-todo {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.status-doing {
+  background: #fef08a;
+  color: #92400e;
+}
+
+.status-done {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status-error {
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 .actions {
