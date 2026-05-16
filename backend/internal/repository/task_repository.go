@@ -29,6 +29,7 @@ type TaskRepository interface {
 	UpdateByID(ctx context.Context, task *model.Task) error
 	DeleteByIDAndUserID(ctx context.Context, id, userID uint64) error
 	DeleteByID(ctx context.Context, id uint64) error
+	ClearAssigneeForTeamTasks(ctx context.Context, teamID, assigneeID uint64) error
 }
 
 type taskRepository struct {
@@ -491,6 +492,38 @@ func (r *taskRepository) DeleteByID(ctx context.Context, id uint64) error {
 	}
 	if res.RowsAffected == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *taskRepository) ClearAssigneeForTeamTasks(ctx context.Context, teamID, assigneeID uint64) error {
+	res := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("team_id = ?", teamID).
+		Where("assignee_id = ?", assigneeID).
+		Where("deleted_at IS NULL").
+		Where("status IN ?", []model.TaskStatus{model.TaskStatusTODO, model.TaskStatusDOING}).
+		Updates(map[string]interface{}{
+			"assignee_id": nil,
+			"updated_at":  time.Now(),
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	return nil
+}
+
+func (r *taskRepository) SoftDeleteByTeamID(ctx context.Context, teamID uint64) error {
+	res := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("team_id = ?", teamID).
+		Where("deleted_at IS NULL").
+		Updates(map[string]interface{}{
+			"deleted_at": time.Now(),
+			"updated_at": time.Now(),
+		})
+	if res.Error != nil {
+		return res.Error
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
@@ -22,6 +23,7 @@ type TeamRepository interface {
 	IsMember(ctx context.Context, teamID, userID uint64) (bool, error)
 	GetMemberRole(ctx context.Context, teamID, userID uint64) (model.TeamRole, error)
 	ListMembers(ctx context.Context, teamID uint64) ([]model.TeamMemberDetail, error)
+	TransferOwnership(ctx context.Context, teamID, oldOwnerID, newOwnerID uint64) error
 }
 
 type teamRepository struct {
@@ -182,4 +184,87 @@ func (r *teamRepository) ListMembers(ctx context.Context, teamID uint64) ([]mode
 		list = make([]model.TeamMemberDetail, 0)
 	}
 	return list, nil
+}
+
+func (r *teamRepository) TransferOwnership(ctx context.Context, teamID, oldOwnerID, newOwnerID uint64) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&model.Team{}).
+			Where("id = ?", teamID).
+			Where("deleted_at IS NULL").
+			Updates(map[string]interface{}{
+				"owner_id":   newOwnerID,
+				"updated_at": time.Now(),
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+
+		res = tx.Model(&model.TeamMember{}).
+			Where("team_id = ?", teamID).
+			Where("user_id = ?", newOwnerID).
+			Where("deleted_at IS NULL").
+			Updates(map[string]interface{}{
+				"role":       model.TeamRoleOwner,
+				"updated_at": time.Now(),
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+
+		res = tx.Model(&model.TeamMember{}).
+			Where("team_id = ?", teamID).
+			Where("user_id = ?", oldOwnerID).
+			Where("deleted_at IS NULL").
+			Updates(map[string]interface{}{
+				"role":       model.TeamRoleAdmin,
+				"updated_at": time.Now(),
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+
+		return nil
+	})
+}
+
+func (r *teamRepository) Delete(ctx context.Context, teamID uint64) error {
+	res := r.db.WithContext(ctx).
+		Model(&model.Team{}).
+		Where("id = ?", teamID).
+		Where("deleted_at IS NULL").
+		Updates(map[string]interface{}{
+			"deleted_at": time.Now(),
+			"updated_at": time.Now(),
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *teamRepository) SoftDeleteMembersByTeamID(ctx context.Context, teamID uint64) error {
+	res := r.db.WithContext(ctx).
+		Model(&model.TeamMember{}).
+		Where("team_id = ?", teamID).
+		Where("deleted_at IS NULL").
+		Updates(map[string]interface{}{
+			"deleted_at": time.Now(),
+			"updated_at": time.Now(),
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	return nil
 }

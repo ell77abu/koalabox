@@ -11,13 +11,15 @@ import (
 )
 
 var (
-	ErrInvalidTeamName      = errors.New("invalid team name")
-	ErrInvalidTeamRole      = errors.New("invalid team role")
-	ErrInvalidTeamMember    = errors.New("invalid team member")
-	ErrTeamOwnerOnly        = errors.New("only owner can manage team members")
-	ErrCannotRemoveSelf     = errors.New("owner cannot remove self from team")
-	ErrCannotModifyOwner    = errors.New("owner role cannot be changed")
-	ErrInvitationNotPending = errors.New("invitation is not pending")
+	ErrInvalidTeamName       = errors.New("invalid team name")
+	ErrInvalidTeamRole       = errors.New("invalid team role")
+	ErrInvalidTeamMember     = errors.New("invalid team member")
+	ErrTeamOwnerOnly         = errors.New("only owner can manage team members")
+	ErrCannotRemoveSelf      = errors.New("owner cannot remove self from team")
+	ErrCannotModifyOwner     = errors.New("owner role cannot be changed")
+	ErrInvitationNotPending  = errors.New("invitation is not pending")
+	ErrOwnerCannotLeave      = errors.New("owner cannot leave team")
+	ErrInvalidTransferTarget = errors.New("invalid transfer target")
 )
 
 type CreateTeamRequest struct {
@@ -37,6 +39,10 @@ type UpdateTeamRequest struct {
 	Name string `json:"name"`
 }
 
+type TransferTeamRequest struct {
+	NewOwnerID uint64 `json:"new_owner_id"`
+}
+
 type TeamService interface {
 	Create(ctx context.Context, ownerID uint64, req CreateTeamRequest) (*model.Team, error)
 	ListMine(ctx context.Context, userID uint64, search string) ([]model.TeamWithRole, error)
@@ -48,16 +54,23 @@ type TeamService interface {
 	ListPendingInvitations(ctx context.Context, userID uint64) ([]model.TeamInvitationDetail, error)
 	AcceptInvitation(ctx context.Context, userID, invitationID uint64) error
 	DeclineInvitation(ctx context.Context, userID, invitationID uint64) error
+	Leave(ctx context.Context, userID, teamID uint64) error
+	TransferOwnership(ctx context.Context, operatorID, teamID, newOwnerID uint64) error
 }
 
 type teamService struct {
 	teamRepo   repository.TeamRepository
 	userRepo   repository.UserRepository
 	inviteRepo repository.TeamInvitationRepository
+	taskRepo   repository.TaskRepository
 }
 
 func NewTeamService(teamRepo repository.TeamRepository, userRepo repository.UserRepository, inviteRepo repository.TeamInvitationRepository) TeamService {
-	return &teamService{teamRepo: teamRepo, userRepo: userRepo, inviteRepo: inviteRepo}
+	return NewTeamServiceWithTaskRepo(teamRepo, userRepo, inviteRepo, nil)
+}
+
+func NewTeamServiceWithTaskRepo(teamRepo repository.TeamRepository, userRepo repository.UserRepository, inviteRepo repository.TeamInvitationRepository, taskRepo repository.TaskRepository) TeamService {
+	return &teamService{teamRepo: teamRepo, userRepo: userRepo, inviteRepo: inviteRepo, taskRepo: taskRepo}
 }
 
 func (s *teamService) Create(ctx context.Context, ownerID uint64, req CreateTeamRequest) (*model.Team, error) {
@@ -321,6 +334,110 @@ func (s *teamService) DeclineInvitation(ctx context.Context, userID, invitationI
 	}
 
 	return s.inviteRepo.UpdateStatus(ctx, invitationID, model.InvitationStatusDeclined)
+}
+
+func (s *teamService) Leave(ctx context.Context, userID, teamID uint64) error {
+	if _, err := s.teamRepo.GetByID(ctx, teamID); err != nil {
+		return err
+	}
+
+	role, err := s.teamRepo.GetMemberRole(ctx, teamID, userID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return repository.ErrForbidden
+	}
+	if err != nil {
+		return err
+	}
+	if role == model.TeamRoleOwner {
+		return ErrOwnerCannotLeave
+	}
+	if s.taskRepo == nil {
+		return errors.New("task repository is not configured")
+	}
+
+	if err := s.taskRepo.ClearAssigneeForTeamTasks(ctx, teamID, userID); err != nil {
+		return err
+	}
+
+	return s.teamRepo.RemoveMember(ctx, teamID, userID)
+}
+
+func (s *teamService) TransferOwnership(ctx context.Context, operatorID, teamID, newOwnerID uint64) error {
+	if newOwnerID == 0 || newOwnerID == operatorID {
+		return ErrInvalidTransferTarget
+	}
+
+	if _, err := s.teamRepo.GetByID(ctx, teamID); err != nil {
+		return err
+	}
+
+	role, err := s.teamRepo.GetMemberRole(ctx, teamID, operatorID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return repository.ErrForbidden
+	}
+	if err != nil {
+		return err
+	}
+	if role != model.TeamRoleOwner {
+		return ErrTeamOwnerOnly
+	}
+
+	if _, err := s.teamRepo.GetMemberRole(ctx, teamID, newOwnerID); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrInvalidTransferTarget
+		}
+		return err
+	}
+
+	return s.teamRepo.TransferOwnership(ctx, teamID, operatorID, newOwnerID)
+}
+
+func (s *teamService) DeleteTeam(ctx context.Context, operatorID, teamID uint64) error {
+	if _, err := s.teamRepo.GetByID(ctx, teamID); err != nil {
+		return err
+	}
+
+	role, err := s.teamRepo.GetMemberRole(ctx, teamID, operatorID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return repository.ErrForbidden
+	}
+	if err != nil {
+		return err
+	}
+	if role != model.TeamRoleOwner {
+		return ErrTeamOwnerOnly
+	}
+	if s.taskRepo == nil {
+		return errors.New("task repository is not configured")
+	}
+
+	taskDeleter, ok := s.taskRepo.(interface {
+		SoftDeleteByTeamID(ctx context.Context, teamID uint64) error
+	})
+	if !ok {
+		return errors.New("task repository does not support soft delete by team")
+	}
+	if err := taskDeleter.SoftDeleteByTeamID(ctx, teamID); err != nil {
+		return err
+	}
+
+	memberDeleter, ok := s.teamRepo.(interface {
+		SoftDeleteMembersByTeamID(ctx context.Context, teamID uint64) error
+	})
+	if !ok {
+		return errors.New("team repository does not support soft delete members")
+	}
+	if err := memberDeleter.SoftDeleteMembersByTeamID(ctx, teamID); err != nil {
+		return err
+	}
+
+	deleter, ok := s.teamRepo.(interface {
+		Delete(ctx context.Context, teamID uint64) error
+	})
+	if !ok {
+		return errors.New("team repository does not support delete")
+	}
+	return deleter.Delete(ctx, teamID)
 }
 
 func isValidTeamRole(role model.TeamRole) bool {
