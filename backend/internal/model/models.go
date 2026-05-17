@@ -67,6 +67,21 @@ type Task struct {
 	DeletedAt   *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`
 }
 
+// TaskDependency 映射 task_dependencies 表。
+type TaskDependency struct {
+	ID            uint64    `json:"id" db:"id"`
+	PredecessorID uint64    `json:"predecessor_id" db:"predecessor_id"`
+	SuccessorID   uint64    `json:"successor_id" db:"successor_id"`
+	CreatedAt     time.Time `json:"created_at" db:"created_at"`
+}
+
+// TaskDependencyNode 用于依赖关系返回。
+type TaskDependencyNode struct {
+	ID     uint64     `json:"id" db:"id"`
+	Title  string     `json:"title" db:"title"`
+	Status TaskStatus `json:"status" db:"status"`
+}
+
 // Team 映射 teams 表。
 type Team struct {
 	ID        uint64     `json:"id" db:"id"`

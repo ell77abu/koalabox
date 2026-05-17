@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
 	"task-backend/internal/model"
@@ -30,6 +31,12 @@ type TaskRepository interface {
 	DeleteByIDAndUserID(ctx context.Context, id, userID uint64) error
 	DeleteByID(ctx context.Context, id uint64) error
 	ClearAssigneeForTeamTasks(ctx context.Context, teamID, assigneeID uint64) error
+	AddDependency(ctx context.Context, predecessorID, successorID uint64) (*model.TaskDependency, error)
+	RemoveDependency(ctx context.Context, predecessorID, successorID uint64) error
+	ListPredecessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error)
+	ListSuccessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error)
+	CountIncompletePredecessors(ctx context.Context, taskID uint64) (int64, error)
+	HasDependencyPath(ctx context.Context, fromID, toID uint64) (bool, error)
 }
 
 type taskRepository struct {
@@ -511,6 +518,106 @@ func (r *taskRepository) ClearAssigneeForTeamTasks(ctx context.Context, teamID, 
 		return res.Error
 	}
 	return nil
+}
+
+func (r *taskRepository) AddDependency(ctx context.Context, predecessorID, successorID uint64) (*model.TaskDependency, error) {
+	dep := &model.TaskDependency{
+		PredecessorID: predecessorID,
+		SuccessorID:   successorID,
+	}
+	err := r.db.WithContext(ctx).Create(dep).Error
+	if err == nil {
+		return dep, nil
+	}
+
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return nil, ErrConflict
+	}
+	return nil, err
+}
+
+func (r *taskRepository) RemoveDependency(ctx context.Context, predecessorID, successorID uint64) error {
+	res := r.db.WithContext(ctx).
+		Where("predecessor_id = ?", predecessorID).
+		Where("successor_id = ?", successorID).
+		Delete(&model.TaskDependency{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *taskRepository) ListPredecessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error) {
+	var list []model.TaskDependencyNode
+	err := r.db.WithContext(ctx).
+		Table("task_dependencies td").
+		Select("t.id, t.title, t.status").
+		Joins("JOIN tasks t ON t.id = td.predecessor_id AND t.deleted_at IS NULL").
+		Where("td.successor_id = ?", taskID).
+		Order("t.created_at ASC").
+		Find(&list).Error
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = make([]model.TaskDependencyNode, 0)
+	}
+	return list, nil
+}
+
+func (r *taskRepository) ListSuccessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error) {
+	var list []model.TaskDependencyNode
+	err := r.db.WithContext(ctx).
+		Table("task_dependencies td").
+		Select("t.id, t.title, t.status").
+		Joins("JOIN tasks t ON t.id = td.successor_id AND t.deleted_at IS NULL").
+		Where("td.predecessor_id = ?", taskID).
+		Order("t.created_at ASC").
+		Find(&list).Error
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = make([]model.TaskDependencyNode, 0)
+	}
+	return list, nil
+}
+
+func (r *taskRepository) CountIncompletePredecessors(ctx context.Context, taskID uint64) (int64, error) {
+	var total int64
+	err := r.db.WithContext(ctx).
+		Table("task_dependencies td").
+		Joins("JOIN tasks t ON t.id = td.predecessor_id AND t.deleted_at IS NULL").
+		Where("td.successor_id = ?", taskID).
+		Where("t.status <> ?", model.TaskStatusDONE).
+		Count(&total).Error
+	if err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+func (r *taskRepository) HasDependencyPath(ctx context.Context, fromID, toID uint64) (bool, error) {
+	if fromID == 0 || toID == 0 {
+		return false, nil
+	}
+	const query = `
+WITH RECURSIVE dep(successor_id) AS (
+  SELECT successor_id FROM task_dependencies WHERE predecessor_id = ?
+  UNION
+  SELECT td.successor_id FROM task_dependencies td
+  JOIN dep ON td.predecessor_id = dep.successor_id
+)
+SELECT 1 AS found FROM dep WHERE successor_id = ? LIMIT 1`
+	var found int
+	if err := r.db.WithContext(ctx).Raw(query, fromID, toID).Scan(&found).Error; err != nil {
+		return false, err
+	}
+	return found == 1, nil
 }
 
 func (r *taskRepository) SoftDeleteByTeamID(ctx context.Context, teamID uint64) error {

@@ -12,16 +12,19 @@ import (
 )
 
 var (
-	ErrInvalidTaskTitle     = errors.New("invalid task title")
-	ErrInvalidTaskStatus    = errors.New("invalid task status")
-	ErrInvalidTaskPriority  = errors.New("invalid task priority")
-	ErrInvalidTaskDeadline  = errors.New("invalid task deadline format, expected YYYY-MM-DD HH:mm:ss")
-	ErrInvalidTeamID        = errors.New("invalid team id")
-	ErrInvalidAssigneeID    = errors.New("invalid assignee id")
-	ErrAssigneeNotInTeam    = errors.New("assignee is not in team")
-	ErrTeamRoleDenied       = errors.New("insufficient team role permission")
-	ErrMemberStatusOnly     = errors.New("member can only update status for assigned task")
-	ErrAssignmentNotPending = errors.New("assignment request is not pending")
+	ErrInvalidTaskTitle      = errors.New("invalid task title")
+	ErrInvalidTaskStatus     = errors.New("invalid task status")
+	ErrInvalidTaskPriority   = errors.New("invalid task priority")
+	ErrInvalidTaskDeadline   = errors.New("invalid task deadline format, expected YYYY-MM-DD HH:mm:ss")
+	ErrInvalidTeamID         = errors.New("invalid team id")
+	ErrInvalidAssigneeID     = errors.New("invalid assignee id")
+	ErrAssigneeNotInTeam     = errors.New("assignee is not in team")
+	ErrTeamRoleDenied        = errors.New("insufficient team role permission")
+	ErrMemberStatusOnly      = errors.New("member can only update status for assigned task")
+	ErrAssignmentNotPending  = errors.New("assignment request is not pending")
+	ErrInvalidTaskDependency = errors.New("invalid task dependency")
+	ErrDependenciesNotDone   = errors.New("predecessor tasks are not completed")
+	ErrDependencyCycle       = errors.New("dependency cycle detected")
 )
 
 type CreateTaskRequest struct {
@@ -69,6 +72,15 @@ type UpdateTaskRequest struct {
 	AssigneeID  OptionalUint64 `json:"assignee_id"`
 }
 
+type AddTaskDependencyRequest struct {
+	PredecessorID uint64 `json:"predecessor_id"`
+}
+
+type TaskDependencies struct {
+	Predecessors []model.TaskDependencyNode `json:"predecessors"`
+	Successors   []model.TaskDependencyNode `json:"successors"`
+}
+
 type TaskService interface {
 	List(ctx context.Context, userID uint64, userLevel uint8, page, size int, teamID *uint64) ([]model.Task, int64, int, int, error)
 	Create(ctx context.Context, userID uint64, req CreateTaskRequest) (*model.Task, error)
@@ -77,6 +89,9 @@ type TaskService interface {
 	ListPendingAssignments(ctx context.Context, userID uint64) ([]model.TaskAssignmentRequestDetail, error)
 	AcceptAssignment(ctx context.Context, userID, requestID uint64) error
 	DeclineAssignment(ctx context.Context, userID, requestID uint64) error
+	AddDependency(ctx context.Context, userID, taskID, predecessorID uint64) (*model.TaskDependency, error)
+	RemoveDependency(ctx context.Context, userID, taskID, predecessorID uint64) error
+	GetDependencies(ctx context.Context, userID, taskID uint64) (*TaskDependencies, error)
 }
 
 type taskService struct {
@@ -259,6 +274,11 @@ func (s *taskService) Update(ctx context.Context, userID uint64, taskID uint64, 
 	if task.Status == status {
 		return task, nil
 	}
+	if status == model.TaskStatusDONE {
+		if err := s.ensureDependenciesCompleted(ctx, task.ID); err != nil {
+			return nil, err
+		}
+	}
 	task.Status = status
 
 	if err := s.taskRepo.UpdateByID(ctx, task); err != nil {
@@ -315,6 +335,11 @@ func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.T
 		status := model.TaskStatus(*req.Status)
 		if !isValidTaskStatus(status) {
 			return nil, ErrInvalidTaskStatus
+		}
+		if status == model.TaskStatusDONE && task.Status != model.TaskStatusDONE {
+			if err := s.ensureDependenciesCompleted(ctx, task.ID); err != nil {
+				return nil, err
+			}
 		}
 		task.Status = status
 	}
@@ -432,6 +457,146 @@ func (s *taskService) DeclineAssignment(ctx context.Context, userID, requestID u
 	return s.assignRepo.UpdateStatus(ctx, requestID, model.InvitationStatusDeclined)
 }
 
+func (s *taskService) AddDependency(ctx context.Context, userID, taskID, predecessorID uint64) (*model.TaskDependency, error) {
+	if taskID == 0 || predecessorID == 0 || taskID == predecessorID {
+		return nil, ErrInvalidTaskDependency
+	}
+
+	successor, err := s.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	predecessor, err := s.taskRepo.GetByID(ctx, predecessorID)
+	if err != nil {
+		return nil, err
+	}
+
+	if successor.TeamID == nil && predecessor.TeamID == nil {
+		if successor.UserID != userID || predecessor.UserID != userID {
+			return nil, repository.ErrForbidden
+		}
+		hasCycle, err := s.taskRepo.HasDependencyPath(ctx, taskID, predecessorID)
+		if err != nil {
+			return nil, err
+		}
+		if hasCycle {
+			return nil, ErrDependencyCycle
+		}
+		return s.taskRepo.AddDependency(ctx, predecessorID, taskID)
+	}
+
+	if successor.TeamID == nil || predecessor.TeamID == nil {
+		return nil, ErrInvalidTaskDependency
+	}
+	if *successor.TeamID != *predecessor.TeamID {
+		return nil, ErrInvalidTaskDependency
+	}
+
+	role, err := s.teamRepo.GetMemberRole(ctx, *successor.TeamID, userID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, repository.ErrForbidden
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !canManageTeamTasks(role) {
+		return nil, ErrTeamRoleDenied
+	}
+
+	hasCycle, err := s.taskRepo.HasDependencyPath(ctx, taskID, predecessorID)
+	if err != nil {
+		return nil, err
+	}
+	if hasCycle {
+		return nil, ErrDependencyCycle
+	}
+
+	return s.taskRepo.AddDependency(ctx, predecessorID, taskID)
+}
+
+func (s *taskService) RemoveDependency(ctx context.Context, userID, taskID, predecessorID uint64) error {
+	if taskID == 0 || predecessorID == 0 {
+		return ErrInvalidTaskDependency
+	}
+
+	successor, err := s.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		return err
+	}
+
+	predecessor, err := s.taskRepo.GetByID(ctx, predecessorID)
+	if err != nil {
+		return err
+	}
+
+	if successor.TeamID == nil && predecessor.TeamID == nil {
+		if successor.UserID != userID || predecessor.UserID != userID {
+			return repository.ErrForbidden
+		}
+		return s.taskRepo.RemoveDependency(ctx, predecessorID, taskID)
+	}
+
+	if successor.TeamID == nil || predecessor.TeamID == nil {
+		return ErrInvalidTaskDependency
+	}
+	if *successor.TeamID != *predecessor.TeamID {
+		return ErrInvalidTaskDependency
+	}
+
+	role, err := s.teamRepo.GetMemberRole(ctx, *successor.TeamID, userID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return repository.ErrForbidden
+	}
+	if err != nil {
+		return err
+	}
+	if !canManageTeamTasks(role) {
+		return ErrTeamRoleDenied
+	}
+
+	return s.taskRepo.RemoveDependency(ctx, predecessorID, taskID)
+}
+
+func (s *taskService) GetDependencies(ctx context.Context, userID, taskID uint64) (*TaskDependencies, error) {
+	if taskID == 0 {
+		return nil, ErrInvalidTaskDependency
+	}
+
+	task, err := s.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	if task.TeamID == nil {
+		if task.UserID != userID {
+			return nil, repository.ErrForbidden
+		}
+	} else {
+		isMember, err := s.teamRepo.IsMember(ctx, *task.TeamID, userID)
+		if err != nil {
+			return nil, err
+		}
+		if !isMember {
+			return nil, repository.ErrForbidden
+		}
+	}
+
+	predecessors, err := s.taskRepo.ListPredecessors(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	successors, err := s.taskRepo.ListSuccessors(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &TaskDependencies{
+		Predecessors: predecessors,
+		Successors:   successors,
+	}, nil
+}
+
 func (s *taskService) createAssignmentNotification(ctx context.Context, task *model.Task, requesterID uint64, originalAssigneeID, originalTeamID *uint64) error {
 	if task.TeamID == nil || task.AssigneeID == nil {
 		return nil
@@ -466,6 +631,17 @@ func (s *taskService) createAssignmentNotification(ctx context.Context, task *mo
 			return nil
 		}
 		return err
+	}
+	return nil
+}
+
+func (s *taskService) ensureDependenciesCompleted(ctx context.Context, taskID uint64) error {
+	count, err := s.taskRepo.CountIncompletePredecessors(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return ErrDependenciesNotDone
 	}
 	return nil
 }
