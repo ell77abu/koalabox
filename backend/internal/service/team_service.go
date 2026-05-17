@@ -223,6 +223,13 @@ func (s *teamService) RemoveMember(ctx context.Context, operatorID, teamID, targ
 	if targetRole == model.TeamRoleOwner {
 		return ErrCannotModifyOwner
 	}
+	if s.taskRepo == nil {
+		return errors.New("task repository is not configured")
+	}
+
+	if err := s.taskRepo.ClearAssigneeForTeamTasks(ctx, teamID, targetUserID); err != nil {
+		return err
+	}
 
 	return s.teamRepo.RemoveMember(ctx, teamID, targetUserID)
 }

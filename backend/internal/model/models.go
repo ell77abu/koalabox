@@ -82,6 +82,12 @@ type TaskDependencyNode struct {
 	Status TaskStatus `json:"status" db:"status"`
 }
 
+// TaskDependencyLink 用于依赖图返回，source 指向 target。
+type TaskDependencyLink struct {
+	Source uint64 `json:"source" db:"source"`
+	Target uint64 `json:"target" db:"target"`
+}
+
 // Team 映射 teams 表。
 type Team struct {
 	ID        uint64     `json:"id" db:"id"`

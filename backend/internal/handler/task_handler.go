@@ -2,7 +2,9 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -121,6 +123,13 @@ func (h *TaskHandler) Update(c *gin.Context) {
 	}
 
 	task, err := h.taskService.Update(c.Request.Context(), userID, id, req)
+	var unresolvedErr *service.UnresolvedDependenciesError
+	if errors.As(err, &unresolvedErr) {
+		response.JSON(c, 409, 409, fmt.Sprintf("操作失败：尚有前置任务（ID: %s）未完成", joinUint64IDs(unresolvedErr.IDs)), gin.H{
+			"unresolved_predecessor_ids": unresolvedErr.IDs,
+		})
+		return
+	}
 	if isTaskValidationError(err) {
 		response.BadRequest(c, err.Error())
 		return
@@ -295,6 +304,10 @@ func (h *TaskHandler) AddDependency(c *gin.Context) {
 		response.BadRequest(c, "无法添加依赖：检测到依赖循环")
 		return
 	}
+	if errors.Is(err, service.ErrCrossTaskDependency) {
+		response.Forbidden(c, "跨团队或跨用户任务禁止建立依赖关系")
+		return
+	}
 	if isTaskValidationError(err) {
 		response.BadRequest(c, err.Error())
 		return
@@ -339,6 +352,10 @@ func (h *TaskHandler) RemoveDependency(c *gin.Context) {
 	}
 
 	err = h.taskService.RemoveDependency(c.Request.Context(), userID, taskID, predecessorID)
+	if errors.Is(err, service.ErrCrossTaskDependency) {
+		response.Forbidden(c, "跨团队或跨用户任务禁止建立依赖关系")
+		return
+	}
 	if isTaskValidationError(err) {
 		response.BadRequest(c, err.Error())
 		return
@@ -393,6 +410,40 @@ func (h *TaskHandler) GetDependencies(c *gin.Context) {
 	response.Success(c, "query success", data)
 }
 
+// GetDependencyGraph 查询任务依赖图的所有祖先、后代节点与依赖边。
+func (h *TaskHandler) GetDependencyGraph(c *gin.Context) {
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
+
+	taskID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid task id")
+		return
+	}
+
+	data, err := h.taskService.GetDependencyGraph(c.Request.Context(), userID, taskID)
+	if isTaskValidationError(err) {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if errors.Is(err, repository.ErrForbidden) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
+	if errors.Is(err, repository.ErrNotFound) {
+		response.NotFound(c, "task not found")
+		return
+	}
+	if err != nil {
+		response.InternalError(c, "query dependency graph failed")
+		return
+	}
+
+	response.Success(c, "query success", data)
+}
+
 func getUserIDFromContext(c *gin.Context) (uint64, bool) {
 	v, exists := c.Get(middleware.ContextUserIDKey)
 	if !exists {
@@ -436,4 +487,12 @@ func isTaskValidationError(err error) bool {
 func isTaskForbiddenError(err error) bool {
 	return errors.Is(err, service.ErrTeamRoleDenied) ||
 		errors.Is(err, service.ErrMemberStatusOnly)
+}
+
+func joinUint64IDs(ids []uint64) string {
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		parts = append(parts, strconv.FormatUint(id, 10))
+	}
+	return strings.Join(parts, ", ")
 }

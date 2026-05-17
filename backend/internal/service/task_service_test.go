@@ -12,10 +12,11 @@ import (
 )
 
 type taskRepoMock struct {
-	listByTeamIDFn                func(ctx context.Context, teamID uint64, page, size int) ([]model.Task, int64, error)
-	listPersonalAndAssignedTeamFn func(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error)
-	getByIDFn                     func(ctx context.Context, id uint64) (*model.Task, error)
-	updateByIDFn                  func(ctx context.Context, task *model.Task) error
+	listByTeamIDFn                 func(ctx context.Context, teamID uint64, page, size int) ([]model.Task, int64, error)
+	listPersonalAndAssignedTeamFn  func(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error)
+	getByIDFn                      func(ctx context.Context, id uint64) (*model.Task, error)
+	updateByIDFn                   func(ctx context.Context, task *model.Task) error
+	listIncompletePredecessorIDsFn func(ctx context.Context, taskID uint64) ([]uint64, error)
 }
 
 func (m *taskRepoMock) Create(ctx context.Context, task *model.Task) error {
@@ -75,6 +76,36 @@ func (m *taskRepoMock) ListByUserIDWithSearch(ctx context.Context, userID uint64
 func (m *taskRepoMock) ListAllWithSearch(ctx context.Context, page, size int, search, orderBy string) ([]model.Task, int64, error) {
 	panic("unexpected call to ListAllWithSearch")
 }
+func (m *taskRepoMock) ClearAssigneeForTeamTasks(ctx context.Context, teamID, assigneeID uint64) error {
+	panic("unexpected call to ClearAssigneeForTeamTasks")
+}
+func (m *taskRepoMock) AddDependency(ctx context.Context, predecessorID, successorID uint64) (*model.TaskDependency, error) {
+	panic("unexpected call to AddDependency")
+}
+func (m *taskRepoMock) RemoveDependency(ctx context.Context, predecessorID, successorID uint64) error {
+	panic("unexpected call to RemoveDependency")
+}
+func (m *taskRepoMock) ListPredecessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error) {
+	panic("unexpected call to ListPredecessors")
+}
+func (m *taskRepoMock) ListSuccessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error) {
+	panic("unexpected call to ListSuccessors")
+}
+func (m *taskRepoMock) CountIncompletePredecessors(ctx context.Context, taskID uint64) (int64, error) {
+	panic("unexpected call to CountIncompletePredecessors")
+}
+func (m *taskRepoMock) ListIncompletePredecessorIDs(ctx context.Context, taskID uint64) ([]uint64, error) {
+	if m.listIncompletePredecessorIDsFn == nil {
+		panic("unexpected call to ListIncompletePredecessorIDs")
+	}
+	return m.listIncompletePredecessorIDsFn(ctx, taskID)
+}
+func (m *taskRepoMock) HasDependencyPath(ctx context.Context, fromID, toID uint64) (bool, error) {
+	panic("unexpected call to HasDependencyPath")
+}
+func (m *taskRepoMock) GetDependencyGraph(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, []model.TaskDependencyLink, error) {
+	panic("unexpected call to GetDependencyGraph")
+}
 
 type teamRepoForTaskMock struct {
 	getByIDFn       func(ctx context.Context, teamID uint64) (*model.Team, error)
@@ -120,6 +151,9 @@ func (m *teamRepoForTaskMock) GetMemberRole(ctx context.Context, teamID, userID 
 }
 func (m *teamRepoForTaskMock) ListMembers(ctx context.Context, teamID uint64) ([]model.TeamMemberDetail, error) {
 	panic("unexpected call to ListMembers")
+}
+func (m *teamRepoForTaskMock) TransferOwnership(ctx context.Context, teamID, oldOwnerID, newOwnerID uint64) error {
+	panic("unexpected call to TransferOwnership")
 }
 
 type taskUserRepoStub struct{}

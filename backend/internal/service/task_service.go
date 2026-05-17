@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ var (
 	ErrMemberStatusOnly      = errors.New("member can only update status for assigned task")
 	ErrAssignmentNotPending  = errors.New("assignment request is not pending")
 	ErrInvalidTaskDependency = errors.New("invalid task dependency")
+	ErrCrossTaskDependency   = errors.New("cross team or cross user task dependency is forbidden")
 	ErrDependenciesNotDone   = errors.New("predecessor tasks are not completed")
 	ErrDependencyCycle       = errors.New("dependency cycle detected")
 )
@@ -81,6 +83,23 @@ type TaskDependencies struct {
 	Successors   []model.TaskDependencyNode `json:"successors"`
 }
 
+type TaskDependencyGraph struct {
+	Nodes []model.TaskDependencyNode `json:"nodes"`
+	Links []model.TaskDependencyLink `json:"links"`
+}
+
+type UnresolvedDependenciesError struct {
+	IDs []uint64
+}
+
+func (e *UnresolvedDependenciesError) Error() string {
+	return fmt.Sprintf("predecessor tasks are not completed: %v", e.IDs)
+}
+
+func (e *UnresolvedDependenciesError) Is(target error) bool {
+	return target == ErrDependenciesNotDone
+}
+
 type TaskService interface {
 	List(ctx context.Context, userID uint64, userLevel uint8, page, size int, teamID *uint64) ([]model.Task, int64, int, int, error)
 	Create(ctx context.Context, userID uint64, req CreateTaskRequest) (*model.Task, error)
@@ -92,6 +111,7 @@ type TaskService interface {
 	AddDependency(ctx context.Context, userID, taskID, predecessorID uint64) (*model.TaskDependency, error)
 	RemoveDependency(ctx context.Context, userID, taskID, predecessorID uint64) error
 	GetDependencies(ctx context.Context, userID, taskID uint64) (*TaskDependencies, error)
+	GetDependencyGraph(ctx context.Context, userID, taskID uint64) (*TaskDependencyGraph, error)
 }
 
 type taskService struct {
@@ -474,7 +494,7 @@ func (s *taskService) AddDependency(ctx context.Context, userID, taskID, predece
 
 	if successor.TeamID == nil && predecessor.TeamID == nil {
 		if successor.UserID != userID || predecessor.UserID != userID {
-			return nil, repository.ErrForbidden
+			return nil, ErrCrossTaskDependency
 		}
 		hasCycle, err := s.taskRepo.HasDependencyPath(ctx, taskID, predecessorID)
 		if err != nil {
@@ -487,10 +507,10 @@ func (s *taskService) AddDependency(ctx context.Context, userID, taskID, predece
 	}
 
 	if successor.TeamID == nil || predecessor.TeamID == nil {
-		return nil, ErrInvalidTaskDependency
+		return nil, ErrCrossTaskDependency
 	}
 	if *successor.TeamID != *predecessor.TeamID {
-		return nil, ErrInvalidTaskDependency
+		return nil, ErrCrossTaskDependency
 	}
 
 	role, err := s.teamRepo.GetMemberRole(ctx, *successor.TeamID, userID)
@@ -532,16 +552,16 @@ func (s *taskService) RemoveDependency(ctx context.Context, userID, taskID, pred
 
 	if successor.TeamID == nil && predecessor.TeamID == nil {
 		if successor.UserID != userID || predecessor.UserID != userID {
-			return repository.ErrForbidden
+			return ErrCrossTaskDependency
 		}
 		return s.taskRepo.RemoveDependency(ctx, predecessorID, taskID)
 	}
 
 	if successor.TeamID == nil || predecessor.TeamID == nil {
-		return ErrInvalidTaskDependency
+		return ErrCrossTaskDependency
 	}
 	if *successor.TeamID != *predecessor.TeamID {
-		return ErrInvalidTaskDependency
+		return ErrCrossTaskDependency
 	}
 
 	role, err := s.teamRepo.GetMemberRole(ctx, *successor.TeamID, userID)
@@ -597,6 +617,40 @@ func (s *taskService) GetDependencies(ctx context.Context, userID, taskID uint64
 	}, nil
 }
 
+func (s *taskService) GetDependencyGraph(ctx context.Context, userID, taskID uint64) (*TaskDependencyGraph, error) {
+	if taskID == 0 {
+		return nil, ErrInvalidTaskDependency
+	}
+
+	task, err := s.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	if task.TeamID == nil {
+		if task.UserID != userID {
+			return nil, repository.ErrForbidden
+		}
+	} else {
+		isMember, err := s.teamRepo.IsMember(ctx, *task.TeamID, userID)
+		if err != nil {
+			return nil, err
+		}
+		if !isMember {
+			return nil, repository.ErrForbidden
+		}
+	}
+
+	nodes, links, err := s.taskRepo.GetDependencyGraph(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return &TaskDependencyGraph{
+		Nodes: nodes,
+		Links: links,
+	}, nil
+}
+
 func (s *taskService) createAssignmentNotification(ctx context.Context, task *model.Task, requesterID uint64, originalAssigneeID, originalTeamID *uint64) error {
 	if task.TeamID == nil || task.AssigneeID == nil {
 		return nil
@@ -636,12 +690,12 @@ func (s *taskService) createAssignmentNotification(ctx context.Context, task *mo
 }
 
 func (s *taskService) ensureDependenciesCompleted(ctx context.Context, taskID uint64) error {
-	count, err := s.taskRepo.CountIncompletePredecessors(ctx, taskID)
+	ids, err := s.taskRepo.ListIncompletePredecessorIDs(ctx, taskID)
 	if err != nil {
 		return err
 	}
-	if count > 0 {
-		return ErrDependenciesNotDone
+	if len(ids) > 0 {
+		return &UnresolvedDependenciesError{IDs: ids}
 	}
 	return nil
 }

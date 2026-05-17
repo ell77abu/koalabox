@@ -56,6 +56,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			taskGroup.POST("/:id/dependencies", taskHandler.AddDependency)
 			taskGroup.DELETE("/:id/dependencies/:predecessor_id", taskHandler.RemoveDependency)
 			taskGroup.GET("/:id/dependencies", taskHandler.GetDependencies)
+			taskGroup.GET("/:id/dependency-graph", taskHandler.GetDependencyGraph)
 			taskGroup.GET("/assignments/pending", taskHandler.ListPendingAssignments)
 			taskGroup.POST("/assignments/:request_id/accept", taskHandler.AcceptAssignment)
 			taskGroup.POST("/assignments/:request_id/decline", taskHandler.DeclineAssignment)

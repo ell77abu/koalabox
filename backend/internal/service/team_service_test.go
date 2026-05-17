@@ -91,6 +91,10 @@ func (m *teamRepoMock) ListMembers(ctx context.Context, teamID uint64) ([]model.
 	return m.listMembersFn(ctx, teamID)
 }
 
+func (m *teamRepoMock) TransferOwnership(ctx context.Context, teamID, oldOwnerID, newOwnerID uint64) error {
+	panic("unexpected call to TransferOwnership")
+}
+
 type userRepoMock struct {
 	getByIDFn       func(ctx context.Context, id uint64) (*model.User, error)
 	getByUsernameFn func(ctx context.Context, username string) (*model.User, error)
