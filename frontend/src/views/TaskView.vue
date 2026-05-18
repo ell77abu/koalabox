@@ -206,6 +206,12 @@
                   >
                     {{ updatingId === task.id ? '完成中...' : '完成任务' }}
                   </button>
+                  <RouterLink
+                    class="btn btn-small btn-dependency"
+                    :to="`/tasks/${task.id}/dependencies`"
+                  >
+                    依赖详情
+                  </RouterLink>
                   <button
                     class="btn btn-small btn-edit"
                     @click="startEdit(task)"
@@ -295,6 +301,12 @@
                   </div>
 
                   <div class="task-actions">
+                    <RouterLink
+                      class="btn btn-small btn-dependency"
+                      :to="`/tasks/${task.id}/dependencies`"
+                    >
+                      依赖详情
+                    </RouterLink>
                     <button
                       class="btn btn-small btn-edit"
                       @click="startEdit(task)"
@@ -1586,6 +1598,27 @@ onBeforeUnmount(() => {
 
 .btn-complete:hover:not(:disabled)::before {
   transform: translateX(120%);
+}
+
+.btn-dependency {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  background: #fff;
+  color: #1e40af;
+  border: 1px solid #93c5fd;
+  text-align: center;
+  text-decoration: none;
+  font-weight: 600;
+  line-height: 1;
+  transition: background-color 0.22s ease, border-color 0.22s ease, color 0.22s ease;
+}
+
+.btn-dependency:hover {
+  background: #eff6ff;
+  border-color: #60a5fa;
+  color: #1d4ed8;
 }
 
 .btn-danger {
