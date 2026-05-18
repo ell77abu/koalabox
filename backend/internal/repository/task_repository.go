@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
 	"task-backend/internal/model"
@@ -30,6 +31,14 @@ type TaskRepository interface {
 	DeleteByIDAndUserID(ctx context.Context, id, userID uint64) error
 	DeleteByID(ctx context.Context, id uint64) error
 	ClearAssigneeForTeamTasks(ctx context.Context, teamID, assigneeID uint64) error
+	AddDependency(ctx context.Context, predecessorID, successorID uint64) (*model.TaskDependency, error)
+	RemoveDependency(ctx context.Context, predecessorID, successorID uint64) error
+	ListPredecessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error)
+	ListSuccessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error)
+	CountIncompletePredecessors(ctx context.Context, taskID uint64) (int64, error)
+	ListIncompletePredecessorIDs(ctx context.Context, taskID uint64) ([]uint64, error)
+	HasDependencyPath(ctx context.Context, fromID, toID uint64) (bool, error)
+	GetDependencyGraph(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, []model.TaskDependencyLink, error)
 }
 
 type taskRepository struct {
@@ -460,40 +469,56 @@ func (r *taskRepository) UpdateByID(ctx context.Context, task *model.Task) error
 }
 
 func (r *taskRepository) DeleteByIDAndUserID(ctx context.Context, id, userID uint64) error {
-	res := r.db.WithContext(ctx).
-		Model(&model.Task{}).
-		Where("id = ?", id).
-		Where("user_id = ?", userID).
-		Where("deleted_at IS NULL").
-		Updates(map[string]interface{}{
-			"deleted_at": time.Now(),
-			"updated_at": time.Now(),
-		})
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.
+			Where("predecessor_id = ? OR successor_id = ?", id, id).
+			Delete(&model.TaskDependency{}).Error; err != nil {
+			return err
+		}
+
+		res := tx.
+			Model(&model.Task{}).
+			Where("id = ?", id).
+			Where("user_id = ?", userID).
+			Where("deleted_at IS NULL").
+			Updates(map[string]interface{}{
+				"deleted_at": time.Now(),
+				"updated_at": time.Now(),
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
 }
 
 func (r *taskRepository) DeleteByID(ctx context.Context, id uint64) error {
-	res := r.db.WithContext(ctx).
-		Model(&model.Task{}).
-		Where("id = ?", id).
-		Where("deleted_at IS NULL").
-		Updates(map[string]interface{}{
-			"deleted_at": time.Now(),
-			"updated_at": time.Now(),
-		})
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.
+			Where("predecessor_id = ? OR successor_id = ?", id, id).
+			Delete(&model.TaskDependency{}).Error; err != nil {
+			return err
+		}
+
+		res := tx.
+			Model(&model.Task{}).
+			Where("id = ?", id).
+			Where("deleted_at IS NULL").
+			Updates(map[string]interface{}{
+				"deleted_at": time.Now(),
+				"updated_at": time.Now(),
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
 }
 
 func (r *taskRepository) ClearAssigneeForTeamTasks(ctx context.Context, teamID, assigneeID uint64) error {
@@ -513,17 +538,204 @@ func (r *taskRepository) ClearAssigneeForTeamTasks(ctx context.Context, teamID, 
 	return nil
 }
 
-func (r *taskRepository) SoftDeleteByTeamID(ctx context.Context, teamID uint64) error {
+func (r *taskRepository) AddDependency(ctx context.Context, predecessorID, successorID uint64) (*model.TaskDependency, error) {
+	dep := &model.TaskDependency{
+		PredecessorID: predecessorID,
+		SuccessorID:   successorID,
+	}
+	err := r.db.WithContext(ctx).Create(dep).Error
+	if err == nil {
+		return dep, nil
+	}
+
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return nil, ErrConflict
+	}
+	return nil, err
+}
+
+func (r *taskRepository) RemoveDependency(ctx context.Context, predecessorID, successorID uint64) error {
 	res := r.db.WithContext(ctx).
-		Model(&model.Task{}).
-		Where("team_id = ?", teamID).
-		Where("deleted_at IS NULL").
-		Updates(map[string]interface{}{
-			"deleted_at": time.Now(),
-			"updated_at": time.Now(),
-		})
+		Where("predecessor_id = ?", predecessorID).
+		Where("successor_id = ?", successorID).
+		Delete(&model.TaskDependency{})
 	if res.Error != nil {
 		return res.Error
 	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
 	return nil
+}
+
+func (r *taskRepository) ListPredecessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error) {
+	var list []model.TaskDependencyNode
+	err := r.db.WithContext(ctx).
+		Table("task_dependencies td").
+		Select("t.id, t.title, t.status").
+		Joins("JOIN tasks t ON t.id = td.predecessor_id AND t.deleted_at IS NULL").
+		Where("td.successor_id = ?", taskID).
+		Order("t.created_at ASC").
+		Find(&list).Error
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = make([]model.TaskDependencyNode, 0)
+	}
+	return list, nil
+}
+
+func (r *taskRepository) ListSuccessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error) {
+	var list []model.TaskDependencyNode
+	err := r.db.WithContext(ctx).
+		Table("task_dependencies td").
+		Select("t.id, t.title, t.status").
+		Joins("JOIN tasks t ON t.id = td.successor_id AND t.deleted_at IS NULL").
+		Where("td.predecessor_id = ?", taskID).
+		Order("t.created_at ASC").
+		Find(&list).Error
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = make([]model.TaskDependencyNode, 0)
+	}
+	return list, nil
+}
+
+func (r *taskRepository) CountIncompletePredecessors(ctx context.Context, taskID uint64) (int64, error) {
+	var total int64
+	err := r.db.WithContext(ctx).
+		Table("task_dependencies td").
+		Joins("JOIN tasks t ON t.id = td.predecessor_id AND t.deleted_at IS NULL").
+		Where("td.successor_id = ?", taskID).
+		Where("t.status <> ?", model.TaskStatusDONE).
+		Count(&total).Error
+	if err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+func (r *taskRepository) ListIncompletePredecessorIDs(ctx context.Context, taskID uint64) ([]uint64, error) {
+	var ids []uint64
+	err := r.db.WithContext(ctx).
+		Table("task_dependencies td").
+		Select("t.id").
+		Joins("JOIN tasks t ON t.id = td.predecessor_id AND t.deleted_at IS NULL").
+		Where("td.successor_id = ?", taskID).
+		Where("t.status <> ?", model.TaskStatusDONE).
+		Order("t.id ASC").
+		Find(&ids).Error
+	if err != nil {
+		return nil, err
+	}
+	if ids == nil {
+		ids = make([]uint64, 0)
+	}
+	return ids, nil
+}
+
+func (r *taskRepository) HasDependencyPath(ctx context.Context, fromID, toID uint64) (bool, error) {
+	if fromID == 0 || toID == 0 {
+		return false, nil
+	}
+	const query = `
+WITH RECURSIVE dep(successor_id) AS (
+  SELECT successor_id FROM task_dependencies WHERE predecessor_id = ?
+  UNION
+  SELECT td.successor_id FROM task_dependencies td
+  JOIN dep ON td.predecessor_id = dep.successor_id
+)
+SELECT 1 AS found FROM dep WHERE successor_id = ? LIMIT 1`
+	var found int
+	if err := r.db.WithContext(ctx).Raw(query, fromID, toID).Scan(&found).Error; err != nil {
+		return false, err
+	}
+	return found == 1, nil
+}
+
+func (r *taskRepository) GetDependencyGraph(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, []model.TaskDependencyLink, error) {
+	const nodeQuery = `
+WITH RECURSIVE
+ancestors(id) AS (
+  SELECT predecessor_id FROM task_dependencies WHERE successor_id = ?
+  UNION
+  SELECT td.predecessor_id FROM task_dependencies td JOIN ancestors a ON td.successor_id = a.id
+),
+descendants(id) AS (
+  SELECT successor_id FROM task_dependencies WHERE predecessor_id = ?
+  UNION
+  SELECT td.successor_id FROM task_dependencies td JOIN descendants d ON td.predecessor_id = d.id
+),
+related(id) AS (
+  SELECT ?
+  UNION SELECT id FROM ancestors
+  UNION SELECT id FROM descendants
+)
+SELECT DISTINCT t.id, t.title, t.status
+FROM related r
+JOIN tasks t ON t.id = r.id AND t.deleted_at IS NULL
+ORDER BY t.id ASC`
+
+	nodes := make([]model.TaskDependencyNode, 0)
+	if err := r.db.WithContext(ctx).Raw(nodeQuery, taskID, taskID, taskID).Scan(&nodes).Error; err != nil {
+		return nil, nil, err
+	}
+
+	const linkQuery = `
+WITH RECURSIVE
+ancestors(id) AS (
+  SELECT predecessor_id FROM task_dependencies WHERE successor_id = ?
+  UNION
+  SELECT td.predecessor_id FROM task_dependencies td JOIN ancestors a ON td.successor_id = a.id
+),
+descendants(id) AS (
+  SELECT successor_id FROM task_dependencies WHERE predecessor_id = ?
+  UNION
+  SELECT td.successor_id FROM task_dependencies td JOIN descendants d ON td.predecessor_id = d.id
+),
+related(id) AS (
+  SELECT ?
+  UNION SELECT id FROM ancestors
+  UNION SELECT id FROM descendants
+)
+SELECT DISTINCT td.predecessor_id AS source, td.successor_id AS target
+FROM task_dependencies td
+JOIN related rp ON rp.id = td.predecessor_id
+JOIN related rs ON rs.id = td.successor_id
+JOIN tasks pred ON pred.id = td.predecessor_id AND pred.deleted_at IS NULL
+JOIN tasks succ ON succ.id = td.successor_id AND succ.deleted_at IS NULL
+ORDER BY td.predecessor_id ASC, td.successor_id ASC`
+
+	links := make([]model.TaskDependencyLink, 0)
+	if err := r.db.WithContext(ctx).Raw(linkQuery, taskID, taskID, taskID).Scan(&links).Error; err != nil {
+		return nil, nil, err
+	}
+	return nodes, links, nil
+}
+
+func (r *taskRepository) SoftDeleteByTeamID(ctx context.Context, teamID uint64) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.
+			Where("predecessor_id IN (SELECT id FROM tasks WHERE team_id = ?) OR successor_id IN (SELECT id FROM tasks WHERE team_id = ?)", teamID, teamID).
+			Delete(&model.TaskDependency{}).Error; err != nil {
+			return err
+		}
+
+		res := tx.
+			Model(&model.Task{}).
+			Where("team_id = ?", teamID).
+			Where("deleted_at IS NULL").
+			Updates(map[string]interface{}{
+				"deleted_at": time.Now(),
+				"updated_at": time.Now(),
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		return nil
+	})
 }

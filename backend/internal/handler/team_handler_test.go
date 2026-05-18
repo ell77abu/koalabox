@@ -64,6 +64,14 @@ func (m *mockTeamService) DeclineInvitation(ctx context.Context, userID, invitat
 	panic("not used")
 }
 
+func (m *mockTeamService) Leave(ctx context.Context, userID, teamID uint64) error {
+	panic("not used")
+}
+
+func (m *mockTeamService) TransferOwnership(ctx context.Context, operatorID, teamID, newOwnerID uint64) error {
+	panic("not used")
+}
+
 func TestTeamHandler_AddMember_Success(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
