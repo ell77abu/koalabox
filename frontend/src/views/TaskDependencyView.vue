@@ -2,7 +2,7 @@
   <div class="page-shell">
     <section class="dependency-page">
       <header class="dependency-header">
-        <button class="back-btn" type="button" @click="router.back()">返回</button>
+        <button class="back-btn" @click="router.back()">← 返回</button>
         <div class="header-main">
           <p class="eyebrow">任务依赖详情</p>
           <h1>{{ currentTaskTitle }}</h1>
@@ -13,7 +13,7 @@
             <span class="task-id">#{{ taskId }}</span>
           </div>
         </div>
-        <RouterLink class="btn btn-outline" to="/tasks">任务列表</RouterLink>
+        <RouterLink class="task-list-btn" to="/tasks">任务列表</RouterLink>
       </header>
 
       <div v-if="loading" class="state-panel">依赖数据加载中...</div>
@@ -93,59 +93,70 @@
           </div>
         </section>
 
-        <section class="graph-panel">
-          <div class="panel-heading">
-            <h2>全量依赖图</h2>
-            <span>{{ graphLinks.length }} 条依赖边</span>
-          </div>
-
-          <div v-if="graphNodes.length <= 1 && graphLinks.length === 0" class="empty-box">
-            当前任务尚未形成依赖链。
-          </div>
-
-          <div v-else class="graph-scroll">
-            <div
-              class="graph-canvas"
-              :style="{ width: `${graphLayout.width}px`, height: `${graphLayout.height}px` }"
-            >
-              <svg class="graph-svg" :viewBox="`0 0 ${graphLayout.width} ${graphLayout.height}`">
-                <defs>
-                  <marker
-                    id="arrow"
-                    viewBox="0 0 10 10"
-                    refX="9"
-                    refY="5"
-                    markerWidth="7"
-                    markerHeight="7"
-                    orient="auto-start-reverse"
-                  >
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
-                  </marker>
-                </defs>
-                <path
-                  v-for="link in graphLayout.links"
-                  :key="`${link.source}-${link.target}`"
-                  class="graph-link"
-                  :d="link.path"
-                  marker-end="url(#arrow)"
-                />
-              </svg>
-
-              <RouterLink
-                v-for="node in graphLayout.nodes"
-                :key="node.id"
-                class="graph-node"
-                :class="{ current: node.id === taskId, done: node.status === 'DONE' }"
-                :style="{ left: `${node.x}px`, top: `${node.y}px` }"
-                :to="`/tasks/${node.id}/dependencies`"
-              >
-                <span class="graph-node-title">{{ node.title }}</span>
-                <span class="status-badge" :class="statusClass(node.status)">
-                  {{ statusLabel(node.status) }}
-                </span>
-              </RouterLink>
+        <section class="graph-panel" :class="{ expanded: showGraph }">
+          <div class="panel-heading graph-heading">
+            <div>
+              <h2>全量依赖图</h2>
+              <span>{{ graphLinks.length }} 条依赖边</span>
             </div>
+            <button class="graph-toggle-btn" type="button" @click="showGraph = !showGraph">
+              {{ showGraph ? '收起依赖图' : '查看依赖图' }}
+            </button>
           </div>
+
+          <div v-if="!showGraph" class="graph-collapsed">
+            <span>当前图包含 {{ graphNodes.length }} 个节点、{{ graphLinks.length }} 条依赖边。</span>
+          </div>
+
+          <template v-else>
+            <div v-if="graphNodes.length <= 1 && graphLinks.length === 0" class="empty-box">
+              当前任务尚未形成依赖链。
+            </div>
+
+            <div v-else class="graph-scroll">
+              <div
+                class="graph-canvas"
+                :style="{ width: `${graphLayout.width}px`, height: `${graphLayout.height}px` }"
+              >
+                <svg class="graph-svg" :viewBox="`0 0 ${graphLayout.width} ${graphLayout.height}`">
+                  <defs>
+                    <marker
+                      id="arrow"
+                      viewBox="0 0 10 10"
+                      refX="9"
+                      refY="5"
+                      markerWidth="7"
+                      markerHeight="7"
+                      orient="auto-start-reverse"
+                    >
+                      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
+                    </marker>
+                  </defs>
+                  <path
+                    v-for="link in graphLayout.links"
+                    :key="`${link.source}-${link.target}`"
+                    class="graph-link"
+                    :d="link.path"
+                    marker-end="url(#arrow)"
+                  />
+                </svg>
+
+                <RouterLink
+                  v-for="node in graphLayout.nodes"
+                  :key="node.id"
+                  class="graph-node"
+                  :class="{ current: node.id === taskId, done: node.status === 'DONE' }"
+                  :style="{ left: `${node.x}px`, top: `${node.y}px` }"
+                  :to="`/tasks/${node.id}/dependencies`"
+                >
+                  <span class="graph-node-title">{{ node.title }}</span>
+                  <span class="status-badge" :class="statusClass(node.status)">
+                    {{ statusLabel(node.status) }}
+                  </span>
+                </RouterLink>
+              </div>
+            </div>
+          </template>
         </section>
       </template>
     </section>
@@ -166,6 +177,7 @@ const predecessors = ref([]);
 const successors = ref([]);
 const graphNodes = ref([]);
 const graphLinks = ref([]);
+const showGraph = ref(false);
 
 const taskId = computed(() => Number(route.params.id));
 
@@ -203,6 +215,7 @@ const loadDependencyData = async () => {
     return;
   }
 
+  showGraph.value = false;
   loading.value = true;
   error.value = '';
   try {
@@ -252,6 +265,7 @@ const graphLayout = computed(() => {
   const columnGap = 230;
   const rowGap = 92;
   const margin = 48;
+  const minCanvasWidth = 1000;
 
   const nodes = graphNodes.value.map(normalizeTaskNode);
   const nodeIds = new Set(nodes.map((node) => node.id));
@@ -307,9 +321,9 @@ const graphLayout = computed(() => {
 
   const byID = new Map(positioned.map((node) => [node.id, node]));
   const maxRank = Math.max(0, ...sortedGroups.map(([group]) => group));
-  const width = Math.max(760, margin * 2 + (maxRank + 1) * columnGap);
+  const width = Math.max(minCanvasWidth, margin * 2 + (maxRank + 1) * columnGap);
   const maxRows = Math.max(1, ...sortedGroups.map(([, groupNodes]) => groupNodes.length));
-  const height = Math.max(280, margin * 2 + maxRows * rowGap);
+  const height = Math.max(320, margin * 2 + maxRows * rowGap);
   const layoutLinks = links.map((link) => {
     const source = byID.get(link.source);
     const target = byID.get(link.target);
@@ -344,9 +358,15 @@ watch(() => route.params.id, loadDependencyData);
 </script>
 
 <style scoped>
+* {
+  box-sizing: border-box;
+}
+
 .dependency-page {
-  max-width: 1100px;
+  width: 750px;
+  max-width: calc(100vw - 32px);
   margin: 0 auto;
+  min-height: 760px;
 }
 
 .dependency-header {
@@ -354,6 +374,7 @@ watch(() => route.params.id, loadDependencyData);
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
+  min-height: 128px;
   padding: 1.5rem;
   margin-bottom: 1rem;
   border: 1px solid #e2e8f0;
@@ -392,22 +413,20 @@ watch(() => route.params.id, loadDependencyData);
   font-size: 0.85rem;
 }
 
-.back-btn,
-.btn {
+
+.back-btn {
   min-height: 38px;
   padding: 0 14px;
-  border-radius: 8px;
-  border: 1px solid #cbd5e1;
-  background: #f8fafc;
-  color: #1e293b;
-  font-size: 0.85rem;
-  font-weight: 700;
+  border: 1px solid #c9ddff;
+  border-radius: 999px;
+  background: #f8fbff;
+  color: #1d4ed8;
   cursor: pointer;
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.25s ease;
 }
+
 
 .btn-primary {
   border-color: #2563eb;
@@ -415,7 +434,28 @@ watch(() => route.params.id, loadDependencyData);
   color: #ffffff;
 }
 
-.btn-outline:hover,
+.task-list-btn {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid #c9ddff;
+  border-radius: 8px;
+  background: #f8fbff;
+  color: #1d4ed8;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s ease;
+}
+
+.task-list-btn:hover {
+  background: #eaf3ff;
+  border-color: #accbff;
+}
+
 .back-btn:hover {
   border-color: #93c5fd;
   background: #eff6ff;
@@ -431,6 +471,13 @@ watch(() => route.params.id, loadDependencyData);
   text-align: center;
 }
 
+.state-panel {
+  min-height: 520px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .state-panel.error {
   display: flex;
   align-items: center;
@@ -444,11 +491,13 @@ watch(() => route.params.id, loadDependencyData);
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: 96px;
   gap: 0.75rem;
   margin-bottom: 1rem;
 }
 
 .summary-item {
+  min-height: 96px;
   padding: 1rem;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
@@ -477,6 +526,7 @@ watch(() => route.params.id, loadDependencyData);
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  min-height: 64px;
   padding: 0.9rem 1rem;
   margin-bottom: 1rem;
   border: 1px solid #bbf7d0;
@@ -500,13 +550,28 @@ watch(() => route.params.id, loadDependencyData);
 
 .dependency-panel,
 .graph-panel {
+  display: flex;
+  flex-direction: column;
   padding: 1rem;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   background: #ffffff;
 }
 
+.dependency-panel {
+  min-height: 246px;
+}
+
+.graph-panel {
+  min-height: 132px;
+}
+
+.graph-panel.expanded {
+  min-height: 404px;
+}
+
 .panel-heading {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -526,10 +591,59 @@ watch(() => route.params.id, loadDependencyData);
   font-weight: 700;
 }
 
+.graph-heading {
+  align-items: flex-start;
+}
+
+.graph-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.graph-toggle-btn {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #93c5fd;
+  border-radius: 8px;
+  background: #fff;
+  color: #1d4ed8;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.graph-toggle-btn:hover {
+  background: #eff6ff;
+  border-color: #60a5fa;
+}
+
+.graph-collapsed {
+  min-height: 52px;
+  padding: 0.85rem 1rem;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+}
+
 .task-node-list {
+  min-height: 148px;
+  max-height: 220px;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
+}
+
+.dependency-panel > .empty-box {
+  min-height: 148px;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .task-node-row {
@@ -589,6 +703,7 @@ watch(() => route.params.id, loadDependencyData);
 }
 
 .graph-scroll {
+  height: 320px;
   overflow: auto;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
@@ -598,6 +713,15 @@ watch(() => route.params.id, loadDependencyData);
 .graph-canvas {
   position: relative;
   min-width: 100%;
+  min-height: 320px;
+}
+
+.graph-panel > .empty-box {
+  min-height: 320px;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .graph-svg {
