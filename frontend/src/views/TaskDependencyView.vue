@@ -260,10 +260,10 @@ const loadDependencyData = async () => {
 };
 
 const graphLayout = computed(() => {
-  const nodeWidth = 168;
-  const nodeHeight = 62;
-  const columnGap = 230;
-  const rowGap = 92;
+  const nodeWidth = 150;                                                                                                                                                                                                 
+  const nodeHeight = 56;                                                                                                                                                                                                 
+  const columnGap = 260;                                                                                                                                                                                                 
+  const rowGap = 110;   
   const margin = 48;
   const minCanvasWidth = 1000;
 
@@ -740,8 +740,8 @@ watch(() => route.params.id, loadDependencyData);
 
 .graph-node {
   position: absolute;
-  width: 168px;
-  min-height: 62px;
+  width: 150px;                                                                                                                                                                                                        
+  min-height: 56px;   
   display: flex;
   flex-direction: column;
   justify-content: center;

@@ -84,8 +84,14 @@
               <p class="task-description">{{ task.description || '暂无描述' }}</p>
             </div>
 
-            <div class="task-actions" v-if="canEditTask(task)">
-              <button class="btn btn-small btn-edit" @click="startEdit(task)">编辑</button>
+            <div class="task-actions">
+              <RouterLink
+                class="btn btn-small btn-dependency"
+                :to="`/tasks/${task.id}/dependencies`"
+              >
+                依赖详情
+              </RouterLink>
+              <button v-if="canEditTask(task)" class="btn btn-small btn-edit" @click="startEdit(task)">编辑</button>
               <button 
                 v-if="myRole === 'Owner' || myRole === 'Admin'" 
                 class="btn btn-small btn-danger" 
@@ -311,7 +317,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { authStore } from '../stores/auth'; 
 import { teamStore } from '../stores/team';
 import {
@@ -673,6 +679,18 @@ onMounted(() => {
 .btn-complete:hover { transform: translateY(-1px); box-shadow: 0 6px 14px rgba(34,197,94,0.3); }
 .btn-outline { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
 .btn-outline:hover { background: #e2e8f0; }
+.btn-dependency {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  color: #1e40af;
+  border: 1px solid #93c5fd;
+  text-align: center;
+  text-decoration: none;
+  line-height: 1;
+}
+.btn-dependency:hover { background: #eff6ff; border-color: #60a5fa; color: #1d4ed8; }
 .btn-edit { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
 .btn-edit:hover:not(:disabled) { background: #bfdbfe; }
 .btn-danger { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
