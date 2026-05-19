@@ -24,6 +24,7 @@ var (
 	ErrMemberStatusOnly      = errors.New("member can only update status for assigned task")
 	ErrAssignmentNotPending  = errors.New("assignment request is not pending")
 	ErrInvalidTaskDependency = errors.New("invalid task dependency")
+	ErrDependencyOnDoneTask  = errors.New("cannot add dependency to a completed task")
 	ErrCrossTaskDependency   = errors.New("cross team or cross user task dependency is forbidden")
 	ErrDependenciesNotDone   = errors.New("predecessor tasks are not completed")
 	ErrDependencyCycle       = errors.New("dependency cycle detected")
@@ -485,6 +486,9 @@ func (s *taskService) AddDependency(ctx context.Context, userID, taskID, predece
 	successor, err := s.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
 		return nil, err
+	}
+	if successor.Status == model.TaskStatusDONE {
+		return nil, ErrDependencyOnDoneTask
 	}
 
 	predecessor, err := s.taskRepo.GetByID(ctx, predecessorID)
