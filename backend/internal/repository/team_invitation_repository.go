@@ -90,15 +90,39 @@ func (r *teamInvitationRepository) ListPendingByInvitee(ctx context.Context, inv
 }
 
 func (r *teamInvitationRepository) UpdateStatus(ctx context.Context, id uint64, status model.InvitationStatus) error {
-	res := r.db.WithContext(ctx).
-		Model(&model.TeamInvitation{}).
-		Where("id = ?", id).
-		Updates(map[string]interface{}{"status": status})
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var invite model.TeamInvitation
+		err := tx.Select("id", "team_id", "invitee_id").
+			Where("id = ?", id).
+			First(&invite).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+
+		if status != model.InvitationStatusPending {
+			err = tx.
+				Where("team_id = ?", invite.TeamID).
+				Where("invitee_id = ?", invite.InviteeID).
+				Where("status = ?", status).
+				Where("id <> ?", invite.ID).
+				Delete(&model.TeamInvitation{}).Error
+			if err != nil {
+				return err
+			}
+		}
+
+		res := tx.Model(&model.TeamInvitation{}).
+			Where("id = ?", id).
+			Updates(map[string]interface{}{"status": status})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
 }
