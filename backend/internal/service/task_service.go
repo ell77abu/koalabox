@@ -90,7 +90,8 @@ type TaskDependencyGraph struct {
 }
 
 type UnresolvedDependenciesError struct {
-	IDs []uint64
+	IDs          []uint64
+	Predecessors []model.TaskDependencyNode
 }
 
 func (e *UnresolvedDependenciesError) Error() string {
@@ -694,12 +695,16 @@ func (s *taskService) createAssignmentNotification(ctx context.Context, task *mo
 }
 
 func (s *taskService) ensureDependenciesCompleted(ctx context.Context, taskID uint64) error {
-	ids, err := s.taskRepo.ListIncompletePredecessorIDs(ctx, taskID)
+	predecessors, err := s.taskRepo.ListIncompletePredecessors(ctx, taskID)
 	if err != nil {
 		return err
 	}
-	if len(ids) > 0 {
-		return &UnresolvedDependenciesError{IDs: ids}
+	if len(predecessors) > 0 {
+		ids := make([]uint64, 0, len(predecessors))
+		for _, predecessor := range predecessors {
+			ids = append(ids, predecessor.ID)
+		}
+		return &UnresolvedDependenciesError{IDs: ids, Predecessors: predecessors}
 	}
 	return nil
 }

@@ -2,9 +2,7 @@ package handler
 
 import (
 	"errors"
-	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -125,8 +123,9 @@ func (h *TaskHandler) Update(c *gin.Context) {
 	task, err := h.taskService.Update(c.Request.Context(), userID, id, req)
 	var unresolvedErr *service.UnresolvedDependenciesError
 	if errors.As(err, &unresolvedErr) {
-		response.JSON(c, 409, 409, fmt.Sprintf("操作失败：尚有前置任务（ID: %s）未完成", joinUint64IDs(unresolvedErr.IDs)), gin.H{
+		response.JSON(c, 409, 409, "操作失败：尚有前置任务未完成", gin.H{
 			"unresolved_predecessor_ids": unresolvedErr.IDs,
+			"unresolved_predecessors":    unresolvedErr.Predecessors,
 		})
 		return
 	}
@@ -492,12 +491,4 @@ func isTaskValidationError(err error) bool {
 func isTaskForbiddenError(err error) bool {
 	return errors.Is(err, service.ErrTeamRoleDenied) ||
 		errors.Is(err, service.ErrMemberStatusOnly)
-}
-
-func joinUint64IDs(ids []uint64) string {
-	parts := make([]string, 0, len(ids))
-	for _, id := range ids {
-		parts = append(parts, strconv.FormatUint(id, 10))
-	}
-	return strings.Join(parts, ", ")
 }

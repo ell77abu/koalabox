@@ -17,6 +17,7 @@ type taskRepoMock struct {
 	getByIDFn                      func(ctx context.Context, id uint64) (*model.Task, error)
 	updateByIDFn                   func(ctx context.Context, task *model.Task) error
 	listIncompletePredecessorIDsFn func(ctx context.Context, taskID uint64) ([]uint64, error)
+	listIncompletePredecessorsFn   func(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error)
 }
 
 func (m *taskRepoMock) Create(ctx context.Context, task *model.Task) error {
@@ -99,6 +100,12 @@ func (m *taskRepoMock) ListIncompletePredecessorIDs(ctx context.Context, taskID 
 		panic("unexpected call to ListIncompletePredecessorIDs")
 	}
 	return m.listIncompletePredecessorIDsFn(ctx, taskID)
+}
+func (m *taskRepoMock) ListIncompletePredecessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error) {
+	if m.listIncompletePredecessorsFn == nil {
+		panic("unexpected call to ListIncompletePredecessors")
+	}
+	return m.listIncompletePredecessorsFn(ctx, taskID)
 }
 func (m *taskRepoMock) HasDependencyPath(ctx context.Context, fromID, toID uint64) (bool, error) {
 	panic("unexpected call to HasDependencyPath")

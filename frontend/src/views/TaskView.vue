@@ -488,6 +488,39 @@ const availablePersonalTasks = computed(() => {
 });
 
 // 状态管理
+const findTaskTitleById = (id) => {
+  const task = taskStore.tasks.value.find((item) => Number(item.id) === Number(id));
+  return task?.title || '';
+};
+
+const formatUnresolvedDependenciesMessage = (error) => {
+  const responseData = error.response?.data || {};
+  const data = responseData.data || {};
+  const predecessors = Array.isArray(data.unresolved_predecessors)
+    ? data.unresolved_predecessors
+    : [];
+  const ids = Array.isArray(data.unresolved_predecessor_ids)
+    ? data.unresolved_predecessor_ids
+    : [];
+
+  const names = predecessors
+    .map((task) => task.title || findTaskTitleById(task.id) || `ID ${task.id}`)
+    .filter(Boolean);
+
+  if (names.length === 0) {
+    ids.forEach((id) => {
+      names.push(findTaskTitleById(id) || `ID ${id}`);
+    });
+  }
+
+  const uniqueNames = [...new Set(names)];
+  if (uniqueNames.length > 0) {
+    return `操作失败：前置任务「${uniqueNames.join('」、「')}」尚未完成`;
+  }
+
+  return responseData.message || '操作失败：尚有前置任务未完成';
+};
+
 const loading = ref(false);
 const creatingTask = ref(false);
 const updatingId = ref(null);
@@ -721,7 +754,7 @@ const onUpdateTask = async () => {
     }
   } catch (error) {
     if (error.response?.status === 409) {
-      updateError.value = error.response.data.message || '操作失败：尚有前置任务未完成';
+      updateError.value = formatUnresolvedDependenciesMessage(error);
     } else {
       updateError.value = error.response?.data?.message || '更新任务失败，请重试';
     }
@@ -798,7 +831,7 @@ const markTaskDone = async (task) => {
   } catch (error) {
     // 新增：拦截 409 状态码，提示前置任务未完成
     if (error.response?.status === 409) {
-      alert(`⚠️ 无法完成：${error.response.data.message || '该任务尚有前置任务未完成'}`);
+      alert(`⚠️ ${formatUnresolvedDependenciesMessage(error)}`);
     } else {
       alert(error.response?.data?.message || '完成任务失败，请重试');
     }
