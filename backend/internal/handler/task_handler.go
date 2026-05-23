@@ -308,6 +308,10 @@ func (h *TaskHandler) AddDependency(c *gin.Context) {
 		response.Forbidden(c, "跨团队或跨用户任务禁止建立依赖关系")
 		return
 	}
+	if errors.Is(err, service.ErrDependencyOnDoneTask) {
+		response.BadRequest(c, "已完成任务不能再设置前置依赖")
+		return
+	}
 	if isTaskValidationError(err) {
 		response.BadRequest(c, err.Error())
 		return
@@ -481,6 +485,7 @@ func isTaskValidationError(err error) bool {
 		errors.Is(err, service.ErrInvalidAssigneeID) ||
 		errors.Is(err, service.ErrAssigneeNotInTeam) ||
 		errors.Is(err, service.ErrInvalidTaskDependency) ||
+		errors.Is(err, service.ErrDependencyOnDoneTask) ||
 		errors.Is(err, service.ErrDependenciesNotDone)
 }
 
