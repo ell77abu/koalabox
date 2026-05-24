@@ -172,9 +172,13 @@
                 <div class="task-main">
                   <div class="task-title-section">
                     <h3>{{ task.title }}</h3>
-                    <span v-if="task.team_id" class="priority-badge" style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;">
+                    <RouterLink
+                      v-if="!isPersonalTask(task)"
+                      class="priority-badge team-link-badge"
+                      :to="`/teams/${task.team_id}`"
+                    >
                       👥 {{ getTeamName(task) }}
-                    </span>
+                    </RouterLink>
                     <span class="status-badge" :class="`status-${task.status.toLowerCase()}`">
                       {{ statusLabel(task.status) }}
                     </span>
@@ -274,9 +278,13 @@
                   <div class="task-main">
                     <div class="task-title-section">
                       <h3>{{ task.title }}</h3>
-                      <span v-if="task.team_id" class="priority-badge" style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;">
+                      <RouterLink
+                        v-if="!isPersonalTask(task)"
+                        class="priority-badge team-link-badge"
+                        :to="`/teams/${task.team_id}`"
+                      >
                         👥 {{ getTeamName(task) }}
-                      </span>
+                      </RouterLink>
                       <span class="status-badge" :class="`status-${task.status.toLowerCase()}`">
                         {{ statusLabel(task.status) }}
                       </span>
@@ -1553,6 +1561,21 @@ onBeforeUnmount(() => {
 .priority-3 {
   background: #fee2e2;
   color: #b91c1c;
+}
+
+.team-link-badge {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.team-link-badge:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
 }
 
 .task-description {
