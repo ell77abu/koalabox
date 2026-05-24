@@ -51,20 +51,47 @@
       <div v-if="activeTab === 'tasks'" class="tab-content">
         <div class="list-header">
           <h2>任务大厅</h2>
-          <button 
-            v-if="myRole === 'Owner' || myRole === 'Admin'" 
-            class="btn btn-primary btn-small" 
-            @click="showCreateTaskModal = true"
-          >
-            + 发布团队任务
-          </button>
+          <div class="list-header-actions">
+            <div class="search-box">
+              <span class="search-fab" aria-hidden="true">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="4" />
+                  <line x1="16.65" y1="16.65" x2="22" y2="22" stroke="currentColor" stroke-width="4" stroke-linecap="round" />
+                </svg>
+              </span>
+              <input
+                v-model.trim="searchQuery"
+                type="search"
+                placeholder="搜索任务"
+                class="search-input"
+              />
+              <button
+                v-if="isSearching"
+                type="button"
+                class="search-clear"
+                @click="searchQuery = ''"
+              >
+                清除
+              </button>
+            </div>
+            <button 
+              v-if="myRole === 'Owner' || myRole === 'Admin'" 
+              class="btn btn-primary btn-small" 
+              @click="showCreateTaskModal = true"
+            >
+              + 发布团队任务
+            </button>
+          </div>
         </div>
 
         <div v-if="loadingTasks" class="loading-state">加载任务中...</div>
         <div v-else-if="tasks.length === 0" class="empty-state">当前团队暂无任务。</div>
+        <div v-else-if="displayedTeamTasks.length === 0" class="empty-state">
+          {{ isSearching ? '未找到包含关键词的匹配任务。' : '当前暂无匹配任务。' }}
+        </div>
         
         <div v-else class="task-list">
-          <div v-for="task in tasks" :key="task.id" class="task-item">
+          <div v-for="task in displayedTeamTasks" :key="task.id" class="task-item">
             <div class="task-main">
               <div class="task-title-section">
                 <h3>{{ task.title }}</h3>
@@ -342,6 +369,7 @@ const myRole = computed(() => currentTeam.value ? currentTeam.value.role : 'Memb
 
 const tasks = ref([]);
 const loadingTasks = ref(false);
+const searchQuery = ref('');
 const showCreateTaskModal = ref(false);
 const showEditTaskModal = ref(false);
 const submittingTask = ref(false);
@@ -391,6 +419,16 @@ const canEditTask = (task) => {
   const currentMember = members.value.find(m => m.username === authStore.username.value);
   return currentMember ? task.assignee_id === currentMember.user_id : false;
 };
+
+const isSearching = computed(() => searchQuery.value.trim().length > 0);
+
+const displayedTeamTasks = computed(() => {
+  const keyword = searchQuery.value.trim().toLowerCase();
+  if (!keyword) return tasks.value;
+  return tasks.value.filter((task) =>
+    String(task.title || '').toLowerCase().includes(keyword)
+  );
+});
 
 // 👇 Lab3 新增：细化移除成员权限校验
 const canRemoveMember = (member) => {
@@ -652,6 +690,49 @@ onMounted(() => {
 
 .list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
 .list-header h2 { font-size: 1.1rem; color: var(--text); font-weight: 700; margin: 0; }
+.list-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem; flex: 1; }
+.search-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.25rem 0.75rem 0.25rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  min-width: 260px;
+  max-width: 420px;
+  flex: 1;
+}
+.search-fab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(28, 126, 214, 0.28);
+  flex-shrink: 0;
+}
+.search-fab svg { width: 16px; height: 16px; }
+.search-input {
+  border: none;
+  background: transparent;
+  width: 100%;
+  font-size: 0.85rem;
+  color: #1f2937;
+}
+.search-input:focus { outline: none; }
+.search-clear {
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+}
+.search-clear:hover { color: #0f172a; }
 .empty-state, .loading-state { text-align: center; padding: 3rem; color: #6b7280; background: #f8fafc; border-radius: 0.5rem; border: 1px dashed #cbd5e1; }
 
 .task-list { display: flex; flex-direction: column; gap: 1rem; }
@@ -753,4 +834,31 @@ onMounted(() => {
 :global([data-theme="dark"]) .tab-btn.active { color: #3b82f6; border-bottom-color: #3b82f6; }
 :global([data-theme="dark"]) .tabs-container { border-bottom-color: #334155; }
 :global([data-theme="dark"]) .btn-outline { background: #0f172a; color: #cbd5e1; border-color: #334155; }
+:global([data-theme="dark"]) .search-box { background: #0f172a; border-color: #334155; }
+:global([data-theme="dark"]) .search-input { color: #f8fafc; }
+:global([data-theme="dark"]) .search-clear { color: #94a3b8; }
+
+@media (max-width: 768px) {
+  .list-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .list-header-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: stretch;
+  }
+
+  .search-box {
+    min-width: 0;
+    max-width: none;
+    width: 100%;
+  }
+
+  .list-header-actions .btn {
+    flex: 1;
+  }
+}
 </style>

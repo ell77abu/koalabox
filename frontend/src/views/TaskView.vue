@@ -173,7 +173,7 @@
                   <div class="task-title-section">
                     <h3>{{ task.title }}</h3>
                     <span v-if="task.team_id" class="priority-badge" style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;">
-                      👥 团队任务
+                      👥 {{ getTeamName(task) }}
                     </span>
                     <span class="status-badge" :class="`status-${task.status.toLowerCase()}`">
                       {{ statusLabel(task.status) }}
@@ -275,7 +275,7 @@
                     <div class="task-title-section">
                       <h3>{{ task.title }}</h3>
                       <span v-if="task.team_id" class="priority-badge" style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;">
-                        👥 团队任务
+                        👥 {{ getTeamName(task) }}
                       </span>
                       <span class="status-badge" :class="`status-${task.status.toLowerCase()}`">
                         {{ statusLabel(task.status) }}
@@ -456,6 +456,12 @@ const canEditTaskDetails = (task) => {
   const role = team ? team.role : 'Member'; 
   
   return role === 'Owner' || role === 'Admin';
+};
+
+const getTeamName = (task) => {
+  const teamId = Number(task?.team_id);
+  const team = teamStore.teams.value.find((item) => Number(item.team_id) === teamId);
+  return team?.name || '团队任务';
 };
 // === Lab2 逻辑结束 ===
 
