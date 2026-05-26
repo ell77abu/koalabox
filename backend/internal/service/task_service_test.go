@@ -83,6 +83,9 @@ func (m *taskRepoMock) ClearAssigneeForTeamTasks(ctx context.Context, teamID, as
 func (m *taskRepoMock) AddDependency(ctx context.Context, predecessorID, successorID uint64) (*model.TaskDependency, error) {
 	panic("unexpected call to AddDependency")
 }
+func (m *taskRepoMock) AddDependencyWithCycleCheck(ctx context.Context, predecessorID, successorID uint64) (*model.TaskDependency, error) {
+	panic("unexpected call to AddDependencyWithCycleCheck")
+}
 func (m *taskRepoMock) RemoveDependency(ctx context.Context, predecessorID, successorID uint64) error {
 	panic("unexpected call to RemoveDependency")
 }

@@ -36,6 +36,10 @@ func NewTeamRepository(db *gorm.DB) TeamRepository {
 	return &teamRepository{db: db}
 }
 
+func (r *teamRepository) GetDB() *gorm.DB {
+	return r.db
+}
+
 func (r *teamRepository) Create(ctx context.Context, team *model.Team) error {
 	return r.db.WithContext(ctx).Create(team).Error
 }
