@@ -311,6 +311,10 @@ func (h *TaskHandler) AddDependency(c *gin.Context) {
 		response.BadRequest(c, "已完成任务不能再设置前置依赖")
 		return
 	}
+	if errors.Is(err, service.ErrTeamGone) {
+		response.Gone(c, "team has been deleted")
+		return
+	}
 	if isTaskValidationError(err) {
 		response.BadRequest(c, err.Error())
 		return
@@ -359,8 +363,16 @@ func (h *TaskHandler) RemoveDependency(c *gin.Context) {
 		response.Forbidden(c, "跨团队或跨用户任务禁止建立依赖关系")
 		return
 	}
+	if errors.Is(err, service.ErrTeamGone) {
+		response.Gone(c, "team has been deleted")
+		return
+	}
 	if isTaskValidationError(err) {
 		response.BadRequest(c, err.Error())
+		return
+	}
+	if errors.Is(err, service.ErrTeamGone) {
+		response.Gone(c, "team has been deleted")
 		return
 	}
 	if isTaskForbiddenError(err) || errors.Is(err, repository.ErrForbidden) {
@@ -395,6 +407,10 @@ func (h *TaskHandler) GetDependencies(c *gin.Context) {
 	data, err := h.taskService.GetDependencies(c.Request.Context(), userID, taskID)
 	if isTaskValidationError(err) {
 		response.BadRequest(c, err.Error())
+		return
+	}
+	if errors.Is(err, service.ErrTeamGone) {
+		response.Gone(c, "team has been deleted")
 		return
 	}
 	if errors.Is(err, repository.ErrForbidden) {
@@ -481,6 +497,7 @@ func isTaskValidationError(err error) bool {
 		errors.Is(err, service.ErrInvalidTaskPriority) ||
 		errors.Is(err, service.ErrInvalidTaskDeadline) ||
 		errors.Is(err, service.ErrInvalidTeamID) ||
+		errors.Is(err, service.ErrTeamIDImmutable) ||
 		errors.Is(err, service.ErrInvalidAssigneeID) ||
 		errors.Is(err, service.ErrAssigneeNotInTeam) ||
 		errors.Is(err, service.ErrInvalidTaskDependency) ||

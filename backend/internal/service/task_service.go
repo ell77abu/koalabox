@@ -28,6 +28,8 @@ var (
 	ErrCrossTaskDependency   = errors.New("cross team or cross user task dependency is forbidden")
 	ErrDependenciesNotDone   = errors.New("predecessor tasks are not completed")
 	ErrDependencyCycle       = errors.New("dependency cycle detected")
+	ErrTeamIDImmutable       = errors.New("cannot change team id for team task")
+	ErrTeamGone              = errors.New("team is gone")
 )
 
 type CreateTaskRequest struct {
@@ -379,6 +381,9 @@ func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.T
 		}
 		task.Deadline = deadline
 	}
+	if req.TeamID != nil && task.TeamID != nil && *req.TeamID != *task.TeamID {
+		return nil, ErrTeamIDImmutable
+	}
 	if req.TeamID != nil {
 		if _, err := s.teamRepo.GetByID(ctx, *req.TeamID); err != nil {
 			return nil, ErrInvalidTeamID
@@ -501,14 +506,11 @@ func (s *taskService) AddDependency(ctx context.Context, userID, taskID, predece
 		if successor.UserID != userID || predecessor.UserID != userID {
 			return nil, ErrCrossTaskDependency
 		}
-		hasCycle, err := s.taskRepo.HasDependencyPath(ctx, taskID, predecessorID)
-		if err != nil {
-			return nil, err
-		}
-		if hasCycle {
+		dep, err := s.taskRepo.AddDependencyWithCycleCheck(ctx, predecessorID, taskID)
+		if errors.Is(err, repository.ErrDependencyCycle) {
 			return nil, ErrDependencyCycle
 		}
-		return s.taskRepo.AddDependency(ctx, predecessorID, taskID)
+		return dep, err
 	}
 
 	if successor.TeamID == nil || predecessor.TeamID == nil {
@@ -516,6 +518,9 @@ func (s *taskService) AddDependency(ctx context.Context, userID, taskID, predece
 	}
 	if *successor.TeamID != *predecessor.TeamID {
 		return nil, ErrCrossTaskDependency
+	}
+	if err := s.ensureTeamActive(ctx, *successor.TeamID); err != nil {
+		return nil, err
 	}
 
 	role, err := s.teamRepo.GetMemberRole(ctx, *successor.TeamID, userID)
@@ -529,15 +534,11 @@ func (s *taskService) AddDependency(ctx context.Context, userID, taskID, predece
 		return nil, ErrTeamRoleDenied
 	}
 
-	hasCycle, err := s.taskRepo.HasDependencyPath(ctx, taskID, predecessorID)
-	if err != nil {
-		return nil, err
-	}
-	if hasCycle {
+	dep, err := s.taskRepo.AddDependencyWithCycleCheck(ctx, predecessorID, taskID)
+	if errors.Is(err, repository.ErrDependencyCycle) {
 		return nil, ErrDependencyCycle
 	}
-
-	return s.taskRepo.AddDependency(ctx, predecessorID, taskID)
+	return dep, err
 }
 
 func (s *taskService) RemoveDependency(ctx context.Context, userID, taskID, predecessorID uint64) error {
@@ -567,6 +568,9 @@ func (s *taskService) RemoveDependency(ctx context.Context, userID, taskID, pred
 	}
 	if *successor.TeamID != *predecessor.TeamID {
 		return ErrCrossTaskDependency
+	}
+	if err := s.ensureTeamActive(ctx, *successor.TeamID); err != nil {
+		return err
 	}
 
 	role, err := s.teamRepo.GetMemberRole(ctx, *successor.TeamID, userID)
@@ -598,6 +602,9 @@ func (s *taskService) GetDependencies(ctx context.Context, userID, taskID uint64
 			return nil, repository.ErrForbidden
 		}
 	} else {
+		if err := s.ensureTeamActive(ctx, *task.TeamID); err != nil {
+			return nil, err
+		}
 		isMember, err := s.teamRepo.IsMember(ctx, *task.TeamID, userID)
 		if err != nil {
 			return nil, err
@@ -637,6 +644,9 @@ func (s *taskService) GetDependencyGraph(ctx context.Context, userID, taskID uin
 			return nil, repository.ErrForbidden
 		}
 	} else {
+		if err := s.ensureTeamActive(ctx, *task.TeamID); err != nil {
+			return nil, err
+		}
 		isMember, err := s.teamRepo.IsMember(ctx, *task.TeamID, userID)
 		if err != nil {
 			return nil, err
@@ -705,6 +715,22 @@ func (s *taskService) ensureDependenciesCompleted(ctx context.Context, taskID ui
 			ids = append(ids, predecessor.ID)
 		}
 		return &UnresolvedDependenciesError{IDs: ids, Predecessors: predecessors}
+	}
+	return nil
+}
+
+func (s *taskService) ensureTeamActive(ctx context.Context, teamID uint64) error {
+	if _, err := s.teamRepo.GetByID(ctx, teamID); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			deleted, derr := s.teamRepo.IsDeleted(ctx, teamID)
+			if derr != nil {
+				return derr
+			}
+			if deleted {
+				return ErrTeamGone
+			}
+		}
+		return err
 	}
 	return nil
 }

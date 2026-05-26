@@ -32,6 +32,7 @@ type TaskRepository interface {
 	DeleteByID(ctx context.Context, id uint64) error
 	ClearAssigneeForTeamTasks(ctx context.Context, teamID, assigneeID uint64) error
 	AddDependency(ctx context.Context, predecessorID, successorID uint64) (*model.TaskDependency, error)
+	AddDependencyWithCycleCheck(ctx context.Context, predecessorID, successorID uint64) (*model.TaskDependency, error)
 	RemoveDependency(ctx context.Context, predecessorID, successorID uint64) error
 	ListPredecessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error)
 	ListSuccessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error)
@@ -556,6 +557,39 @@ func (r *taskRepository) AddDependency(ctx context.Context, predecessorID, succe
 	return nil, err
 }
 
+func (r *taskRepository) AddDependencyWithCycleCheck(ctx context.Context, predecessorID, successorID uint64) (*model.TaskDependency, error) {
+	var dep *model.TaskDependency
+	return dep, r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockTaskIDs(tx, predecessorID, successorID); err != nil {
+			return err
+		}
+
+		hasCycle, err := hasDependencyPathTx(tx, successorID, predecessorID)
+		if err != nil {
+			return err
+		}
+		if hasCycle {
+			return ErrDependencyCycle
+		}
+
+		created := &model.TaskDependency{
+			PredecessorID: predecessorID,
+			SuccessorID:   successorID,
+		}
+		err = tx.Create(created).Error
+		if err == nil {
+			dep = created
+			return nil
+		}
+
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return ErrConflict
+		}
+		return err
+	})
+}
+
 func (r *taskRepository) RemoveDependency(ctx context.Context, predecessorID, successorID uint64) error {
 	res := r.db.WithContext(ctx).
 		Where("predecessor_id = ?", predecessorID).
@@ -675,6 +709,32 @@ SELECT 1 AS found FROM dep WHERE successor_id = ? LIMIT 1`
 		return false, err
 	}
 	return found == 1, nil
+}
+
+func hasDependencyPathTx(tx *gorm.DB, fromID, toID uint64) (bool, error) {
+	if fromID == 0 || toID == 0 {
+		return false, nil
+	}
+	const query = `
+WITH RECURSIVE dep(successor_id) AS (
+  SELECT successor_id FROM task_dependencies WHERE predecessor_id = ?
+  UNION
+  SELECT td.successor_id FROM task_dependencies td
+  JOIN dep ON td.predecessor_id = dep.successor_id
+)
+SELECT 1 AS found FROM dep WHERE successor_id = ? LIMIT 1`
+	var found int
+	if err := tx.Raw(query, fromID, toID).Scan(&found).Error; err != nil {
+		return false, err
+	}
+	return found == 1, nil
+}
+
+func lockTaskIDs(tx *gorm.DB, firstID, secondID uint64) error {
+	if firstID > secondID {
+		firstID, secondID = secondID, firstID
+	}
+	return tx.Raw("SELECT pg_advisory_xact_lock(?), pg_advisory_xact_lock(?)", int64(firstID), int64(secondID)).Error
 }
 
 func (r *taskRepository) GetDependencyGraph(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, []model.TaskDependencyLink, error) {
