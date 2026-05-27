@@ -109,21 +109,4 @@ router.beforeEach((to) => {
   return true;
 });
 
-// 全局前置路由守卫
-router.beforeEach((to, from, next) => {
-  // 尝试从 localStorage 获取 token (或者通过 authStore)
-  const isAuthenticated = !!localStorage.getItem('token'); 
-
-  if (to.meta.requiresAuth && !isAuthenticated) {
-    // 试图访问需要登录的页面，但没有 Token，强制踢回登录页
-    next({ name: 'login', query: { redirect: to.fullPath } });
-  } else if (to.meta.guestOnly && isAuthenticated) {
-    // 已经登录了，还试图访问登录/注册页，直接送回任务大厅
-    next({ name: 'tasks' });
-  } else {
-    // 正常放行
-    next();
-  }
-});
-
 export default router;
