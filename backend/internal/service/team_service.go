@@ -235,8 +235,7 @@ func (s *teamService) RemoveMember(ctx context.Context, operatorID, teamID, targ
 
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		teamRepoTx := repository.NewTeamRepository(tx)
-		taskRepoTx := repository.NewTaskRepository(tx)
-		if err := taskRepoTx.ClearAssigneeForTeamTasks(ctx, teamID, targetUserID); err != nil {
+		if err := s.cleanupDepartingMember(ctx, tx, teamID, targetUserID); err != nil {
 			return err
 		}
 		return teamRepoTx.RemoveMember(ctx, teamID, targetUserID)
@@ -377,12 +376,28 @@ func (s *teamService) Leave(ctx context.Context, userID, teamID uint64) error {
 
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		teamRepoTx := repository.NewTeamRepository(tx)
-		taskRepoTx := repository.NewTaskRepository(tx)
-		if err := taskRepoTx.ClearAssigneeForTeamTasks(ctx, teamID, userID); err != nil {
+		if err := s.cleanupDepartingMember(ctx, tx, teamID, userID); err != nil {
 			return err
 		}
 		return teamRepoTx.RemoveMember(ctx, teamID, userID)
 	})
+}
+
+func (s *teamService) cleanupDepartingMember(ctx context.Context, tx *gorm.DB, teamID, userID uint64) error {
+	taskRepoTx := repository.NewTaskRepository(tx)
+	if err := taskRepoTx.ClearAssigneeForTeamTasks(ctx, teamID, userID); err != nil {
+		return err
+	}
+
+	// 成员离队后，回收该成员在团队内的相关分配请求，避免残留可见性与状态歧义。
+	return tx.WithContext(ctx).
+		Model(&model.TaskAssignmentRequest{}).
+		Where("team_id = ?", teamID).
+		Where("assignee_id = ?", userID).
+		Where("status IN ?", []model.InvitationStatus{model.InvitationStatusPending, model.InvitationStatusAccepted}).
+		Updates(map[string]interface{}{
+			"status": model.InvitationStatusDeclined,
+		}).Error
 }
 
 func (s *teamService) TransferOwnership(ctx context.Context, operatorID, teamID, newOwnerID uint64) error {
