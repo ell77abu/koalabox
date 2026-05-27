@@ -26,12 +26,20 @@ http.interceptors.response.use(
 
     // Ignore auth pages' own 401 handling.
     const isAuthRequest = requestUrl.includes('/auth/login') || requestUrl.includes('/auth/register');
+    
     if (status === 401 && !isAuthRequest) {
       authStore.clearAuth();
       if (!window.location.pathname.startsWith('/login')) {
         const redirect = encodeURIComponent(window.location.pathname + window.location.search);
         window.location.href = `/login?redirect=${redirect}`;
       }
+    }
+
+    // 403 越权操作拦截
+    if (status === 403) {
+      alert('警告：检测到越权操作！系统将重置您的状态。');
+      // 强制刷新页面，让前端代码重新加载，重置被用户利用插件篡改的 Vue 变量
+      window.location.reload(); 
     }
 
     return Promise.reject(error);
