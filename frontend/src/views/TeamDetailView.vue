@@ -460,7 +460,6 @@ const displayedTeamTasks = computed(() => {
 // 👇 Lab3 新增：细化移除成员权限校验
 const canRemoveMember = (member) => {
   if (myRole.value === 'Owner' && member.role !== 'Owner') return true;
-  if (myRole.value === 'Admin' && member.role === 'Member') return true;
   return false;
 };
 
