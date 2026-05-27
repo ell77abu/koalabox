@@ -81,20 +81,28 @@ func (s *teamService) Create(ctx context.Context, ownerID uint64, req CreateTeam
 		return nil, ErrInvalidTeamName
 	}
 
+	db, err := getTeamRepoDB(s.teamRepo)
+	if err != nil {
+		return nil, err
+	}
+
 	team := &model.Team{
 		Name:    name,
 		OwnerID: ownerID,
 	}
-	if err := s.teamRepo.Create(ctx, team); err != nil {
-		return nil, err
-	}
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		teamRepoTx := repository.NewTeamRepository(tx)
+		if err := teamRepoTx.Create(ctx, team); err != nil {
+			return err
+		}
 
-	owner := &model.TeamMember{
-		TeamID: team.ID,
-		UserID: ownerID,
-		Role:   model.TeamRoleOwner,
-	}
-	if err := s.teamRepo.AddMember(ctx, owner); err != nil {
+		owner := &model.TeamMember{
+			TeamID: team.ID,
+			UserID: ownerID,
+			Role:   model.TeamRoleOwner,
+		}
+		return teamRepoTx.AddMember(ctx, owner)
+	}); err != nil {
 		return nil, err
 	}
 	return team, nil
@@ -474,6 +482,28 @@ func (s *teamService) DeleteTeam(ctx context.Context, operatorID, teamID uint64)
 			return errors.New("team repository does not support soft delete members")
 		}
 		if err := memberDeleter.SoftDeleteMembersByTeamID(ctx, teamID); err != nil {
+			return err
+		}
+
+		// 团队解散后，回收仍有效的成员邀请，避免用户看到已失效邀请。
+		if err := tx.WithContext(ctx).
+			Model(&model.TeamInvitation{}).
+			Where("team_id = ?", teamID).
+			Where("status = ?", model.InvitationStatusPending).
+			Updates(map[string]interface{}{
+				"status": model.InvitationStatusDeclined,
+			}).Error; err != nil {
+			return err
+		}
+
+		// 团队解散后，回收任务分配请求，避免残留有效状态干扰审计和统计。
+		if err := tx.WithContext(ctx).
+			Model(&model.TaskAssignmentRequest{}).
+			Where("team_id = ?", teamID).
+			Where("status IN ?", []model.InvitationStatus{model.InvitationStatusPending, model.InvitationStatusAccepted}).
+			Updates(map[string]interface{}{
+				"status": model.InvitationStatusDeclined,
+			}).Error; err != nil {
 			return err
 		}
 

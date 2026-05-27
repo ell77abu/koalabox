@@ -28,7 +28,7 @@ var (
 	ErrCrossTaskDependency   = errors.New("cross team or cross user task dependency is forbidden")
 	ErrDependenciesNotDone   = errors.New("predecessor tasks are not completed")
 	ErrDependencyCycle       = errors.New("dependency cycle detected")
-	ErrTeamIDImmutable       = errors.New("cannot change team id for team task")
+	ErrTeamIDImmutable       = errors.New("cannot change team id for existing task")
 	ErrTeamGone              = errors.New("team is gone")
 )
 
@@ -381,14 +381,8 @@ func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.T
 		}
 		task.Deadline = deadline
 	}
-	if req.TeamID != nil && task.TeamID != nil && *req.TeamID != *task.TeamID {
-		return nil, ErrTeamIDImmutable
-	}
 	if req.TeamID != nil {
-		if _, err := s.teamRepo.GetByID(ctx, *req.TeamID); err != nil {
-			return nil, ErrInvalidTeamID
-		}
-		task.TeamID = req.TeamID
+		return nil, ErrTeamIDImmutable
 	}
 	if req.AssigneeID.Set {
 		if !req.AssigneeID.Valid {
