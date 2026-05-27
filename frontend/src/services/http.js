@@ -37,10 +37,10 @@ http.interceptors.response.use(
 
     // 403 越权操作拦截
     if (status === 403) {
-      alert('警告：检测到越权操作！系统将重置您的状态。');
-      // 强制刷新页面，让前端代码重新加载，重置被用户利用插件篡改的 Vue 变量
-      window.location.reload(); 
-    }
+      alert('您的操作权限不足，系统已重置您的状态。');
+      authStore.clearAuth(); // 清理前端状态
+      window.location.href = '/login'; // 安全切回登录页，彻底切断原页面的异步重试死循环
+}
 
     return Promise.reject(error);
   }
