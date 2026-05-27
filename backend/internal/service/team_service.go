@@ -120,19 +120,8 @@ func (s *teamService) ListMine(ctx context.Context, userID uint64, search string
 }
 
 func (s *teamService) Update(ctx context.Context, operatorID, teamID uint64, req UpdateTeamRequest) error {
-	if _, err := s.teamRepo.GetByID(ctx, teamID); err != nil {
+	if err := s.requireTeamOwner(ctx, teamID, operatorID); err != nil {
 		return err
-	}
-
-	operatorRole, err := s.teamRepo.GetMemberRole(ctx, teamID, operatorID)
-	if errors.Is(err, repository.ErrNotFound) {
-		return repository.ErrForbidden
-	}
-	if err != nil {
-		return err
-	}
-	if operatorRole != model.TeamRoleOwner {
-		return ErrTeamOwnerOnly
 	}
 
 	name := strings.TrimSpace(req.Name)
@@ -144,19 +133,8 @@ func (s *teamService) Update(ctx context.Context, operatorID, teamID uint64, req
 }
 
 func (s *teamService) AddMember(ctx context.Context, operatorID, teamID uint64, req AddTeamMemberRequest) (*model.TeamMember, error) {
-	if _, err := s.teamRepo.GetByID(ctx, teamID); err != nil {
+	if err := s.requireTeamOwner(ctx, teamID, operatorID); err != nil {
 		return nil, err
-	}
-
-	operatorRole, err := s.teamRepo.GetMemberRole(ctx, teamID, operatorID)
-	if errors.Is(err, repository.ErrNotFound) {
-		return nil, repository.ErrForbidden
-	}
-	if err != nil {
-		return nil, err
-	}
-	if operatorRole != model.TeamRoleOwner {
-		return nil, ErrTeamOwnerOnly
 	}
 
 	targetUserID := req.UserID
@@ -187,7 +165,7 @@ func (s *teamService) AddMember(ctx context.Context, operatorID, teamID uint64, 
 
 	if _, err := s.inviteRepo.GetPendingByTeamAndInvitee(ctx, teamID, targetUserID); err == nil {
 		return nil, repository.ErrConflict
-	} else if err != nil && !errors.Is(err, repository.ErrNotFound) {
+	} else if !errors.Is(err, repository.ErrNotFound) {
 		return nil, err
 	}
 
@@ -208,19 +186,8 @@ func (s *teamService) AddMember(ctx context.Context, operatorID, teamID uint64, 
 }
 
 func (s *teamService) RemoveMember(ctx context.Context, operatorID, teamID, targetUserID uint64) error {
-	if _, err := s.teamRepo.GetByID(ctx, teamID); err != nil {
+	if err := s.requireTeamOwner(ctx, teamID, operatorID); err != nil {
 		return err
-	}
-
-	operatorRole, err := s.teamRepo.GetMemberRole(ctx, teamID, operatorID)
-	if errors.Is(err, repository.ErrNotFound) {
-		return repository.ErrForbidden
-	}
-	if err != nil {
-		return err
-	}
-	if operatorRole != model.TeamRoleOwner {
-		return ErrTeamOwnerOnly
 	}
 	if operatorID == targetUserID {
 		return ErrCannotRemoveSelf
@@ -251,19 +218,8 @@ func (s *teamService) RemoveMember(ctx context.Context, operatorID, teamID, targ
 }
 
 func (s *teamService) UpdateMemberRole(ctx context.Context, operatorID, teamID, targetUserID uint64, req UpdateTeamMemberRoleRequest) (*model.TeamMember, error) {
-	if _, err := s.teamRepo.GetByID(ctx, teamID); err != nil {
+	if err := s.requireTeamOwner(ctx, teamID, operatorID); err != nil {
 		return nil, err
-	}
-
-	operatorRole, err := s.teamRepo.GetMemberRole(ctx, teamID, operatorID)
-	if errors.Is(err, repository.ErrNotFound) {
-		return nil, repository.ErrForbidden
-	}
-	if err != nil {
-		return nil, err
-	}
-	if operatorRole != model.TeamRoleOwner {
-		return nil, ErrTeamOwnerOnly
 	}
 
 	targetRole, err := s.teamRepo.GetMemberRole(ctx, teamID, targetUserID)
@@ -291,16 +247,8 @@ func (s *teamService) UpdateMemberRole(ctx context.Context, operatorID, teamID, 
 }
 
 func (s *teamService) ListMembers(ctx context.Context, operatorID, teamID uint64) ([]model.TeamMemberDetail, error) {
-	if _, err := s.teamRepo.GetByID(ctx, teamID); err != nil {
+	if err := s.requireTeamMember(ctx, teamID, operatorID); err != nil {
 		return nil, err
-	}
-
-	isMember, err := s.teamRepo.IsMember(ctx, teamID, operatorID)
-	if err != nil {
-		return nil, err
-	}
-	if !isMember {
-		return nil, repository.ErrForbidden
 	}
 
 	return s.teamRepo.ListMembers(ctx, teamID)
@@ -364,10 +312,7 @@ func (s *teamService) Leave(ctx context.Context, userID, teamID uint64) error {
 		return err
 	}
 
-	role, err := s.teamRepo.GetMemberRole(ctx, teamID, userID)
-	if errors.Is(err, repository.ErrNotFound) {
-		return repository.ErrForbidden
-	}
+	role, err := s.getTeamRoleOrForbidden(ctx, teamID, userID)
 	if err != nil {
 		return err
 	}
@@ -413,19 +358,8 @@ func (s *teamService) TransferOwnership(ctx context.Context, operatorID, teamID,
 		return ErrInvalidTransferTarget
 	}
 
-	if _, err := s.teamRepo.GetByID(ctx, teamID); err != nil {
+	if err := s.requireTeamOwner(ctx, teamID, operatorID); err != nil {
 		return err
-	}
-
-	role, err := s.teamRepo.GetMemberRole(ctx, teamID, operatorID)
-	if errors.Is(err, repository.ErrNotFound) {
-		return repository.ErrForbidden
-	}
-	if err != nil {
-		return err
-	}
-	if role != model.TeamRoleOwner {
-		return ErrTeamOwnerOnly
 	}
 
 	if _, err := s.teamRepo.GetMemberRole(ctx, teamID, newOwnerID); err != nil {
@@ -439,19 +373,8 @@ func (s *teamService) TransferOwnership(ctx context.Context, operatorID, teamID,
 }
 
 func (s *teamService) DeleteTeam(ctx context.Context, operatorID, teamID uint64) error {
-	if _, err := s.teamRepo.GetByID(ctx, teamID); err != nil {
+	if err := s.requireTeamOwner(ctx, teamID, operatorID); err != nil {
 		return err
-	}
-
-	role, err := s.teamRepo.GetMemberRole(ctx, teamID, operatorID)
-	if errors.Is(err, repository.ErrNotFound) {
-		return repository.ErrForbidden
-	}
-	if err != nil {
-		return err
-	}
-	if role != model.TeamRoleOwner {
-		return ErrTeamOwnerOnly
 	}
 	if s.taskRepo == nil {
 		return errors.New("task repository is not configured")

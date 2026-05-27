@@ -153,18 +153,9 @@ func (s *taskService) List(ctx context.Context, userID uint64, userLevel uint8, 
 			list, total, err = s.taskRepo.ListAll(ctx, page, size)
 		}
 	} else if teamID != nil {
-		if _, err = s.teamRepo.GetByID(ctx, *teamID); err != nil {
-			return nil, 0, 0, 0, ErrInvalidTeamID
+		if err := s.requireExistingTeamMember(ctx, *teamID, userID); err != nil {
+			return nil, 0, 0, 0, err
 		}
-
-		isMember, memberErr := s.teamRepo.IsMember(ctx, *teamID, userID)
-		if memberErr != nil {
-			return nil, 0, 0, 0, memberErr
-		}
-		if !isMember {
-			return nil, 0, 0, 0, repository.ErrForbidden
-		}
-
 		list, total, err = s.taskRepo.ListByTeamID(ctx, *teamID, page, size)
 	} else {
 		list, total, err = s.taskRepo.ListPersonalAndAssignedTeam(ctx, userID, page, size)
@@ -209,16 +200,8 @@ func (s *taskService) Create(ctx context.Context, userID uint64, req CreateTaskR
 		if _, err := s.teamRepo.GetByID(ctx, *req.TeamID); err != nil {
 			return nil, ErrInvalidTeamID
 		}
-
-		role, err := s.teamRepo.GetMemberRole(ctx, *req.TeamID, userID)
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, repository.ErrForbidden
-		}
-		if err != nil {
+		if err := s.requireTeamManager(ctx, *req.TeamID, userID); err != nil {
 			return nil, err
-		}
-		if !canManageTeamTasks(role) {
-			return nil, ErrTeamRoleDenied
 		}
 	}
 
@@ -328,15 +311,8 @@ func (s *taskService) Delete(ctx context.Context, userID uint64, userLevel uint8
 		return s.taskRepo.DeleteByID(ctx, taskID)
 	}
 
-	role, err := s.teamRepo.GetMemberRole(ctx, *task.TeamID, userID)
-	if errors.Is(err, repository.ErrNotFound) {
-		return repository.ErrForbidden
-	}
-	if err != nil {
+	if err := s.requireTeamManager(ctx, *task.TeamID, userID); err != nil {
 		return err
-	}
-	if !canManageTeamTasks(role) {
-		return ErrTeamRoleDenied
 	}
 
 	return s.taskRepo.DeleteByID(ctx, taskID)
@@ -517,15 +493,8 @@ func (s *taskService) AddDependency(ctx context.Context, userID, taskID, predece
 		return nil, err
 	}
 
-	role, err := s.teamRepo.GetMemberRole(ctx, *successor.TeamID, userID)
-	if errors.Is(err, repository.ErrNotFound) {
-		return nil, repository.ErrForbidden
-	}
-	if err != nil {
+	if err := s.requireTeamManager(ctx, *successor.TeamID, userID); err != nil {
 		return nil, err
-	}
-	if !canManageTeamTasks(role) {
-		return nil, ErrTeamRoleDenied
 	}
 
 	dep, err := s.taskRepo.AddDependencyWithCycleCheck(ctx, predecessorID, taskID)
@@ -567,15 +536,8 @@ func (s *taskService) RemoveDependency(ctx context.Context, userID, taskID, pred
 		return err
 	}
 
-	role, err := s.teamRepo.GetMemberRole(ctx, *successor.TeamID, userID)
-	if errors.Is(err, repository.ErrNotFound) {
-		return repository.ErrForbidden
-	}
-	if err != nil {
+	if err := s.requireTeamManager(ctx, *successor.TeamID, userID); err != nil {
 		return err
-	}
-	if !canManageTeamTasks(role) {
-		return ErrTeamRoleDenied
 	}
 
 	return s.taskRepo.RemoveDependency(ctx, predecessorID, taskID)
@@ -591,21 +553,8 @@ func (s *taskService) GetDependencies(ctx context.Context, userID, taskID uint64
 		return nil, err
 	}
 
-	if task.TeamID == nil {
-		if task.UserID != userID {
-			return nil, repository.ErrForbidden
-		}
-	} else {
-		if err := s.ensureTeamActive(ctx, *task.TeamID); err != nil {
-			return nil, err
-		}
-		isMember, err := s.teamRepo.IsMember(ctx, *task.TeamID, userID)
-		if err != nil {
-			return nil, err
-		}
-		if !isMember {
-			return nil, repository.ErrForbidden
-		}
+	if err := s.requireTaskReadAccess(ctx, task, userID); err != nil {
+		return nil, err
 	}
 
 	predecessors, err := s.taskRepo.ListPredecessors(ctx, taskID)
@@ -633,21 +582,8 @@ func (s *taskService) GetDependencyGraph(ctx context.Context, userID, taskID uin
 		return nil, err
 	}
 
-	if task.TeamID == nil {
-		if task.UserID != userID {
-			return nil, repository.ErrForbidden
-		}
-	} else {
-		if err := s.ensureTeamActive(ctx, *task.TeamID); err != nil {
-			return nil, err
-		}
-		isMember, err := s.teamRepo.IsMember(ctx, *task.TeamID, userID)
-		if err != nil {
-			return nil, err
-		}
-		if !isMember {
-			return nil, repository.ErrForbidden
-		}
+	if err := s.requireTaskReadAccess(ctx, task, userID); err != nil {
+		return nil, err
 	}
 
 	nodes, links, err := s.taskRepo.GetDependencyGraph(ctx, taskID)

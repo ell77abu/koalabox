@@ -19,6 +19,7 @@ import (
 
 type mockTeamService struct {
 	addMemberFn func(ctx context.Context, operatorID, teamID uint64, req service.AddTeamMemberRequest) (*model.TeamMember, error)
+	leaveFn     func(ctx context.Context, userID, teamID uint64) error
 }
 
 func (m *mockTeamService) Create(ctx context.Context, ownerID uint64, req service.CreateTeamRequest) (*model.Team, error) {
@@ -65,7 +66,10 @@ func (m *mockTeamService) DeclineInvitation(ctx context.Context, userID, invitat
 }
 
 func (m *mockTeamService) Leave(ctx context.Context, userID, teamID uint64) error {
-	panic("not used")
+	if m.leaveFn == nil {
+		panic("leaveFn not set")
+	}
+	return m.leaveFn(ctx, userID, teamID)
 }
 
 func (m *mockTeamService) TransferOwnership(ctx context.Context, operatorID, teamID, newOwnerID uint64) error {
@@ -169,4 +173,70 @@ func TestTeamHandler_AddMember_Forbidden(t *testing.T) {
 	assert.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.Equal(t, 403, resp.Code)
 	assert.Equal(t, "forbidden", resp.Message)
+}
+
+func TestTeamHandler_Leave_OwnerForbidden(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	userID := uint64(9)
+	teamID := uint64(123)
+
+	mock := &mockTeamService{
+		leaveFn: func(ctx context.Context, gotUserID, gotTeamID uint64) error {
+			assert.Equal(t, userID, gotUserID)
+			assert.Equal(t, teamID, gotTeamID)
+			return service.ErrOwnerCannotLeave
+		},
+	}
+
+	h := NewTeamHandler(mock)
+	r := gin.New()
+	r.POST("/teams/:team_id/leave", func(c *gin.Context) {
+		c.Set(middleware.ContextUserIDKey, userID)
+		h.Leave(c)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/teams/123/leave", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+
+	var resp response.Common
+	assert.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, 403, resp.Code)
+	assert.Equal(t, "forbidden", resp.Message)
+}
+
+func TestTeamHandler_Leave_Success(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	userID := uint64(11)
+	teamID := uint64(321)
+
+	mock := &mockTeamService{
+		leaveFn: func(ctx context.Context, gotUserID, gotTeamID uint64) error {
+			assert.Equal(t, userID, gotUserID)
+			assert.Equal(t, teamID, gotTeamID)
+			return nil
+		},
+	}
+
+	h := NewTeamHandler(mock)
+	r := gin.New()
+	r.POST("/teams/:team_id/leave", func(c *gin.Context) {
+		c.Set(middleware.ContextUserIDKey, userID)
+		h.Leave(c)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/teams/321/leave", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	var resp response.Common
+	assert.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, 0, resp.Code)
+	assert.Equal(t, "已成功离开团队", resp.Message)
 }

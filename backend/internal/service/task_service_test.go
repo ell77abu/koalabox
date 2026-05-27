@@ -121,6 +121,7 @@ type teamRepoForTaskMock struct {
 	getByIDFn       func(ctx context.Context, teamID uint64) (*model.Team, error)
 	isMemberFn      func(ctx context.Context, teamID, userID uint64) (bool, error)
 	getMemberRoleFn func(ctx context.Context, teamID, userID uint64) (model.TeamRole, error)
+	isDeletedFn     func(ctx context.Context, teamID uint64) (bool, error)
 }
 
 func (m *teamRepoForTaskMock) Create(ctx context.Context, team *model.Team) error {
@@ -164,6 +165,12 @@ func (m *teamRepoForTaskMock) ListMembers(ctx context.Context, teamID uint64) ([
 }
 func (m *teamRepoForTaskMock) TransferOwnership(ctx context.Context, teamID, oldOwnerID, newOwnerID uint64) error {
 	panic("unexpected call to TransferOwnership")
+}
+func (m *teamRepoForTaskMock) IsDeleted(ctx context.Context, teamID uint64) (bool, error) {
+	if m.isDeletedFn != nil {
+		return m.isDeletedFn(ctx, teamID)
+	}
+	return false, nil
 }
 
 type taskUserRepoStub struct{}
@@ -292,6 +299,62 @@ func TestTaskServiceUpdateRejectsMemberEditingNonStatusFields(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrMemberStatusOnly)
+}
+
+func TestTaskServiceUpdateRejectsTeamIDChangeForPersonalTask(t *testing.T) {
+	newTeamID := uint64(77)
+	svc := NewTaskService(
+		&taskRepoMock{
+			getByIDFn: func(ctx context.Context, id uint64) (*model.Task, error) {
+				return &model.Task{
+					ID:     id,
+					UserID: 9,
+					Status: model.TaskStatusTODO,
+				}, nil
+			},
+		},
+		&teamRepoForTaskMock{},
+		&taskUserRepoStub{},
+		&taskAssignRepoStub{},
+	)
+
+	_, err := svc.Update(context.Background(), 9, 101, UpdateTaskRequest{
+		TeamID: &newTeamID,
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTeamIDImmutable)
+}
+
+func TestTaskServiceUpdateRejectsTeamIDChangeForTeamTask(t *testing.T) {
+	oldTeamID := uint64(5)
+	newTeamID := uint64(8)
+	svc := NewTaskService(
+		&taskRepoMock{
+			getByIDFn: func(ctx context.Context, id uint64) (*model.Task, error) {
+				return &model.Task{
+					ID:     id,
+					UserID: 2,
+					TeamID: &oldTeamID,
+					Status: model.TaskStatusTODO,
+				}, nil
+			},
+		},
+		&teamRepoForTaskMock{
+			getMemberRoleFn: func(ctx context.Context, teamID, userID uint64) (model.TeamRole, error) {
+				assert.Equal(t, oldTeamID, teamID)
+				assert.Equal(t, uint64(10), userID)
+				return model.TeamRoleOwner, nil
+			},
+		},
+		&taskUserRepoStub{},
+		&taskAssignRepoStub{},
+	)
+
+	_, err := svc.Update(context.Background(), 10, 102, UpdateTaskRequest{
+		TeamID: &newTeamID,
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTeamIDImmutable)
 }
 
 func uint64Ptr(v uint64) *uint64 {
