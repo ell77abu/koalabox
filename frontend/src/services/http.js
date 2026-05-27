@@ -26,6 +26,7 @@ http.interceptors.response.use(
 
     // Ignore auth pages' own 401 handling.
     const isAuthRequest = requestUrl.includes('/auth/login') || requestUrl.includes('/auth/register');
+    
     if (status === 401 && !isAuthRequest) {
       authStore.clearAuth();
       if (!window.location.pathname.startsWith('/login')) {
@@ -33,6 +34,13 @@ http.interceptors.response.use(
         window.location.href = `/login?redirect=${redirect}`;
       }
     }
+
+    // 403 越权操作拦截
+    if (status === 403) {
+      alert('您的操作权限不足，系统已重置您的状态。');
+      authStore.clearAuth(); // 清理前端状态
+      window.location.href = '/login'; // 安全切回登录页，彻底切断原页面的异步重试死循环
+}
 
     return Promise.reject(error);
   }

@@ -103,7 +103,11 @@ const onSubmit = async () => {
     }
 
     authStore.setAuth(payload.username, payload.level ?? 0);
-    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/tasks';
+    let redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/tasks';
+    // 安全合规校验：防止恶意外链重定向
+    if (!redirect.startsWith('/') || redirect.startsWith('//') || redirect.startsWith('\\\\')) {
+      redirect = '/tasks';
+    }
     await router.replace(redirect);
   } catch (error) {
     errorMessage.value = getApiErrorMessage(error, '登录失败');
