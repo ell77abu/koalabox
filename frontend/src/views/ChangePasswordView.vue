@@ -132,6 +132,7 @@ import { reactive, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import { changePasswordApi } from '../services/auth';
 import { validatePassword } from '../utils/validators';
+import { getApiErrorMessage } from '../utils/apiError';
 
 const router = useRouter();
 
@@ -203,9 +204,10 @@ const onSubmit = async () => {
     }, 900);
   } catch (error) {
     if (isOldPasswordError(error)) {
-      errorMessage.value = '旧密码错误，请重新输入';
+      const suffix = error?.response?.status ? `（HTTP ${error.response.status}）` : '';
+      errorMessage.value = `修改密码失败：旧密码错误，请重新输入${suffix}`;
     } else {
-      errorMessage.value = error.response?.data?.message || '修改密码失败，请稍后重试';
+      errorMessage.value = getApiErrorMessage(error, '修改密码失败');
     }
   } finally {
     submitting.value = false;

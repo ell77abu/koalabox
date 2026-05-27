@@ -113,6 +113,7 @@ import { reactive, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import { registerApi } from '../services/auth';
 import { validatePassword, validateUsername } from '../utils/validators';
+import { getApiErrorMessage } from '../utils/apiError';
 
 const router = useRouter();
 
@@ -161,11 +162,7 @@ const onSubmit = async () => {
       router.replace('/login');
     }, 800);
   } catch (error) {
-    if (error.response?.status === 409) {
-      errorMessage.value = '用户名已存在，请更换用户名';
-    } else {
-      errorMessage.value = error.response?.data?.message || '注册失败，请稍后重试';
-    }
+    errorMessage.value = getApiErrorMessage(error, '注册失败');
   } finally {
     submitting.value = false;
   }

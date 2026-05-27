@@ -52,6 +52,13 @@
           <p>加载中...</p>
         </div>
 
+        <div v-else-if="loadError" class="empty-state error-state">
+          <p>{{ loadError }}</p>
+          <div class="error-actions">
+            <button class="btn btn-small btn-primary-style" type="button" @click="loadTeams">重试</button>
+          </div>
+        </div>
+
         <div v-else-if="displayedTeams.length === 0" class="empty-state">
           <p v-if="isSearching">未找到匹配的团队。</p>
           <p v-else>你还没有加入任何团队，快去创建一个吧！</p>
@@ -102,9 +109,11 @@ import { ref, computed, onMounted } from 'vue';
 import { useRouter, RouterLink } from 'vue-router';
 import { teamStore } from '../stores/team';
 import { getTeamsApi } from '../services/team';
+import { getApiErrorMessage, getApiFailureMessage } from '../utils/apiError';
 
 const router = useRouter();
 const loading = ref(false);
+const loadError = ref('');
 const searchQuery = ref('');
 
 const isSearching = computed(() => searchQuery.value.trim().length > 0);
@@ -124,13 +133,19 @@ const roleBadgeClass = (role) => {
 
 const loadTeams = async () => {
   loading.value = true;
+  loadError.value = '';
   try {
     const res = await getTeamsApi();
     if (res.data.code === 0) {
       teamStore.setTeams(res.data.data.list || []);
+    } else {
+      teamStore.setTeams([]);
+      loadError.value = getApiFailureMessage(res, '加载团队失败');
     }
   } catch (error) {
-    console.error('加载团队失败', error);
+    teamStore.setTeams([]);
+    loadError.value = getApiErrorMessage(error, '加载团队失败');
+    console.error(loadError.value, error);
   } finally {
     loading.value = false;
   }
