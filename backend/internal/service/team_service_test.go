@@ -22,6 +22,7 @@ type teamRepoMock struct {
 	removeMemberFn     func(ctx context.Context, teamID, userID uint64) error
 	updateMemberRoleFn func(ctx context.Context, teamID, userID uint64, role model.TeamRole) error
 	listMembersFn      func(ctx context.Context, teamID uint64) ([]model.TeamMemberDetail, error)
+	isDeletedFn        func(ctx context.Context, teamID uint64) (bool, error)
 }
 
 func (m *teamRepoMock) Create(ctx context.Context, team *model.Team) error {
@@ -93,6 +94,12 @@ func (m *teamRepoMock) ListMembers(ctx context.Context, teamID uint64) ([]model.
 
 func (m *teamRepoMock) TransferOwnership(ctx context.Context, teamID, oldOwnerID, newOwnerID uint64) error {
 	panic("unexpected call to TransferOwnership")
+}
+func (m *teamRepoMock) IsDeleted(ctx context.Context, teamID uint64) (bool, error) {
+	if m.isDeletedFn != nil {
+		return m.isDeletedFn(ctx, teamID)
+	}
+	return false, nil
 }
 
 type userRepoMock struct {
@@ -345,4 +352,65 @@ func TestTeamServiceAcceptInvitationRejectsWrongInvitee(t *testing.T) {
 	err := svc.AcceptInvitation(context.Background(), 1, 7)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, repository.ErrForbidden)
+}
+
+func TestTeamServiceLeaveRejectsOwner(t *testing.T) {
+	svc := NewTeamServiceWithTaskRepo(
+		&teamRepoMock{
+			getByIDFn: func(ctx context.Context, teamID uint64) (*model.Team, error) {
+				return &model.Team{ID: teamID}, nil
+			},
+			getMemberRoleFn: func(ctx context.Context, teamID, userID uint64) (model.TeamRole, error) {
+				assert.Equal(t, uint64(3), teamID)
+				assert.Equal(t, uint64(9), userID)
+				return model.TeamRoleOwner, nil
+			},
+		},
+		&userRepoMock{},
+		&inviteRepoMock{},
+		nil,
+	)
+
+	err := svc.Leave(context.Background(), 9, 3)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrOwnerCannotLeave)
+}
+
+func TestTeamServiceLeaveRejectsNonMember(t *testing.T) {
+	svc := NewTeamServiceWithTaskRepo(
+		&teamRepoMock{
+			getByIDFn: func(ctx context.Context, teamID uint64) (*model.Team, error) {
+				return &model.Team{ID: teamID}, nil
+			},
+			getMemberRoleFn: func(ctx context.Context, teamID, userID uint64) (model.TeamRole, error) {
+				return "", repository.ErrNotFound
+			},
+		},
+		&userRepoMock{},
+		&inviteRepoMock{},
+		nil,
+	)
+
+	err := svc.Leave(context.Background(), 9, 3)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, repository.ErrForbidden)
+}
+
+func TestTeamServiceGetTeamRoleOrForbiddenSuccess(t *testing.T) {
+	svc := NewTeamServiceWithTaskRepo(
+		&teamRepoMock{
+			getMemberRoleFn: func(ctx context.Context, teamID, userID uint64) (model.TeamRole, error) {
+				assert.Equal(t, uint64(3), teamID)
+				assert.Equal(t, uint64(9), userID)
+				return model.TeamRoleAdmin, nil
+			},
+		},
+		&userRepoMock{},
+		&inviteRepoMock{},
+		nil,
+	)
+
+	role, err := svc.(*teamService).getTeamRoleOrForbidden(context.Background(), 3, 9)
+	require.NoError(t, err)
+	assert.Equal(t, model.TeamRoleAdmin, role)
 }
