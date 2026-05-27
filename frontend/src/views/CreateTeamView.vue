@@ -35,6 +35,7 @@
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { createTeamApi } from '../services/team';
+import { getApiErrorMessage, getApiFailureMessage } from '../utils/apiError';
 
 const router = useRouter();
 const submitting = ref(false);
@@ -53,10 +54,10 @@ const onCreateTeam = async () => {
       // 创建成功后自动跳回团队列表
       router.push('/teams');
     } else {
-      createError.value = res.data.message || '创建失败';
+      createError.value = getApiFailureMessage(res, '创建团队失败', '创建失败');
     }
   } catch (error) {
-    createError.value = error.response?.data?.message || '创建团队请求失败';
+    createError.value = getApiErrorMessage(error, '创建团队失败');
   } finally {
     submitting.value = false;
   }

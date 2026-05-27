@@ -35,6 +35,8 @@
         </div>
       </header>
 
+      <p v-if="teamLoadError" class="error-banner">{{ teamLoadError }}</p>
+
       <div class="list-section">
         <div class="list-header">
           <h2>任务列表</h2>
@@ -52,8 +54,15 @@
           <p>加载中...</p>
         </div>
 
+        <div v-else-if="loadError" class="empty-state error-state">
+          <p>{{ loadError }}</p>
+          <div class="error-actions">
+            <button class="btn btn-small btn-primary" type="button" @click="loadTasks">重试</button>
+          </div>
+        </div>
+
         <!-- 只有当账户里【彻底一个任务都没有】时，才显示全局大空状态 -->
-        <div v-else-if="taskStore.tasks.length === 0" class="empty-state">
+        <div v-else-if="taskStore.tasks.value.length === 0" class="empty-state">
           <p>暂无任务，创建一个新任务开始吧！</p>
         </div>
 
@@ -172,9 +181,13 @@
                 <div class="task-main">
                   <div class="task-title-section">
                     <h3>{{ task.title }}</h3>
-                    <span v-if="task.team_id" class="priority-badge" style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;">
-                      👥 团队任务
-                    </span>
+                    <RouterLink
+                      v-if="!isPersonalTask(task)"
+                      class="priority-badge team-link-badge"
+                      :to="`/teams/${task.team_id}`"
+                    >
+                      👥 {{ getTeamName(task) }}
+                    </RouterLink>
                     <span class="status-badge" :class="`status-${task.status.toLowerCase()}`">
                       {{ statusLabel(task.status) }}
                     </span>
@@ -274,9 +287,13 @@
                   <div class="task-main">
                     <div class="task-title-section">
                       <h3>{{ task.title }}</h3>
-                      <span v-if="task.team_id" class="priority-badge" style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;">
-                        👥 团队任务
-                      </span>
+                      <RouterLink
+                        v-if="!isPersonalTask(task)"
+                        class="priority-badge team-link-badge"
+                        :to="`/teams/${task.team_id}`"
+                      >
+                        👥 {{ getTeamName(task) }}
+                      </RouterLink>
                       <span class="status-badge" :class="`status-${task.status.toLowerCase()}`">
                         {{ statusLabel(task.status) }}
                       </span>
@@ -422,6 +439,11 @@ import {
   addTaskDependencyApi,
   removeTaskDependencyApi
 } from '../services/task';
+import {
+  getApiErrorMessage,
+  getApiFailureMessage,
+  getUnresolvedDependenciesMessage,
+} from '../utils/apiError';
 
 // 团队数据与接口
 import { teamStore } from '../stores/team';
@@ -441,9 +463,13 @@ const fetchUserTeams = async () => {
     const res = await getTeamsApi();
     if (res.data.code === 0) {
       teamStore.setTeams(res.data.data.list || []);
+      teamLoadError.value = '';
+    } else {
+      teamLoadError.value = getApiFailureMessage(res, '加载团队列表失败');
     }
   } catch (err) {
-    console.error('加载团队列表失败', err);
+    teamLoadError.value = getApiErrorMessage(err, '加载团队列表失败');
+    console.error(teamLoadError.value, err);
   }
 };
 
@@ -456,6 +482,12 @@ const canEditTaskDetails = (task) => {
   const role = team ? team.role : 'Member'; 
   
   return role === 'Owner' || role === 'Admin';
+};
+
+const getTeamName = (task) => {
+  const teamId = Number(task?.team_id);
+  const team = teamStore.teams.value.find((item) => Number(item.team_id) === teamId);
+  return team?.name || '团队任务';
 };
 // === Lab2 逻辑结束 ===
 
@@ -493,35 +525,9 @@ const findTaskTitleById = (id) => {
   return task?.title || '';
 };
 
-const formatUnresolvedDependenciesMessage = (error) => {
-  const responseData = error.response?.data || {};
-  const data = responseData.data || {};
-  const predecessors = Array.isArray(data.unresolved_predecessors)
-    ? data.unresolved_predecessors
-    : [];
-  const ids = Array.isArray(data.unresolved_predecessor_ids)
-    ? data.unresolved_predecessor_ids
-    : [];
-
-  const names = predecessors
-    .map((task) => task.title || findTaskTitleById(task.id) || `ID ${task.id}`)
-    .filter(Boolean);
-
-  if (names.length === 0) {
-    ids.forEach((id) => {
-      names.push(findTaskTitleById(id) || `ID ${id}`);
-    });
-  }
-
-  const uniqueNames = [...new Set(names)];
-  if (uniqueNames.length > 0) {
-    return `操作失败：前置任务「${uniqueNames.join('」、「')}」尚未完成`;
-  }
-
-  return responseData.message || '操作失败：尚有前置任务未完成';
-};
-
 const loading = ref(false);
+const loadError = ref('');
+const teamLoadError = ref('');
 const creatingTask = ref(false);
 const updatingId = ref(null);
 const deletingId = ref(null);
@@ -658,6 +664,7 @@ const logout = async () => {
 // 加载任务列表 - 一次加载所有任务
 const loadTasks = async () => {
   loading.value = true;
+  loadError.value = '';
   taskStore.setLoading(true);
   try {
     // 一次加载所有任务，使用大的 pageSize
@@ -668,9 +675,13 @@ const loadTasks = async () => {
       taskStore.setTasks(list);
       const total = Number.isFinite(pageData.total) ? pageData.total : list.length;
       taskStore.setTotal(total);
+    } else {
+      loadError.value = getApiFailureMessage(response, '加载任务失败');
+      taskStore.clearTasks();
     }
   } catch (error) {
-    console.error('加载任务失败:', error);
+    loadError.value = getApiErrorMessage(error, '加载任务失败');
+    console.error(loadError.value, error);
   } finally {
     loading.value = false;
     taskStore.setLoading(false);
@@ -705,10 +716,10 @@ const onCreateTask = async () => {
       // 刷新列表
       await loadTasks();
     } else {
-      createError.value = response.data.message || '创建失败';
+      createError.value = getApiFailureMessage(response, '创建任务失败', '创建失败');
     }
   } catch (error) {
-    createError.value = error.response?.data?.message || '创建任务失败，请重试';
+    createError.value = getApiErrorMessage(error, '创建任务失败');
   } finally {
     creatingTask.value = false;
   }
@@ -735,28 +746,40 @@ const onUpdateTask = async () => {
         // 算出用户勾选了哪些新任务，取消了哪些老任务
         const toAdd = editingTask.predecessor_ids.filter(id => !editingDependencies.value.includes(id));
         const toRemove = editingDependencies.value.filter(id => !editingTask.predecessor_ids.includes(id));
+        const dependencyErrors = [];
 
         for (const id of toAdd) {
           try {
             await addTaskDependencyApi(editingTask.id, id);
           } catch (err) {
-            if (err.response?.status === 400) alert(`⚠️ 无法添加依赖: ${err.response.data.message}`);
+            const title = findTaskTitleById(id) || `ID ${id}`;
+            dependencyErrors.push(getApiErrorMessage(err, `添加前置依赖「${title}」失败`));
           }
         }
         for (const id of toRemove) {
-          try { await removeTaskDependencyApi(editingTask.id, id); } catch (e) { console.error(e); }
+          try {
+            await removeTaskDependencyApi(editingTask.id, id);
+          } catch (err) {
+            const title = findTaskTitleById(id) || `ID ${id}`;
+            dependencyErrors.push(getApiErrorMessage(err, `移除前置依赖「${title}」失败`));
+          }
+        }
+
+        if (dependencyErrors.length > 0) {
+          updateError.value = dependencyErrors.join('；');
+          return;
         }
       }
       cancelEdit();
       await loadTasks();
     } else {
-      updateError.value = response.data.message || '更新失败';
+      updateError.value = getApiFailureMessage(response, '更新任务失败', '更新失败');
     }
   } catch (error) {
     if (error.response?.status === 409) {
-      updateError.value = formatUnresolvedDependenciesMessage(error);
+      updateError.value = getUnresolvedDependenciesMessage(error, findTaskTitleById, '更新任务失败');
     } else {
-      updateError.value = error.response?.data?.message || '更新任务失败，请重试';
+      updateError.value = getApiErrorMessage(error, '更新任务失败');
     }
   } finally {
     updatingId.value = null;
@@ -826,14 +849,14 @@ const markTaskDone = async (task) => {
         }, 850);
       }, 950);
     } else {
-      alert(response.data.message || '更新失败');
+      alert(getApiFailureMessage(response, '完成任务失败', '更新失败'));
     }
   } catch (error) {
     // 新增：拦截 409 状态码，提示前置任务未完成
     if (error.response?.status === 409) {
-      alert(`⚠️ ${formatUnresolvedDependenciesMessage(error)}`);
+      alert(getUnresolvedDependenciesMessage(error, findTaskTitleById, '完成任务失败'));
     } else {
-      alert(error.response?.data?.message || '完成任务失败，请重试');
+      alert(getApiErrorMessage(error, '完成任务失败'));
     }
   } finally {
     updatingId.value = null;
@@ -852,10 +875,10 @@ const onDeleteTask = async (id) => {
     if (response.data.code === 0) {
       await loadTasks();
     } else {
-      alert(response.data.message || '删除失败');
+      alert(getApiFailureMessage(response, '删除任务失败', '删除失败'));
     }
   } catch (error) {
-    alert(error.response?.data?.message || '删除任务失败，请重试');
+    alert(getApiErrorMessage(error, '删除任务失败'));
   } finally {
     deletingId.value = null;
   }
@@ -863,6 +886,7 @@ const onDeleteTask = async (id) => {
 
 // 开始编辑任务
 const startEdit = async (task) => {
+  updateError.value = '';
   editingTask.id = task.id;
   editingTask.title = task.title;
   editingTask.description = task.description || '';
@@ -883,7 +907,8 @@ const startEdit = async (task) => {
         editingTask.predecessor_ids = [...editingDependencies.value]; // 绑定给多选框
       }
     } catch (err) {
-      console.error('获取依赖失败', err);
+      updateError.value = getApiErrorMessage(err, '获取任务依赖失败');
+      console.error(updateError.value, err);
     }
   }
 };
@@ -1547,6 +1572,21 @@ onBeforeUnmount(() => {
 .priority-3 {
   background: #fee2e2;
   color: #b91c1c;
+}
+
+.team-link-badge {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.team-link-badge:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
 }
 
 .task-description {

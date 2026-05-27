@@ -167,6 +167,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { getTaskDependenciesApi, getTaskDependencyGraphApi } from '../services/task';
+import { getApiErrorMessage, getApiFailureMessage } from '../utils/apiError';
 
 const route = useRoute();
 const router = useRouter();
@@ -224,8 +225,11 @@ const loadDependencyData = async () => {
       getTaskDependencyGraphApi(taskId.value),
     ]);
 
-    if (depsRes.data?.code !== 0 || graphRes.data?.code !== 0) {
-      throw new Error(depsRes.data?.message || graphRes.data?.message || '依赖数据查询失败');
+    if (depsRes.data?.code !== 0) {
+      throw new Error(getApiFailureMessage(depsRes, '加载直接依赖失败', '依赖数据查询失败'));
+    }
+    if (graphRes.data?.code !== 0) {
+      throw new Error(getApiFailureMessage(graphRes, '加载依赖图失败', '依赖数据查询失败'));
     }
 
     const deps = depsRes.data.data || {};
@@ -253,7 +257,7 @@ const loadDependencyData = async () => {
       ];
     }
   } catch (err) {
-    error.value = err.response?.data?.message || err.message || '依赖数据查询失败';
+    error.value = getApiErrorMessage(err, '加载依赖详情失败', '依赖数据查询失败');
   } finally {
     loading.value = false;
   }

@@ -204,6 +204,29 @@ input:focus {
   font-size: 14px;
 }
 
+.error-state {
+  border-color: rgba(220, 38, 38, 0.28) !important;
+  background: rgba(254, 242, 242, 0.8) !important;
+  color: #991b1b !important;
+}
+
+.error-banner {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(220, 38, 38, 0.28);
+  border-radius: 10px;
+  background: rgba(254, 242, 242, 0.85);
+  color: #991b1b;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.error-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 0.75rem;
+}
+
 .foot {
   margin: 16px 0 0;
   color: var(--muted);

@@ -23,6 +23,8 @@
         </div>
       </header>
 
+      <p v-if="teamLoadError" class="error-banner">{{ teamLoadError }}</p>
+
       <div class="tabs-container">
         <button 
           class="tab-btn" 
@@ -51,20 +53,53 @@
       <div v-if="activeTab === 'tasks'" class="tab-content">
         <div class="list-header">
           <h2>任务大厅</h2>
-          <button 
-            v-if="myRole === 'Owner' || myRole === 'Admin'" 
-            class="btn btn-primary btn-small" 
-            @click="showCreateTaskModal = true"
-          >
-            + 发布团队任务
-          </button>
+          <div class="list-header-actions">
+            <div class="search-box">
+              <span class="search-fab" aria-hidden="true">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="4" />
+                  <line x1="16.65" y1="16.65" x2="22" y2="22" stroke="currentColor" stroke-width="4" stroke-linecap="round" />
+                </svg>
+              </span>
+              <input
+                v-model.trim="searchQuery"
+                type="search"
+                placeholder="搜索任务"
+                class="search-input"
+              />
+              <button
+                v-if="isSearching"
+                type="button"
+                class="search-clear"
+                @click="searchQuery = ''"
+              >
+                清除
+              </button>
+            </div>
+            <button 
+              v-if="myRole === 'Owner' || myRole === 'Admin'" 
+              class="btn btn-primary btn-small" 
+              @click="showCreateTaskModal = true"
+            >
+              + 发布团队任务
+            </button>
+          </div>
         </div>
 
         <div v-if="loadingTasks" class="loading-state">加载任务中...</div>
+        <div v-else-if="taskLoadError" class="empty-state error-state">
+          {{ taskLoadError }}
+          <div class="error-actions">
+            <button class="btn btn-small btn-primary" type="button" @click="loadTeamTasks">重试</button>
+          </div>
+        </div>
         <div v-else-if="tasks.length === 0" class="empty-state">当前团队暂无任务。</div>
+        <div v-else-if="displayedTeamTasks.length === 0" class="empty-state">
+          {{ isSearching ? '未找到包含关键词的匹配任务。' : '当前暂无匹配任务。' }}
+        </div>
         
         <div v-else class="task-list">
-          <div v-for="task in tasks" :key="task.id" class="task-item">
+          <div v-for="task in displayedTeamTasks" :key="task.id" class="task-item">
             <div class="task-main">
               <div class="task-title-section">
                 <h3>{{ task.title }}</h3>
@@ -117,6 +152,12 @@
         </div>
 
         <div v-if="loadingMembers" class="loading-state">加载成员中...</div>
+        <div v-else-if="memberLoadError" class="empty-state error-state">
+          {{ memberLoadError }}
+          <div class="error-actions">
+            <button class="btn btn-small btn-primary" type="button" @click="loadTeamMembers">重试</button>
+          </div>
+        </div>
         
         <div v-else class="task-list">
           <div v-for="member in members" :key="member.user_id" class="task-item">
@@ -330,6 +371,11 @@ import {
   createTaskApi, updateTaskApi, deleteTaskApi,
   getTaskDependenciesApi, addTaskDependencyApi, removeTaskDependencyApi
 } from '../services/task';
+import {
+  getApiErrorMessage,
+  getApiFailureMessage,
+  getUnresolvedDependenciesMessage,
+} from '../utils/apiError';
 
 const route = useRoute();
 const router = useRouter();
@@ -337,11 +383,13 @@ const teamId = Number(route.params.team_id);
 
 const activeTab = ref('tasks');
 
-const currentTeam = computed(() => teamStore.teams.value.find(t => t.team_id === teamId));
+const currentTeam = computed(() => teamStore.teams.value.find(t => Number(t.team_id) === teamId));
 const myRole = computed(() => currentTeam.value ? currentTeam.value.role : 'Member');
 
 const tasks = ref([]);
 const loadingTasks = ref(false);
+const taskLoadError = ref('');
+const searchQuery = ref('');
 const showCreateTaskModal = ref(false);
 const showEditTaskModal = ref(false);
 const submittingTask = ref(false);
@@ -352,11 +400,13 @@ const editingDependencies = ref([]);
 
 const members = ref([]);
 const loadingMembers = ref(false);
+const memberLoadError = ref('');
 const showAddMemberModal = ref(false);
 const submittingMember = ref(false);
 const newMemberName = ref('');
 
 const newTeamName = ref('');
+const teamLoadError = ref('');
 const renamingTeam = ref(false);
 const dissolvingTeam = ref(false);
 
@@ -376,7 +426,7 @@ const roleBadgeClass = (role) => {
 
 const getAssigneeName = (assigneeId) => {
   if (!assigneeId) return '';
-  const member = members.value.find(m => m.user_id === assigneeId);
+  const member = members.value.find(m => Number(m.user_id) === Number(assigneeId));
   return member ? member.username : assigneeId;
 };
 
@@ -389,8 +439,23 @@ const roleTextClass = (role) => {
 const canEditTask = (task) => {
   if (myRole.value === 'Owner' || myRole.value === 'Admin') return true;
   const currentMember = members.value.find(m => m.username === authStore.username.value);
-  return currentMember ? task.assignee_id === currentMember.user_id : false;
+  return currentMember ? Number(task.assignee_id) === Number(currentMember.user_id) : false;
 };
+
+const findTaskTitleById = (id) => {
+  const task = tasks.value.find((item) => Number(item.id) === Number(id));
+  return task?.title || '';
+};
+
+const isSearching = computed(() => searchQuery.value.trim().length > 0);
+
+const displayedTeamTasks = computed(() => {
+  const keyword = searchQuery.value.trim().toLowerCase();
+  if (!keyword) return tasks.value;
+  return tasks.value.filter((task) =>
+    String(task.title || '').toLowerCase().includes(keyword)
+  );
+});
 
 // 👇 Lab3 新增：细化移除成员权限校验
 const canRemoveMember = (member) => {
@@ -422,25 +487,53 @@ const formatDateForInput = (dateStr) => {
 const loadTeams = async () => {
   try {
     const res = await getTeamsApi();
-    if (res.data.code === 0) teamStore.setTeams(res.data.data.list || []);
-  } catch (error) { console.error('加载团队列表失败', error); }
+    if (res.data.code === 0) {
+      teamStore.setTeams(res.data.data.list || []);
+      teamLoadError.value = '';
+    } else {
+      teamLoadError.value = getApiFailureMessage(res, '加载团队列表失败');
+    }
+  } catch (error) {
+    teamLoadError.value = getApiErrorMessage(error, '加载团队列表失败');
+    console.error(teamLoadError.value, error);
+  }
 };
 
 const loadTeamTasks = async () => {
   loadingTasks.value = true;
+  taskLoadError.value = '';
   try {
     const res = await getTeamTasksApi(teamId);
-    if (res.data.code === 0) tasks.value = res.data.data.list || [];
-  } catch (error) { console.error('加载任务失败', error); } 
+    if (res.data.code === 0) {
+      tasks.value = res.data.data.list || [];
+    } else {
+      tasks.value = [];
+      taskLoadError.value = getApiFailureMessage(res, '加载团队任务失败');
+    }
+  } catch (error) {
+    taskLoadError.value = getApiErrorMessage(error, '加载团队任务失败');
+    tasks.value = [];
+    console.error(taskLoadError.value, error);
+  } 
   finally { loadingTasks.value = false; }
 };
 
 const loadTeamMembers = async () => {
   loadingMembers.value = true;
+  memberLoadError.value = '';
   try {
     const res = await getTeamMembersApi(teamId);
-    if (res.data.code === 0) members.value = res.data.data || [];
-  } catch (error) { console.error('加载成员失败', error); } 
+    if (res.data.code === 0) {
+      members.value = res.data.data || [];
+    } else {
+      members.value = [];
+      memberLoadError.value = getApiFailureMessage(res, '加载团队成员失败');
+    }
+  } catch (error) {
+    memberLoadError.value = getApiErrorMessage(error, '加载团队成员失败');
+    members.value = [];
+    console.error(memberLoadError.value, error);
+  } 
   finally { loadingMembers.value = false; }
 };
 
@@ -458,16 +551,25 @@ const handleCreateTask = async () => {
     const res = await createTaskApi(payload);
     if (res.data.code === 0) {
       const newTaskId = res.data.data?.id;
+      const dependencyErrors = [];
       if (newTaskId && newTask.value.predecessor_ids.length > 0) {
         for (const predId of newTask.value.predecessor_ids) {
-          try { await addTaskDependencyApi(newTaskId, predId); } catch (err) { console.error('添加依赖失败', err); }
+          try {
+            await addTaskDependencyApi(newTaskId, predId);
+          } catch (err) {
+            const title = findTaskTitleById(predId) || `ID ${predId}`;
+            dependencyErrors.push(getApiErrorMessage(err, `添加前置依赖「${title}」失败`));
+          }
         }
       }
       showCreateTaskModal.value = false;
       newTask.value = { title: '', description: '', priority: '2', deadline: '', assignee_id: null, predecessor_ids: [] }; 
       await loadTeamTasks();
-    } else alert(res.data.message || '发布失败');
-  } catch (error) { alert(error.response?.data?.message || '请求失败'); } 
+      if (dependencyErrors.length > 0) {
+        alert(`任务已创建，但部分依赖设置失败：${dependencyErrors.join('；')}`);
+      }
+    } else alert(getApiFailureMessage(res, '发布团队任务失败', '发布失败'));
+  } catch (error) { alert(getApiErrorMessage(error, '发布团队任务失败')); } 
   finally { submittingTask.value = false; }
 };
 
@@ -483,8 +585,13 @@ const startEdit = async (task) => {
     if (res.data && res.data.code === 0) {
       editingDependencies.value = (res.data.data.predecessors || []).map(p => p.id);
       editingTask.value.predecessor_ids = [...editingDependencies.value];
+    } else {
+      alert(getApiFailureMessage(res, '获取任务依赖失败'));
     }
-  } catch (err) { console.error('获取依赖失败', err); }
+  } catch (err) {
+    alert(getApiErrorMessage(err, '获取任务依赖失败'));
+    console.error(getApiErrorMessage(err, '获取任务依赖失败'), err);
+  }
   showEditTaskModal.value = true;
 };
 
@@ -505,18 +612,36 @@ const handleUpdateTask = async () => {
       if (myRole.value === 'Owner' || myRole.value === 'Admin') {
         const toAdd = editingTask.value.predecessor_ids.filter(id => !editingDependencies.value.includes(id));
         const toRemove = editingDependencies.value.filter(id => !editingTask.value.predecessor_ids.includes(id));
+        const dependencyErrors = [];
         for (const id of toAdd) {
           try { await addTaskDependencyApi(editingTask.value.id, id); } 
-          catch (err) { if (err.response?.status === 400) alert(`⚠️ 无法添加依赖: ${err.response.data.message}`); }
+          catch (err) {
+            const title = findTaskTitleById(id) || `ID ${id}`;
+            dependencyErrors.push(getApiErrorMessage(err, `添加前置依赖「${title}」失败`));
+          }
         }
-        for (const id of toRemove) { try { await removeTaskDependencyApi(editingTask.value.id, id); } catch (e) {} }
+        for (const id of toRemove) {
+          try {
+            await removeTaskDependencyApi(editingTask.value.id, id);
+          } catch (err) {
+            const title = findTaskTitleById(id) || `ID ${id}`;
+            dependencyErrors.push(getApiErrorMessage(err, `移除前置依赖「${title}」失败`));
+          }
+        }
+        if (dependencyErrors.length > 0) {
+          alert(dependencyErrors.join('；'));
+          return;
+        }
       }
       showEditTaskModal.value = false;
       await loadTeamTasks();
-    } else alert(res.data.message || '更新失败');
+    } else alert(getApiFailureMessage(res, '更新团队任务失败', '更新失败'));
   } catch (error) {
-    if (error.response?.status === 409) alert(`⚠️ 无法保存：${error.response.data.message || '尚有前置任务未完成'}`);
-    else alert(error.response?.data?.message || '更新失败，可能是权限不足');
+    if (error.response?.status === 409) {
+      alert(getUnresolvedDependenciesMessage(error, findTaskTitleById, '更新团队任务失败'));
+    } else {
+      alert(getApiErrorMessage(error, '更新团队任务失败'));
+    }
   } finally { submittingTask.value = false; }
 };
 
@@ -525,8 +650,8 @@ const handleDeleteTask = async (taskId) => {
   try {
     const res = await deleteTaskApi(taskId);
     if (res.data.code === 0) await loadTeamTasks();
-    else alert(res.data.message || '删除失败');
-  } catch (error) { alert(error.response?.data?.message || '无权删除'); }
+    else alert(getApiFailureMessage(res, '删除团队任务失败', '删除失败'));
+  } catch (error) { alert(getApiErrorMessage(error, '删除团队任务失败')); }
 };
 
 /* ================== 团队管理生命周期操作 ================== */
@@ -540,9 +665,9 @@ const handleLeaveTeam = async () => {
       alert('已成功退出团队');
       await loadTeams();
       router.push('/teams');
-    } else alert(res.data.message || '退出失败');
+    } else alert(getApiFailureMessage(res, '退出团队失败', '退出失败'));
   } catch (error) {
-    alert(error.response?.data?.message || '退出请求失败');
+    alert(getApiErrorMessage(error, '退出团队失败'));
   }
 };
 
@@ -559,9 +684,9 @@ const handleTransferTeam = async () => {
       await loadTeams(); 
       await loadTeamMembers();
       activeTab.value = 'tasks'; // 失去 Owner 权限后自动切回任务大厅
-    } else alert(res.data.message || '转让失败');
+    } else alert(getApiFailureMessage(res, '转让团队失败', '转让失败'));
   } catch (error) {
-    alert(error.response?.data?.message || '转让请求失败');
+    alert(getApiErrorMessage(error, '转让团队失败'));
   } finally {
     transferringTeam.value = false;
   }
@@ -576,8 +701,8 @@ const handleRenameTeam = async () => {
       alert('团队名称修改成功');
       newTeamName.value = '';
       await loadTeams();
-    } else alert(res.data.message || '修改失败');
-  } catch (error) { alert(error.response?.data?.message || '请求失败'); } 
+    } else alert(getApiFailureMessage(res, '修改团队名称失败', '修改失败'));
+  } catch (error) { alert(getApiErrorMessage(error, '修改团队名称失败')); } 
   finally { renamingTeam.value = false; }
 };
 
@@ -590,8 +715,8 @@ const handleDissolveTeam = async () => {
       alert('团队已解散');
       await loadTeams();
       router.push('/teams');
-    } else alert(res.data.message || '解散失败');
-  } catch (error) { alert(error.response?.data?.message || '请求失败'); } 
+    } else alert(getApiFailureMessage(res, '解散团队失败', '解散失败'));
+  } catch (error) { alert(getApiErrorMessage(error, '解散团队失败')); } 
   finally { dissolvingTeam.value = false; }
 };
 
@@ -606,8 +731,8 @@ const handleAddMember = async () => {
       newMemberName.value = ''; 
       await loadTeamMembers();
       alert('邀请已发送！');
-    } else alert(res.data.message || '邀请失败');
-  } catch (error) { alert(error.response?.data?.message || '请求失败，可能用户不存在或已在团队中'); } 
+    } else alert(getApiFailureMessage(res, '邀请成员失败', '邀请失败'));
+  } catch (error) { alert(getApiErrorMessage(error, '邀请成员失败', '用户不存在或已在团队中')); } 
   finally { submittingMember.value = false; }
 };
 
@@ -616,8 +741,8 @@ const removeMember = async (userId) => {
   try {
     const res = await deleteTeamMemberApi(teamId, userId);
     if (res.data.code === 0) await loadTeamMembers();
-    else alert(res.data.message || '移除失败');
-  } catch (error) { alert(error.response?.data?.message || '无权操作或请求失败'); }
+    else alert(getApiFailureMessage(res, '移除成员失败', '移除失败'));
+  } catch (error) { alert(getApiErrorMessage(error, '移除成员失败')); }
 };
 
 const toggleAdminRole = async (member) => {
@@ -625,8 +750,8 @@ const toggleAdminRole = async (member) => {
   try {
     const res = await updateTeamMemberRoleApi(teamId, member.user_id, { role: newRole });
     if (res.data.code === 0) await loadTeamMembers();
-    else alert(res.data.message || '权限修改失败');
-  } catch (error) { alert(error.response?.data?.message || '无权操作'); }
+    else alert(getApiFailureMessage(res, '修改成员权限失败', '权限修改失败'));
+  } catch (error) { alert(getApiErrorMessage(error, '修改成员权限失败')); }
 };
 
 onMounted(() => {
@@ -652,6 +777,49 @@ onMounted(() => {
 
 .list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
 .list-header h2 { font-size: 1.1rem; color: var(--text); font-weight: 700; margin: 0; }
+.list-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem; flex: 1; }
+.search-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.25rem 0.75rem 0.25rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  min-width: 260px;
+  max-width: 420px;
+  flex: 1;
+}
+.search-fab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(28, 126, 214, 0.28);
+  flex-shrink: 0;
+}
+.search-fab svg { width: 16px; height: 16px; }
+.search-input {
+  border: none;
+  background: transparent;
+  width: 100%;
+  font-size: 0.85rem;
+  color: #1f2937;
+}
+.search-input:focus { outline: none; }
+.search-clear {
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+}
+.search-clear:hover { color: #0f172a; }
 .empty-state, .loading-state { text-align: center; padding: 3rem; color: #6b7280; background: #f8fafc; border-radius: 0.5rem; border: 1px dashed #cbd5e1; }
 
 .task-list { display: flex; flex-direction: column; gap: 1rem; }
@@ -753,4 +921,31 @@ onMounted(() => {
 :global([data-theme="dark"]) .tab-btn.active { color: #3b82f6; border-bottom-color: #3b82f6; }
 :global([data-theme="dark"]) .tabs-container { border-bottom-color: #334155; }
 :global([data-theme="dark"]) .btn-outline { background: #0f172a; color: #cbd5e1; border-color: #334155; }
+:global([data-theme="dark"]) .search-box { background: #0f172a; border-color: #334155; }
+:global([data-theme="dark"]) .search-input { color: #f8fafc; }
+:global([data-theme="dark"]) .search-clear { color: #94a3b8; }
+
+@media (max-width: 768px) {
+  .list-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .list-header-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: stretch;
+  }
+
+  .search-box {
+    min-width: 0;
+    max-width: none;
+    width: 100%;
+  }
+
+  .list-header-actions .btn {
+    flex: 1;
+  }
+}
 </style>

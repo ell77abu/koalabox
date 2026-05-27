@@ -69,6 +69,7 @@
           📌 设置前置依赖 (可选)
         </label>
         <div class="checkbox-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 160px; overflow-y: auto; padding: 12px; background: rgba(255, 255, 255, 0.6); border: 1px solid #d7e2ef; border-radius: 12px;">
+          <span v-if="dependencyLoadError" class="error">{{ dependencyLoadError }}</span>
           <label v-for="t in availablePersonalTasks" :key="t.id" style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #1e293b; cursor: pointer; font-weight: 500;">
             <input type="checkbox" :value="t.id" v-model="newTask.predecessor_ids" style="accent-color: #3b82f6; width: 16px; height: 16px; cursor: pointer; margin: 0;" />
             {{ t.title }}
@@ -96,9 +97,11 @@ import { useRouter } from 'vue-router';
 // 引入依赖管理相关的 API 与 Store
 import { createTaskApi, addTaskDependencyApi, getTasksApi } from '../services/task';
 import { taskStore } from '../stores/task';
+import { getApiErrorMessage, getApiFailureMessage } from '../utils/apiError';
 
 const router = useRouter();
 const submitting = ref(false);
+const dependencyLoadError = ref('');
 
 const newTask = reactive({
   title: '',
@@ -129,6 +132,11 @@ const statusLabel = (status) => {
 };
 
 const taskStatusClass = (task) => `status-${String(task?.status || 'TODO').toLowerCase()}`;
+
+const findTaskTitleById = (id) => {
+  const task = taskStore.tasks.value.find((item) => Number(item.id) === Number(id));
+  return task?.title || '';
+};
 
 const priorityOpen = ref(false);
 const priorityDropdownRef = ref(null);
@@ -189,9 +197,13 @@ onMounted(async () => {
       const res = await getTasksApi(1, 1000);
       if (res.data && res.data.code === 0) {
         taskStore.setTasks(res.data.data.list || []);
+        dependencyLoadError.value = '';
+      } else {
+        dependencyLoadError.value = getApiFailureMessage(res, '预加载依赖任务失败');
       }
     } catch (e) {
-      console.error('预加载任务列表失败', e);
+      dependencyLoadError.value = getApiErrorMessage(e, '预加载依赖任务失败');
+      console.error(dependencyLoadError.value, e);
     }
   }
 });
@@ -215,22 +227,31 @@ const onCreateTask = async () => {
     
     // 1. 先调用 API 创建任务
     const res = await createTaskApi(payload);
+    if (res.data?.code !== 0) {
+      alert(getApiFailureMessage(res, '创建任务失败', '创建任务失败'));
+      return;
+    }
     
     // 2. 🪄 串联逻辑：创建成功后，如果有勾选依赖，则依次添加依赖
     const newTaskId = res.data?.data?.id;
+    const dependencyErrors = [];
     if (newTaskId && newTask.predecessor_ids.length > 0) {
       for (const predId of newTask.predecessor_ids) {
         try {
           await addTaskDependencyApi(newTaskId, predId);
         } catch (err) {
-          console.error(`关联依赖 ID:${predId} 失败`, err);
+          const title = findTaskTitleById(predId) || `ID ${predId}`;
+          dependencyErrors.push(getApiErrorMessage(err, `关联前置任务「${title}」失败`));
         }
       }
     }
 
+    if (dependencyErrors.length > 0) {
+      alert(`任务已创建，但部分前置依赖设置失败：${dependencyErrors.join('；')}`);
+    }
     router.push('/tasks');
   } catch (error) {
-    alert(error.response?.data?.message || '创建任务失败');
+    alert(getApiErrorMessage(error, '创建任务失败'));
   } finally {
     submitting.value = false;
   }
