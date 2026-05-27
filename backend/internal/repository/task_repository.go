@@ -32,6 +32,7 @@ type TaskRepository interface {
 	DeleteByID(ctx context.Context, id uint64) error
 	ClearAssigneeForTeamTasks(ctx context.Context, teamID, assigneeID uint64) error
 	AddDependency(ctx context.Context, predecessorID, successorID uint64) (*model.TaskDependency, error)
+	AddDependencyWithCycleCheck(ctx context.Context, predecessorID, successorID uint64) (*model.TaskDependency, error)
 	RemoveDependency(ctx context.Context, predecessorID, successorID uint64) error
 	ListPredecessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error)
 	ListSuccessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error)
@@ -48,6 +49,10 @@ type taskRepository struct {
 
 func NewTaskRepository(db *gorm.DB) TaskRepository {
 	return &taskRepository{db: db}
+}
+
+func (r *taskRepository) GetDB() *gorm.DB {
+	return r.db
 }
 
 func (r *taskRepository) Create(ctx context.Context, task *model.Task) error {
@@ -528,7 +533,36 @@ func (r *taskRepository) ClearAssigneeForTeamTasks(ctx context.Context, teamID, 
 		Where("team_id = ?", teamID).
 		Where("assignee_id = ?", assigneeID).
 		Where("deleted_at IS NULL").
-		Where("status IN ?", []model.TaskStatus{model.TaskStatusTODO, model.TaskStatusDOING}).
+		Where("status = ?", model.TaskStatusTODO).
+		Updates(map[string]interface{}{
+			"assignee_id": nil,
+			"updated_at":  time.Now(),
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+
+	res = r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("team_id = ?", teamID).
+		Where("assignee_id = ?", assigneeID).
+		Where("deleted_at IS NULL").
+		Where("status = ?", model.TaskStatusDOING).
+		Updates(map[string]interface{}{
+			"assignee_id": nil,
+			"status":      model.TaskStatusTODO,
+			"updated_at":  time.Now(),
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+
+	res = r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("team_id = ?", teamID).
+		Where("assignee_id = ?", assigneeID).
+		Where("deleted_at IS NULL").
+		Where("status = ?", model.TaskStatusDONE).
 		Updates(map[string]interface{}{
 			"assignee_id": nil,
 			"updated_at":  time.Now(),
@@ -554,6 +588,40 @@ func (r *taskRepository) AddDependency(ctx context.Context, predecessorID, succe
 		return nil, ErrConflict
 	}
 	return nil, err
+}
+
+func (r *taskRepository) AddDependencyWithCycleCheck(ctx context.Context, predecessorID, successorID uint64) (*model.TaskDependency, error) {
+	var dep *model.TaskDependency
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockTaskIDs(tx, predecessorID, successorID); err != nil {
+			return err
+		}
+
+		hasCycle, err := hasDependencyPathTx(tx, successorID, predecessorID)
+		if err != nil {
+			return err
+		}
+		if hasCycle {
+			return ErrDependencyCycle
+		}
+
+		dep = &model.TaskDependency{
+			PredecessorID: predecessorID,
+			SuccessorID:   successorID,
+		}
+		if err := tx.Create(dep).Error; err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				return ErrConflict
+			}
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return dep, nil
 }
 
 func (r *taskRepository) RemoveDependency(ctx context.Context, predecessorID, successorID uint64) error {
@@ -675,6 +743,47 @@ SELECT 1 AS found FROM dep WHERE successor_id = ? LIMIT 1`
 		return false, err
 	}
 	return found == 1, nil
+}
+
+func hasDependencyPathTx(tx *gorm.DB, fromID, toID uint64) (bool, error) {
+	if fromID == 0 || toID == 0 {
+		return false, nil
+	}
+	const query = `
+WITH RECURSIVE dep(successor_id) AS (
+  SELECT successor_id FROM task_dependencies WHERE predecessor_id = ?
+  UNION
+  SELECT td.successor_id FROM task_dependencies td
+  JOIN dep ON td.predecessor_id = dep.successor_id
+)
+SELECT 1 AS found FROM dep WHERE successor_id = ? LIMIT 1`
+	var found int
+	if err := tx.Raw(query, fromID, toID).Scan(&found).Error; err != nil {
+		return false, err
+	}
+	return found == 1, nil
+}
+
+func lockTaskIDs(tx *gorm.DB, firstID, secondID uint64) error {
+	if firstID == 0 && secondID == 0 {
+		return nil
+	}
+	first := firstID
+	second := secondID
+	if second < first {
+		first, second = second, first
+	}
+	if first != 0 {
+		if err := tx.Raw("SELECT pg_advisory_xact_lock(?)", int64(first)).Error; err != nil {
+			return err
+		}
+	}
+	if second != 0 && second != first {
+		if err := tx.Raw("SELECT pg_advisory_xact_lock(?)", int64(second)).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *taskRepository) GetDependencyGraph(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, []model.TaskDependencyLink, error) {

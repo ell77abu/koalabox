@@ -74,7 +74,7 @@ func (r *teamInvitationRepository) ListPendingByInvitee(ctx context.Context, inv
 	err := r.db.WithContext(ctx).
 		Table("team_invitations ti").
 		Select("ti.id, ti.team_id, t.name AS team_name, ti.inviter_id, u.username AS inviter_username, ti.status, ti.created_at").
-		Joins("JOIN teams t ON t.id = ti.team_id").
+		Joins("JOIN teams t ON t.id = ti.team_id AND t.deleted_at IS NULL").
 		Joins("JOIN users u ON u.id = ti.inviter_id AND u.deleted_at IS NULL").
 		Where("ti.invitee_id = ?", inviteeID).
 		Where("ti.status = ?", model.InvitationStatusPending).

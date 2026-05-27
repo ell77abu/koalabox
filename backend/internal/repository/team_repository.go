@@ -24,6 +24,8 @@ type TeamRepository interface {
 	GetMemberRole(ctx context.Context, teamID, userID uint64) (model.TeamRole, error)
 	ListMembers(ctx context.Context, teamID uint64) ([]model.TeamMemberDetail, error)
 	TransferOwnership(ctx context.Context, teamID, oldOwnerID, newOwnerID uint64) error
+	// IsDeleted reports whether a team record exists and is soft-deleted.
+	IsDeleted(ctx context.Context, teamID uint64) (bool, error)
 }
 
 type teamRepository struct {
@@ -32,6 +34,10 @@ type teamRepository struct {
 
 func NewTeamRepository(db *gorm.DB) TeamRepository {
 	return &teamRepository{db: db}
+}
+
+func (r *teamRepository) GetDB() *gorm.DB {
+	return r.db
 }
 
 func (r *teamRepository) Create(ctx context.Context, team *model.Team) error {
@@ -267,4 +273,17 @@ func (r *teamRepository) SoftDeleteMembersByTeamID(ctx context.Context, teamID u
 		return res.Error
 	}
 	return nil
+}
+
+func (r *teamRepository) IsDeleted(ctx context.Context, teamID uint64) (bool, error) {
+	var deletedAt *time.Time
+	err := r.db.WithContext(ctx).
+		Model(&model.Team{}).
+		Select("deleted_at").
+		Where("id = ?", teamID).
+		Scan(&deletedAt).Error
+	if err != nil {
+		return false, err
+	}
+	return deletedAt != nil, nil
 }

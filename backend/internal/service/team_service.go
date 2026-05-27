@@ -8,6 +8,8 @@ import (
 
 	"task-backend/internal/model"
 	"task-backend/internal/repository"
+
+	"gorm.io/gorm"
 )
 
 var (
@@ -79,20 +81,28 @@ func (s *teamService) Create(ctx context.Context, ownerID uint64, req CreateTeam
 		return nil, ErrInvalidTeamName
 	}
 
+	db, err := getTeamRepoDB(s.teamRepo)
+	if err != nil {
+		return nil, err
+	}
+
 	team := &model.Team{
 		Name:    name,
 		OwnerID: ownerID,
 	}
-	if err := s.teamRepo.Create(ctx, team); err != nil {
-		return nil, err
-	}
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		teamRepoTx := repository.NewTeamRepository(tx)
+		if err := teamRepoTx.Create(ctx, team); err != nil {
+			return err
+		}
 
-	owner := &model.TeamMember{
-		TeamID: team.ID,
-		UserID: ownerID,
-		Role:   model.TeamRoleOwner,
-	}
-	if err := s.teamRepo.AddMember(ctx, owner); err != nil {
+		owner := &model.TeamMember{
+			TeamID: team.ID,
+			UserID: ownerID,
+			Role:   model.TeamRoleOwner,
+		}
+		return teamRepoTx.AddMember(ctx, owner)
+	}); err != nil {
 		return nil, err
 	}
 	return team, nil
@@ -226,12 +236,18 @@ func (s *teamService) RemoveMember(ctx context.Context, operatorID, teamID, targ
 	if s.taskRepo == nil {
 		return errors.New("task repository is not configured")
 	}
-
-	if err := s.taskRepo.ClearAssigneeForTeamTasks(ctx, teamID, targetUserID); err != nil {
+	db, err := getTeamRepoDB(s.teamRepo)
+	if err != nil {
 		return err
 	}
 
-	return s.teamRepo.RemoveMember(ctx, teamID, targetUserID)
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		teamRepoTx := repository.NewTeamRepository(tx)
+		if err := s.cleanupDepartingMember(ctx, tx, teamID, targetUserID); err != nil {
+			return err
+		}
+		return teamRepoTx.RemoveMember(ctx, teamID, targetUserID)
+	})
 }
 
 func (s *teamService) UpdateMemberRole(ctx context.Context, operatorID, teamID, targetUserID uint64, req UpdateTeamMemberRoleRequest) (*model.TeamMember, error) {
@@ -361,12 +377,35 @@ func (s *teamService) Leave(ctx context.Context, userID, teamID uint64) error {
 	if s.taskRepo == nil {
 		return errors.New("task repository is not configured")
 	}
-
-	if err := s.taskRepo.ClearAssigneeForTeamTasks(ctx, teamID, userID); err != nil {
+	db, err := getTeamRepoDB(s.teamRepo)
+	if err != nil {
 		return err
 	}
 
-	return s.teamRepo.RemoveMember(ctx, teamID, userID)
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		teamRepoTx := repository.NewTeamRepository(tx)
+		if err := s.cleanupDepartingMember(ctx, tx, teamID, userID); err != nil {
+			return err
+		}
+		return teamRepoTx.RemoveMember(ctx, teamID, userID)
+	})
+}
+
+func (s *teamService) cleanupDepartingMember(ctx context.Context, tx *gorm.DB, teamID, userID uint64) error {
+	taskRepoTx := repository.NewTaskRepository(tx)
+	if err := taskRepoTx.ClearAssigneeForTeamTasks(ctx, teamID, userID); err != nil {
+		return err
+	}
+
+	// 成员离队后，回收该成员在团队内的相关分配请求，避免残留可见性与状态歧义。
+	return tx.WithContext(ctx).
+		Model(&model.TaskAssignmentRequest{}).
+		Where("team_id = ?", teamID).
+		Where("assignee_id = ?", userID).
+		Where("status IN ?", []model.InvitationStatus{model.InvitationStatusPending, model.InvitationStatusAccepted}).
+		Updates(map[string]interface{}{
+			"status": model.InvitationStatusDeclined,
+		}).Error
 }
 
 func (s *teamService) TransferOwnership(ctx context.Context, operatorID, teamID, newOwnerID uint64) error {
@@ -417,34 +456,73 @@ func (s *teamService) DeleteTeam(ctx context.Context, operatorID, teamID uint64)
 	if s.taskRepo == nil {
 		return errors.New("task repository is not configured")
 	}
-
-	taskDeleter, ok := s.taskRepo.(interface {
-		SoftDeleteByTeamID(ctx context.Context, teamID uint64) error
-	})
-	if !ok {
-		return errors.New("task repository does not support soft delete by team")
-	}
-	if err := taskDeleter.SoftDeleteByTeamID(ctx, teamID); err != nil {
+	db, err := getTeamRepoDB(s.teamRepo)
+	if err != nil {
 		return err
 	}
 
-	memberDeleter, ok := s.teamRepo.(interface {
-		SoftDeleteMembersByTeamID(ctx context.Context, teamID uint64) error
-	})
-	if !ok {
-		return errors.New("team repository does not support soft delete members")
-	}
-	if err := memberDeleter.SoftDeleteMembersByTeamID(ctx, teamID); err != nil {
-		return err
-	}
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		teamRepoTx := repository.NewTeamRepository(tx)
+		taskRepoTx := repository.NewTaskRepository(tx)
 
-	deleter, ok := s.teamRepo.(interface {
-		Delete(ctx context.Context, teamID uint64) error
+		taskDeleter, ok := taskRepoTx.(interface {
+			SoftDeleteByTeamID(ctx context.Context, teamID uint64) error
+		})
+		if !ok {
+			return errors.New("task repository does not support soft delete by team")
+		}
+		if err := taskDeleter.SoftDeleteByTeamID(ctx, teamID); err != nil {
+			return err
+		}
+
+		memberDeleter, ok := teamRepoTx.(interface {
+			SoftDeleteMembersByTeamID(ctx context.Context, teamID uint64) error
+		})
+		if !ok {
+			return errors.New("team repository does not support soft delete members")
+		}
+		if err := memberDeleter.SoftDeleteMembersByTeamID(ctx, teamID); err != nil {
+			return err
+		}
+
+		// 团队解散后，回收仍有效的成员邀请，避免用户看到已失效邀请。
+		if err := tx.WithContext(ctx).
+			Model(&model.TeamInvitation{}).
+			Where("team_id = ?", teamID).
+			Where("status = ?", model.InvitationStatusPending).
+			Updates(map[string]interface{}{
+				"status": model.InvitationStatusDeclined,
+			}).Error; err != nil {
+			return err
+		}
+
+		// 团队解散后，回收任务分配请求，避免残留有效状态干扰审计和统计。
+		if err := tx.WithContext(ctx).
+			Model(&model.TaskAssignmentRequest{}).
+			Where("team_id = ?", teamID).
+			Where("status IN ?", []model.InvitationStatus{model.InvitationStatusPending, model.InvitationStatusAccepted}).
+			Updates(map[string]interface{}{
+				"status": model.InvitationStatusDeclined,
+			}).Error; err != nil {
+			return err
+		}
+
+		deleter, ok := teamRepoTx.(interface {
+			Delete(ctx context.Context, teamID uint64) error
+		})
+		if !ok {
+			return errors.New("team repository does not support delete")
+		}
+		return deleter.Delete(ctx, teamID)
 	})
-	if !ok {
-		return errors.New("team repository does not support delete")
+}
+
+func getTeamRepoDB(repo repository.TeamRepository) (*gorm.DB, error) {
+	provider, ok := repo.(interface{ GetDB() *gorm.DB })
+	if !ok || provider.GetDB() == nil {
+		return nil, errors.New("team repository does not expose db")
 	}
-	return deleter.Delete(ctx, teamID)
+	return provider.GetDB(), nil
 }
 
 func isValidTeamRole(role model.TeamRole) bool {
