@@ -1,163 +1,122 @@
-# 后端错误映射与异常处理规范（唯一版本）
+# 错误映射说明（Error Mapping）
 
-本文档是后端错误处理与日志规范的唯一版本，用于满足并落地以下要求：
+本文档用于明确后端当前实现中的错误语义与 HTTP 状态码映射，便于前后端联调和测试。
 
-- 早抛出，晚捕获（集中映射、集中日志、统一响应）
-- API 错误返回需包含明确原因与语义化 HTTP 状态码
-- 内部异常需包装后返回前端，并在服务端保留完整错误堆栈
-
-## 1. 设计原则与当前实现
-
-### 1.1 早抛出，晚捕获
-
-- **早抛出**：`repository` / `service` 在发现异常条件时立即返回语义错误。
-- **晚捕获**：调用链边界统一在 `internal/apperror.Respond(...)` 捕获并映射响应。
-- **panic 兜底**：`middleware.RecoverWithLog()` 捕获 panic 并统一处理。
-
-### 1.2 统一响应结构
-
-所有接口统一结构：
-
-- `code`：错误码（当前与 HTTP 状态码对齐；成功为 `0`）
-- `message`：中文错误提示
-- `data`：失败时一般为 `null`，少数场景带扩展信息
-
-### 1.3 单点 ErrorMapper
-
-`internal/apperror.Respond(...)` 是统一错误出口：
-
-1. 优先处理显式 `HTTPError`
-2. 再按 `service/repository` 语义错误做映射（`errors.Is/errors.As`）
-3. 未匹配错误降级为内部异常：`RespondInternal(...)`
-
-## 2. 状态码与前端提示对齐
-
-| 错误码 | 前端中文提示 |
-|---|---|
-| 400 | 请求参数不正确，请检查提交内容 |
-| 401 | 登录状态已失效，请重新登录 |
-| 403 | 权限不足，无法执行该操作 |
-| 404 | 请求的资源不存在或已被删除 |
-| 409 | 操作冲突，请刷新后重试 |
-| 422 | 数据校验失败，请检查提交内容 |
-| 429 | 请求过于频繁，请稍后再试 |
-| 500 | 服务器内部错误，请稍后再试 |
-| 502 | 网关错误，服务暂时不可用 |
-| 503 | 服务暂时不可用，请稍后再试 |
-| 504 | 服务响应超时，请稍后再试 |
-
-说明：
-
-- 当前业务主路径已覆盖：`400/401/403/404/409/410/500`
-- `422/429/502/503/504` 作为前端全局兜底文案保留，后端当前未专门产出时由前端按状态码处理
-
-## 3. 分层错误语义
-
-### 3.1 Repository 层
+## 1. 统一错误语义（Repository 层）
 
 定义位置：`internal/repository/errors.go`
 
-- `ErrNotFound`：资源不存在
-- `ErrConflict`：资源冲突
-- `ErrForbidden`：无权访问
-- `ErrDependencyCycle`：依赖环
+- `ErrNotFound`：资源不存在（例如任务 ID 不存在，或用户不存在）。
+- `ErrConflict`：资源冲突（当前主要用于注册时用户名唯一键冲突）。
+- `ErrForbidden`：资源存在，但当前用户无权操作（越权访问/修改/删除）。
 
-### 3.2 Service 层
+## 2. Auth 接口错误映射
 
-Service 返回业务语义错误（如任务校验失败、权限不足、邀请状态非法等），供 ErrorMapper 统一转换为 HTTP 响应。
+对应文件：`internal/handler/auth_handler.go`
 
-### 3.3 Handler 层
+### 2.1 注册 `POST /api/v1/auth/register`
 
-Handler 不再分散编写 `errors.Is/errors.As` 映射，仅负责：
+- `400 Bad Request`
+  - 请求体非法（JSON 结构错误）
+  - 用户名不合法（`ErrInvalidUsername`）
+  - 密码不合法（`ErrInvalidPassword`）
+- `409 Conflict`
+  - 用户名已存在（`repository.ErrConflict`）
+  - 响应 message：`name already exists`
+- `500 Internal Server Error`
+  - 其他未预期错误
 
-- 请求解析与基础参数转换
-- 调用 service
-- 将错误统一交给 `apperror.Respond(...)`
+### 2.2 登录 `POST /api/v1/auth/login`
 
-## 4. 关键映射规则（按模块）
+- `400 Bad Request`
+  - 请求体非法（JSON 结构错误）
+- `401 Unauthorized`
+  - 用户名或密码错误（`ErrInvalidCredentials`）
+  - 响应 message：`invalid username or password`
+- `500 Internal Server Error`
+  - 其他未预期错误
 
-### 4.1 Auth
+### 2.3 修改密码 `PUT /api/v1/auth/password`
 
-- 注册参数错误 -> `400`
-- 用户名/密码错误 -> `401`
-- 账号冲突 -> `409`
-- 未预期异常 -> `500`
+- `401 Unauthorized`
+  - 未携带或无效登录态
+  - 登录用户不存在（业务映射为 `ErrInvalidCredentials`）
+- `400 Bad Request`
+  - 请求体非法（JSON 结构错误）
+  - 新密码不合法（`ErrInvalidPassword`）
+  - 旧密码错误（`ErrInvalidOldPassword`）
+- `500 Internal Server Error`
+  - 其他未预期错误
 
-### 4.2 Task
+## 3. Task 接口错误映射
 
-- 参数/字段校验失败 -> `400`
-- 登录态无效 -> `401`
-- 越权操作 -> `403`
-- 资源不存在 -> `404`
-- 依赖未完成、重复冲突 -> `409`
-- 团队已删除 -> `410`
-- 未预期异常 -> `500`
+对应文件：`internal/handler/task_handler.go`
 
-### 4.3 Team
+### 3.1 查询任务 `GET /api/v1/tasks`
 
-- 参数错误 -> `400`
-- 登录态无效 -> `401`
-- 权限不足（非 owner/admin） -> `403`
-- 团队或成员不存在 -> `404`
-- 成员/邀请冲突 -> `409`
-- 未预期异常 -> `500`
+- `401 Unauthorized`
+  - 未携带或无效登录态
+- `500 Internal Server Error`
+  - 查询失败
 
-## 5. 内部异常与日志规范
+### 3.2 创建任务 `POST /api/v1/tasks`
 
-### 5.1 对外包装
+- `401 Unauthorized`
+  - 未携带或无效登录态
+- `400 Bad Request`
+  - 请求体非法
+  - 标题、状态、优先级、截止时间校验失败
+- `500 Internal Server Error`
+  - 创建失败
 
-所有内部异常统一返回：
+### 3.3 更新任务 `PUT /api/v1/tasks/:id`
 
-- HTTP `500`
-- `code=500`
-- `message=服务器内部错误，请稍后重试`
+- `401 Unauthorized`
+  - 未携带或无效登录态
+- `400 Bad Request`
+  - 任务 ID 非法
+  - 请求体非法
+  - 字段校验失败
+- `403 Forbidden`
+  - 任务存在，但不属于当前普通用户（`repository.ErrForbidden`）
+- `404 Not Found`
+  - 任务不存在（`repository.ErrNotFound`）
+- `500 Internal Server Error`
+  - 更新失败
 
-不向前端返回堆栈、SQL、内部路径等敏感细节。
+### 3.4 删除任务 `DELETE /api/v1/tasks/:id`
 
-### 5.2 服务端日志（结构化）
+- `401 Unauthorized`
+  - 未携带或无效登录态
+- `400 Bad Request`
+  - 任务 ID 非法
+- `403 Forbidden`
+  - 任务存在，但不属于当前普通用户（`repository.ErrForbidden`）
+- `404 Not Found`
+  - 任务不存在（`repository.ErrNotFound`）
+- `500 Internal Server Error`
+  - 删除失败
 
-日志采用 `log/slog` JSON 输出（配置于 `cmd/server/main.go`），内部异常记录字段：
+## 4. 权限相关说明
 
-- `operation`
-- `method`
-- `path`
-- `user_id`（有则记录）
-- `error`
-- `stack`
+- 普通用户（`level=0`）
+  - 只能查看和操作自己的任务。
+  - 对他人任务执行更新/删除时返回 `403 Forbidden`。
+- 管理员（`level=1`）
+  - 可查看并管理所有任务。
 
-panic 记录字段：
+## 5. 前端联调建议
 
-- `method`
-- `path`
-- `panic`
-- `stack`
+- 对 `401`：统一做登录态失效处理（清理 token 并跳转登录页）。
+- 对 `403`：提示“无权限执行该操作”。
+- 对 `404`：提示“资源不存在或已被删除”。
+- 对 `409`：在注册场景提示“用户名已存在”。
+- 对 `400`：优先展示后端返回的 message（用于表单字段错误提示）。
 
-## 6. 错误链路（端到端）
+## 6. 备注
 
-1. 请求进入路由，经过 `gin.Logger` + `RecoverWithLog`
-2. Handler 调用 service/repository
-3. 下层早返回语义错误（早抛出）
-4. Handler 调用 `apperror.Respond(...)`（晚捕获）
-5. 映射后返回统一响应；未识别则记详细日志并返回统一 500
-6. panic 场景由 recovery 中间件统一兜底
-
-## 7. 日志查看方式
-
-当前后端日志输出到标准输出（stdout）：
-
-- 本地开发：查看启动后端的终端
-- 容器部署：查看容器日志
-- 集群部署：查看 Pod/实例日志
-
-## 8. 维护清单
-
-新增业务错误时必须同步：
-
-- `internal/service` 或 `internal/repository` 错误定义
-- `internal/apperror/mapDomainError` 映射规则
-- 本文档
-- 对应单元测试断言
-
----
-
-> 结论：当前实现已满足“早抛出、晚捕获 + 统一错误映射 + 内部异常安全包装 + 详细堆栈日志记录”的主要求。
+- 文档以当前代码行为为准。若后续新增业务错误，请同步更新：
+  - `internal/repository/errors.go`
+  - 对应 service 透传/转换逻辑
+  - 对应 handler HTTP 映射
+  - 本文档
