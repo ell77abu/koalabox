@@ -1,13 +1,12 @@
 package handler
 
 import (
-	"errors"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 
+	"task-backend/internal/apperror"
 	"task-backend/internal/middleware"
-	"task-backend/internal/repository"
 	"task-backend/internal/service"
 	"task-backend/pkg/response"
 )
@@ -44,23 +43,15 @@ func (h *TaskHandler) List(c *gin.Context) {
 	if teamIDRaw != "" {
 		parsed, err := strconv.ParseUint(teamIDRaw, 10, 64)
 		if err != nil {
-			response.BadRequest(c, "invalid team_id")
+			apperror.Respond(c, apperror.BadRequest("团队ID不合法"), "task list")
 			return
 		}
 		teamID = &parsed
 	}
 
 	list, total, fixedPage, fixedSize, err := h.taskService.List(c.Request.Context(), userID, userLevel, page, size, teamID)
-	if errors.Is(err, repository.ErrForbidden) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, service.ErrInvalidTeamID) {
-		response.BadRequest(c, err.Error())
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "query tasks failed")
+		apperror.Respond(c, err, "task list")
 		return
 	}
 
@@ -76,25 +67,13 @@ func (h *TaskHandler) Create(c *gin.Context) {
 
 	var req service.CreateTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "invalid request body")
+		apperror.Respond(c, apperror.BadRequest("请求体格式不正确"), "task create")
 		return
 	}
 
 	task, err := h.taskService.Create(c.Request.Context(), userID, req)
-	if isTaskValidationError(err) {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	if isTaskForbiddenError(err) || errors.Is(err, repository.ErrForbidden) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, repository.ErrConflict) {
-		response.Conflict(c, "assignment already pending")
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "create task failed")
+		apperror.Respond(c, err, "task create")
 		return
 	}
 
@@ -110,13 +89,13 @@ func (h *TaskHandler) Update(c *gin.Context) {
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		response.BadRequest(c, "invalid task id")
+		apperror.Respond(c, apperror.BadRequest("任务ID不合法"), "task update")
 		return
 	}
 
 	var req service.UpdateTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "invalid request body")
+		apperror.Respond(c, apperror.BadRequest("请求体格式不正确"), "task update")
 		return
 	}
 
@@ -158,7 +137,7 @@ func (h *TaskHandler) Update(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		response.InternalError(c, "update task failed")
+		apperror.Respond(c, err, "task update")
 		return
 	}
 
@@ -178,25 +157,13 @@ func (h *TaskHandler) Delete(c *gin.Context) {
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		response.BadRequest(c, "invalid task id")
+		apperror.Respond(c, apperror.BadRequest("任务ID不合法"), "task delete")
 		return
 	}
 
 	err = h.taskService.Delete(c.Request.Context(), userID, userLevel, id)
-	if isTaskForbiddenError(err) {
-		response.Forbidden(c, err.Error())
-		return
-	}
-	if errors.Is(err, repository.ErrForbidden) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, repository.ErrNotFound) {
-		response.NotFound(c, "task not found")
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "delete task failed")
+		apperror.Respond(c, err, "task delete")
 		return
 	}
 
@@ -212,7 +179,7 @@ func (h *TaskHandler) ListPendingAssignments(c *gin.Context) {
 
 	list, err := h.taskService.ListPendingAssignments(c.Request.Context(), userID)
 	if err != nil {
-		response.InternalError(c, "query assignment requests failed")
+		apperror.Respond(c, err, "assignment list pending")
 		return
 	}
 
@@ -228,25 +195,13 @@ func (h *TaskHandler) AcceptAssignment(c *gin.Context) {
 
 	requestID, err := strconv.ParseUint(c.Param("request_id"), 10, 64)
 	if err != nil {
-		response.BadRequest(c, "invalid request id")
+		apperror.Respond(c, apperror.BadRequest("请求ID不合法"), "assignment accept")
 		return
 	}
 
 	err = h.taskService.AcceptAssignment(c.Request.Context(), userID, requestID)
-	if errors.Is(err, service.ErrAssignmentNotPending) {
-		response.BadRequest(c, "assignment is not pending")
-		return
-	}
-	if errors.Is(err, repository.ErrForbidden) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, repository.ErrNotFound) {
-		response.NotFound(c, "assignment or task not found")
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "accept assignment failed")
+		apperror.Respond(c, err, "assignment accept")
 		return
 	}
 
@@ -262,25 +217,13 @@ func (h *TaskHandler) DeclineAssignment(c *gin.Context) {
 
 	requestID, err := strconv.ParseUint(c.Param("request_id"), 10, 64)
 	if err != nil {
-		response.BadRequest(c, "invalid request id")
+		apperror.Respond(c, apperror.BadRequest("请求ID不合法"), "assignment decline")
 		return
 	}
 
 	err = h.taskService.DeclineAssignment(c.Request.Context(), userID, requestID)
-	if errors.Is(err, service.ErrAssignmentNotPending) {
-		response.BadRequest(c, "assignment is not pending")
-		return
-	}
-	if errors.Is(err, repository.ErrForbidden) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, repository.ErrNotFound) {
-		response.NotFound(c, "assignment not found")
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "decline assignment failed")
+		apperror.Respond(c, err, "assignment decline")
 		return
 	}
 
@@ -296,51 +239,19 @@ func (h *TaskHandler) AddDependency(c *gin.Context) {
 
 	taskID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		response.BadRequest(c, "invalid task id")
+		apperror.Respond(c, apperror.BadRequest("任务ID不合法"), "dependency add")
 		return
 	}
 
 	var req addTaskDependencyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "invalid request body")
+		apperror.Respond(c, apperror.BadRequest("请求体格式不正确"), "dependency add")
 		return
 	}
 
 	dep, err := h.taskService.AddDependency(c.Request.Context(), userID, taskID, req.PredecessorID)
-	if errors.Is(err, service.ErrDependencyCycle) {
-		response.BadRequest(c, "无法添加依赖：检测到依赖循环")
-		return
-	}
-	if errors.Is(err, service.ErrCrossTaskDependency) {
-		response.Forbidden(c, "跨团队或跨用户任务禁止建立依赖关系")
-		return
-	}
-	if errors.Is(err, service.ErrDependencyOnDoneTask) {
-		response.BadRequest(c, "已完成任务不能再设置前置依赖")
-		return
-	}
-	if errors.Is(err, service.ErrTeamGone) {
-		response.Gone(c, "team has been deleted")
-		return
-	}
-	if isTaskValidationError(err) {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	if isTaskForbiddenError(err) || errors.Is(err, repository.ErrForbidden) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, repository.ErrNotFound) {
-		response.NotFound(c, "task not found")
-		return
-	}
-	if errors.Is(err, repository.ErrConflict) {
-		response.Conflict(c, "dependency already exists")
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "add dependency failed")
+		apperror.Respond(c, err, "dependency add")
 		return
 	}
 
@@ -356,43 +267,19 @@ func (h *TaskHandler) RemoveDependency(c *gin.Context) {
 
 	taskID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		response.BadRequest(c, "invalid task id")
+		apperror.Respond(c, apperror.BadRequest("任务ID不合法"), "dependency remove")
 		return
 	}
 
 	predecessorID, err := strconv.ParseUint(c.Param("predecessor_id"), 10, 64)
 	if err != nil {
-		response.BadRequest(c, "invalid predecessor id")
+		apperror.Respond(c, apperror.BadRequest("前置任务ID不合法"), "dependency remove")
 		return
 	}
 
 	err = h.taskService.RemoveDependency(c.Request.Context(), userID, taskID, predecessorID)
-	if errors.Is(err, service.ErrCrossTaskDependency) {
-		response.Forbidden(c, "跨团队或跨用户任务禁止建立依赖关系")
-		return
-	}
-	if errors.Is(err, service.ErrTeamGone) {
-		response.Gone(c, "team has been deleted")
-		return
-	}
-	if isTaskValidationError(err) {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	if errors.Is(err, service.ErrTeamGone) {
-		response.Gone(c, "team has been deleted")
-		return
-	}
-	if isTaskForbiddenError(err) || errors.Is(err, repository.ErrForbidden) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, repository.ErrNotFound) {
-		response.NotFound(c, "dependency not found")
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "remove dependency failed")
+		apperror.Respond(c, err, "dependency remove")
 		return
 	}
 
@@ -408,29 +295,13 @@ func (h *TaskHandler) GetDependencies(c *gin.Context) {
 
 	taskID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		response.BadRequest(c, "invalid task id")
+		apperror.Respond(c, apperror.BadRequest("任务ID不合法"), "dependency list")
 		return
 	}
 
 	data, err := h.taskService.GetDependencies(c.Request.Context(), userID, taskID)
-	if isTaskValidationError(err) {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	if errors.Is(err, service.ErrTeamGone) {
-		response.Gone(c, "team has been deleted")
-		return
-	}
-	if errors.Is(err, repository.ErrForbidden) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, repository.ErrNotFound) {
-		response.NotFound(c, "task not found")
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "query dependencies failed")
+		apperror.Respond(c, err, "dependency list")
 		return
 	}
 
@@ -446,25 +317,13 @@ func (h *TaskHandler) GetDependencyGraph(c *gin.Context) {
 
 	taskID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		response.BadRequest(c, "invalid task id")
+		apperror.Respond(c, apperror.BadRequest("任务ID不合法"), "dependency graph")
 		return
 	}
 
 	data, err := h.taskService.GetDependencyGraph(c.Request.Context(), userID, taskID)
-	if isTaskValidationError(err) {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	if errors.Is(err, repository.ErrForbidden) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, repository.ErrNotFound) {
-		response.NotFound(c, "task not found")
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "query dependency graph failed")
+		apperror.Respond(c, err, "dependency graph")
 		return
 	}
 
@@ -474,12 +333,12 @@ func (h *TaskHandler) GetDependencyGraph(c *gin.Context) {
 func getUserIDFromContext(c *gin.Context) (uint64, bool) {
 	v, exists := c.Get(middleware.ContextUserIDKey)
 	if !exists {
-		response.Unauthorized(c, "unauthorized")
+		apperror.Respond(c, apperror.Unauthorized("登录状态已失效，请重新登录"), "context user id")
 		return 0, false
 	}
 	userID, ok := v.(uint64)
 	if !ok {
-		response.Unauthorized(c, "invalid auth context")
+		apperror.Respond(c, apperror.Unauthorized("登录状态无效，请重新登录"), "context user id")
 		return 0, false
 	}
 	return userID, true
@@ -488,12 +347,12 @@ func getUserIDFromContext(c *gin.Context) (uint64, bool) {
 func getUserLevelFromContext(c *gin.Context) (uint8, bool) {
 	v, exists := c.Get(middleware.ContextUserLevelKey)
 	if !exists {
-		response.Unauthorized(c, "unauthorized")
+		apperror.Respond(c, apperror.Unauthorized("登录状态已失效，请重新登录"), "context user level")
 		return 0, false
 	}
 	level, ok := v.(uint8)
 	if !ok {
-		response.Unauthorized(c, "invalid auth context")
+		apperror.Respond(c, apperror.Unauthorized("登录状态无效，请重新登录"), "context user level")
 		return 0, false
 	}
 	return level, true

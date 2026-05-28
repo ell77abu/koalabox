@@ -1,13 +1,12 @@
 package middleware
 
 import (
-	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"task-backend/internal/apperror"
 	"task-backend/pkg/jwtx"
-	"task-backend/pkg/response"
 )
 
 const (
@@ -33,14 +32,14 @@ func JWTAuth(secret string) gin.HandlerFunc {
 		}
 
 		if tokenString == "" {
-			response.Unauthorized(c, "missing auth token")
+			apperror.Respond(c, apperror.Unauthorized("未登录或登录状态已失效"), "jwt auth")
 			c.Abort()
 			return
 		}
 
 		claims, err := jwtx.ParseToken(tokenString, secret)
 		if err != nil {
-			response.JSON(c, http.StatusUnauthorized, 401, "invalid or expired token", nil)
+			apperror.Respond(c, apperror.Unauthorized("登录状态无效或已过期，请重新登录"), "jwt auth")
 			c.Abort()
 			return
 		}

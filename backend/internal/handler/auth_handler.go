@@ -1,14 +1,13 @@
 package handler
 
 import (
-	"errors"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"task-backend/internal/apperror"
 	"task-backend/internal/middleware"
-	"task-backend/internal/repository"
 	"task-backend/internal/service"
 	"task-backend/pkg/response"
 )
@@ -28,21 +27,13 @@ func NewAuthHandler(authService service.AuthService, sessionExpireHour int) *Aut
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req service.RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "invalid request body")
+		apperror.Respond(c, apperror.BadRequest("请求体格式不正确"), "auth register")
 		return
 	}
 
 	err := h.authService.Register(c.Request.Context(), req)
-	if errors.Is(err, service.ErrInvalidUsername) || errors.Is(err, service.ErrInvalidPassword) {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	if errors.Is(err, repository.ErrConflict) {
-		response.Conflict(c, "name already exists")
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "register failed")
+		apperror.Respond(c, err, "auth register")
 		return
 	}
 
@@ -55,17 +46,13 @@ func (h *AuthHandler) Register(c *gin.Context) {
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req service.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "invalid request body")
+		apperror.Respond(c, apperror.BadRequest("请求体格式不正确"), "auth login")
 		return
 	}
 
 	data, err := h.authService.Login(c.Request.Context(), req)
-	if errors.Is(err, service.ErrInvalidCredentials) {
-		response.Unauthorized(c, "invalid username or password")
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "login failed")
+		apperror.Respond(c, err, "auth login")
 		return
 	}
 
@@ -83,23 +70,23 @@ func (h *AuthHandler) Login(c *gin.Context) {
 func (h *AuthHandler) Session(c *gin.Context) {
 	usernameValue, exists := c.Get(middleware.ContextUsernameKey)
 	if !exists {
-		response.Unauthorized(c, "unauthorized")
+		apperror.Respond(c, apperror.Unauthorized("登录状态已失效，请重新登录"), "auth session")
 		return
 	}
 	username, ok := usernameValue.(string)
 	if !ok || username == "" {
-		response.Unauthorized(c, "invalid auth context")
+		apperror.Respond(c, apperror.Unauthorized("登录状态无效，请重新登录"), "auth session")
 		return
 	}
 
 	levelValue, exists := c.Get(middleware.ContextUserLevelKey)
 	if !exists {
-		response.Unauthorized(c, "unauthorized")
+		apperror.Respond(c, apperror.Unauthorized("登录状态已失效，请重新登录"), "auth session")
 		return
 	}
 	level, ok := levelValue.(uint8)
 	if !ok {
-		response.Unauthorized(c, "invalid auth context")
+		apperror.Respond(c, apperror.Unauthorized("登录状态无效，请重新登录"), "auth session")
 		return
 	}
 
@@ -120,36 +107,24 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	userIDValue, exists := c.Get("user_id")
 	if !exists {
-		response.Unauthorized(c, "unauthorized")
+		apperror.Respond(c, apperror.Unauthorized("登录状态已失效，请重新登录"), "auth change password")
 		return
 	}
 	userID, ok := userIDValue.(uint64)
 	if !ok {
-		response.Unauthorized(c, "invalid auth context")
+		apperror.Respond(c, apperror.Unauthorized("登录状态无效，请重新登录"), "auth change password")
 		return
 	}
 
 	var req service.ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "invalid request body")
+		apperror.Respond(c, apperror.BadRequest("请求体格式不正确"), "auth change password")
 		return
 	}
 
 	err := h.authService.ChangePassword(c.Request.Context(), userID, req)
-	if errors.Is(err, service.ErrInvalidPassword) {
-		response.BadRequest(c, "invalid new password")
-		return
-	}
-	if errors.Is(err, service.ErrInvalidOldPassword) {
-		response.BadRequest(c, "invalid old password")
-		return
-	}
-	if errors.Is(err, service.ErrInvalidCredentials) {
-		response.Unauthorized(c, "unauthorized")
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "change password failed")
+		apperror.Respond(c, err, "auth change password")
 		return
 	}
 
