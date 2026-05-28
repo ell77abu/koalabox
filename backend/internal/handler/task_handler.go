@@ -100,6 +100,42 @@ func (h *TaskHandler) Update(c *gin.Context) {
 	}
 
 	task, err := h.taskService.Update(c.Request.Context(), userID, id, req)
+	var unresolvedErr *service.UnresolvedDependenciesError
+	if errors.As(err, &unresolvedErr) {
+		response.JSON(c, 409, 409, "操作失败：尚有前置任务未完成", gin.H{
+			"unresolved_predecessor_ids": unresolvedErr.IDs,
+			"unresolved_predecessors":    unresolvedErr.Predecessors,
+		})
+		return
+	}
+	var doneSuccessorsErr *service.DoneSuccessorsError
+	if errors.As(err, &doneSuccessorsErr) {
+		response.JSON(c, 409, 409, "操作失败：当前任务已被已完成后继任务依赖，不能回退状态", gin.H{
+			"done_successor_ids": doneSuccessorsErr.IDs,
+			"done_successors":    doneSuccessorsErr.Successors,
+		})
+		return
+	}
+	if isTaskValidationError(err) {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if isTaskForbiddenError(err) {
+		response.Forbidden(c, err.Error())
+		return
+	}
+	if errors.Is(err, repository.ErrForbidden) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
+	if errors.Is(err, repository.ErrNotFound) {
+		response.NotFound(c, "task not found")
+		return
+	}
+	if errors.Is(err, repository.ErrConflict) {
+		response.Conflict(c, "assignment already pending")
+		return
+	}
 	if err != nil {
 		apperror.Respond(c, err, "task update")
 		return
@@ -320,4 +356,24 @@ func getUserLevelFromContext(c *gin.Context) (uint8, bool) {
 		return 0, false
 	}
 	return level, true
+}
+
+func isTaskValidationError(err error) bool {
+	return errors.Is(err, service.ErrInvalidTaskTitle) ||
+		errors.Is(err, service.ErrInvalidTaskStatus) ||
+		errors.Is(err, service.ErrInvalidTaskPriority) ||
+		errors.Is(err, service.ErrInvalidTaskDeadline) ||
+		errors.Is(err, service.ErrInvalidTeamID) ||
+		errors.Is(err, service.ErrTeamIDImmutable) ||
+		errors.Is(err, service.ErrInvalidAssigneeID) ||
+		errors.Is(err, service.ErrAssigneeNotInTeam) ||
+		errors.Is(err, service.ErrInvalidTaskDependency) ||
+		errors.Is(err, service.ErrDependencyOnDoneTask) ||
+		errors.Is(err, service.ErrDependenciesNotDone) ||
+		errors.Is(err, service.ErrDoneSuccessorsExist)
+}
+
+func isTaskForbiddenError(err error) bool {
+	return errors.Is(err, service.ErrTeamRoleDenied) ||
+		errors.Is(err, service.ErrMemberStatusOnly)
 }

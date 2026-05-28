@@ -18,6 +18,7 @@ type taskRepoMock struct {
 	updateByIDFn                   func(ctx context.Context, task *model.Task) error
 	listIncompletePredecessorIDsFn func(ctx context.Context, taskID uint64) ([]uint64, error)
 	listIncompletePredecessorsFn   func(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error)
+	listDoneSuccessorsFn           func(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error)
 }
 
 func (m *taskRepoMock) Create(ctx context.Context, task *model.Task) error {
@@ -109,6 +110,12 @@ func (m *taskRepoMock) ListIncompletePredecessors(ctx context.Context, taskID ui
 		panic("unexpected call to ListIncompletePredecessors")
 	}
 	return m.listIncompletePredecessorsFn(ctx, taskID)
+}
+func (m *taskRepoMock) ListDoneSuccessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error) {
+	if m.listDoneSuccessorsFn == nil {
+		panic("unexpected call to ListDoneSuccessors")
+	}
+	return m.listDoneSuccessorsFn(ctx, taskID)
 }
 func (m *taskRepoMock) HasDependencyPath(ctx context.Context, fromID, toID uint64) (bool, error) {
 	panic("unexpected call to HasDependencyPath")
@@ -355,6 +362,47 @@ func TestTaskServiceUpdateRejectsTeamIDChangeForTeamTask(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrTeamIDImmutable)
+}
+
+func TestTaskServiceUpdateRejectsRollbackWhenDoneSuccessorsExist(t *testing.T) {
+	taskID := uint64(55)
+	teamID := uint64(5)
+	svc := NewTaskService(
+		&taskRepoMock{
+			getByIDFn: func(ctx context.Context, id uint64) (*model.Task, error) {
+				assert.Equal(t, taskID, id)
+				return &model.Task{
+					ID:     taskID,
+					UserID: 1,
+					TeamID: &teamID,
+					Status: model.TaskStatusDONE,
+				}, nil
+			},
+			listDoneSuccessorsFn: func(ctx context.Context, id uint64) ([]model.TaskDependencyNode, error) {
+				assert.Equal(t, taskID, id)
+				return []model.TaskDependencyNode{
+					{ID: 101, Title: "done child", Status: model.TaskStatusDONE},
+				}, nil
+			},
+		},
+		&teamRepoForTaskMock{
+			getMemberRoleFn: func(ctx context.Context, gotTeamID, gotUserID uint64) (model.TeamRole, error) {
+				assert.Equal(t, teamID, gotTeamID)
+				assert.Equal(t, uint64(7), gotUserID)
+				return model.TeamRoleOwner, nil
+			},
+		},
+		&taskUserRepoStub{},
+		&taskAssignRepoStub{},
+	)
+
+	doing := "DOING"
+	_, err := svc.Update(context.Background(), 7, taskID, UpdateTaskRequest{Status: &doing})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDoneSuccessorsExist)
+	var rollbackErr *DoneSuccessorsError
+	assert.ErrorAs(t, err, &rollbackErr)
+	assert.Equal(t, []uint64{101}, rollbackErr.IDs)
 }
 
 func uint64Ptr(v uint64) *uint64 {
