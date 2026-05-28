@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
-	"log/slog"
+	"fmt"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
@@ -37,10 +37,10 @@ func (r *userRepository) Create(ctx context.Context, user *model.User) error {
 		if errors.As(result.Error, &pgErr) && pgErr.Code == "23505" {
 			return ErrConflict
 		}
-		slog.Error("create_user_failed", slog.String("error", result.Error.Error()))
+		fmt.Printf("[GORM ERROR] Create User Failed: %v\n", result.Error)
 		return result.Error
 	}
-	slog.Info("user_created", slog.Uint64("user_id", user.ID), slog.Int64("rows_affected", result.RowsAffected))
+	fmt.Printf("[GORM INFO] User Created Successfully! ID: %d, RowsAffected: %d\n", user.ID, result.RowsAffected)
 	return nil
 }
 
