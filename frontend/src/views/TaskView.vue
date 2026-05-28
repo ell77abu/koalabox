@@ -67,6 +67,7 @@
         </div>
 
         <div v-else class="task-list">
+          <!-- ==================== 待办任务区 ==================== -->
           <section class="task-group">
             <div class="task-group-header">
               <div>
@@ -75,9 +76,8 @@
               <div class="task-group-actions">
                 <!-- 筛选下拉控件 -->
                 <div class="sort-control">
-                  <span class="sort-fab" aria-hidden="true" style="background: #10b981;"> <!-- 用绿色区分筛选 -->
+                  <span class="sort-fab" aria-hidden="true" style="background: #10b981;">
                     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                      <!-- 漏斗图标 -->
                       <path d="M3 4c0-.55.45-1 1-1h16c.55 0 1 .45 1 1v1.59c0 .27-.11.52-.29.71L15 13v6c0 .55-.45 1-1 1h-4c-.55 0-1-.45-1-1v-6L3.29 6.3A.996.996 0 0 1 3 5.59V4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                   </span>
@@ -153,7 +153,7 @@
               </div>
             </div>
 
-            <!-- 当前分类/搜索下，一个任务都没 -->
+            <!-- 情况1：当前分类/搜索下，一个任务都没 -->
             <div v-if="displayedTasks.length === 0" class="sub-empty-state">
               <p v-if="isSearching">未找到包含关键词的匹配任务。</p>
               <p v-else>当前分类下暂无任务。</p>
@@ -270,12 +270,12 @@
             <div v-if="showCompletedHistory">
               <div v-if="completedTasks.length" class="task-group-list">
                 <div
-                  v-for="task in completedTasks"
+                  v-for="task in paginatedActiveTasks"
                   :key="task.id"
-                  class="task-item task-item-done"
+                  class="task-item"
                   :class="{
                     'task-item-celebrating': celebrationTaskId === task.id,
-                    'task-item-arrived': arrivedTaskId === task.id,
+                    'task-item-completing': completingTaskId === task.id,
                   }"
                 >
                   <div v-if="celebrationTaskId === task.id" class="confetti-burst" aria-hidden="true">
@@ -320,6 +320,13 @@
                   </div>
 
                   <div class="task-actions">
+                    <button
+                      class="btn btn-small btn-complete"
+                      @click="markTaskDone(task)"
+                      :disabled="updatingId === task.id"
+                    >
+                      {{ updatingId === task.id ? '完成中...' : '完成任务' }}
+                    </button>
                     <RouterLink
                       class="btn btn-small btn-dependency"
                       :to="`/tasks/${task.id}/dependencies`"
@@ -346,6 +353,124 @@
                 </div>
               </div>
 
+              <!-- 分页控件被安全地包裹在了 v-else-if 内部，不会再打断链条了！ -->
+              <div v-if="activeTotalPages > 1" class="pagination">
+                <button class="btn btn-outline btn-small" :disabled="activePage === 1" @click="activePage--">上一页</button>
+                <span class="page-info">第 {{ activePage }} 页 / 共 {{ activeTotalPages }} 页</span>
+                <button class="btn btn-outline btn-small" :disabled="activePage === activeTotalPages" @click="activePage++">下一页</button>
+              </div>
+            </div>
+
+            <!-- 情况3：有任务，但全都是【已完成】的任务 -->
+            <div v-else class="sub-empty-state">
+              <p>当前没有未完成任务。</p>
+            </div>
+          </section>
+
+          <!-- ==================== 已完成历史区 ==================== -->
+          <section class="task-group task-group-history">
+            <button
+              type="button"
+              class="history-toggle"
+              @click="showCompletedHistory = !showCompletedHistory"
+            >
+              <div>
+                <h3>已完成历史</h3>
+                <p>点击 {{ showCompletedHistory ? '收起' : '展开' }}</p>
+              </div>
+              <div class="history-toggle-meta">
+                <span class="task-group-count done">{{ completedTasks.length }}</span>
+              </div>
+            </button>
+
+            <div v-if="showCompletedHistory">
+              <div v-if="completedTasks.length > 0">
+                <div class="task-group-list">
+                  <div
+                    v-for="task in paginatedHistoryTasks"
+                    :key="task.id"
+                    class="task-item task-item-done"
+                    :class="{
+                      'task-item-celebrating': celebrationTaskId === task.id,
+                      'task-item-arrived': arrivedTaskId === task.id,
+                    }"
+                  >
+                    <div v-if="celebrationTaskId === task.id" class="confetti-burst" aria-hidden="true">
+                      <span
+                        v-for="piece in confettiPieces"
+                        :key="`${task.id}-${piece}`"
+                        class="confetti-piece"
+                        :style="{ '--piece-index': piece }"
+                      ></span>
+                    </div>
+                    <div class="task-main">
+                      <div class="task-title-section">
+                        <h3>{{ task.title }}</h3>
+                        <RouterLink
+                          v-if="!isPersonalTask(task)"
+                          class="priority-badge team-link-badge"
+                          :to="`/teams/${task.team_id}`"
+                        >
+                          👥 {{ getTeamName(task) }}
+                        </RouterLink>
+                        <span class="status-badge" :class="`status-${task.status.toLowerCase()}`">
+                          {{ statusLabel(task.status) }}
+                        </span>
+                        <span
+                          class="priority-badge"
+                          :class="`priority-${task.priority}`"
+                        >
+                          {{ priorityLabel(task.priority) }}
+                        </span>
+                      </div>
+
+                      <p v-if="task.description" class="task-description">{{ task.description }}</p>
+
+                      <div class="task-meta">
+                        <span v-if="task.deadline" class="meta-item">
+                          <span class="meta-label">截止时间：</span>{{ formatDate(task.deadline) }}
+                        </span>
+                        <span class="meta-item">
+                          <span class="meta-label">创建时间：</span>{{ formatDate(task.created_at) }}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div class="task-actions">
+                      <RouterLink
+                        class="btn btn-small btn-dependency"
+                        :to="`/tasks/${task.id}/dependencies`"
+                      >
+                        依赖详情
+                      </RouterLink>
+                      <button
+                        class="btn btn-small btn-edit"
+                        @click="startEdit(task)"
+                        :disabled="updatingId === task.id"
+                      >
+                        编辑
+                      </button>
+                      <button
+                        v-if="canEditTaskDetails(task)"
+                        class="btn btn-small btn-danger"
+                        @click="onDeleteTask(task.id)"
+                        :disabled="deletingId === task.id"
+                      >
+                        {{ deletingId === task.id ? '删除中...' : '删除' }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 历史分页控件也安全包裹 -->
+                <div v-if="historyTotalPages > 1" class="pagination">
+                  <button class="btn btn-outline btn-small" :disabled="historyPage === 1" @click="historyPage--">上一页</button>
+                  <span class="page-info">第 {{ historyPage }} 页 / 共 {{ historyTotalPages }} 页</span>
+                  <button class="btn btn-outline btn-small" :disabled="historyPage === historyTotalPages" @click="historyPage++">下一页</button>
+                </div>
+              </div>
+
+              <!-- 当且仅当没有任何已完成任务时，才显示这句话 -->
               <div v-else class="sub-empty-state">
                 <p>还没有已完成的历史任务。</p>
               </div>
@@ -378,17 +503,19 @@
               * 作为该团队成员，您仅有权限修改此任务的执行状态。
             </p>
 
-            <select v-model="editingTask.status" class="form-input">
-              <option value="TODO">状态：待做</option>
-              <option value="DOING">状态：进行中</option>
-              <option value="DONE">状态：已完成</option>
-            </select>
+            <div class="form-row">
+              <select v-model="editingTask.status" class="form-input">
+                <option value="TODO">状态：待做</option>
+                <option value="DOING">状态：进行中</option>
+                <option value="DONE">状态：已完成</option>
+              </select>
 
-            <select v-model="editingTask.priority" class="form-input" :disabled="!canEditTaskDetails(editingTask)">
-              <option value="1">优先级：低</option>
-              <option value="2">优先级：中</option>
-              <option value="3">优先级：高</option>
-            </select>
+              <select v-model="editingTask.priority" class="form-input" :disabled="!canEditTaskDetails(editingTask)">
+                <option value="1">优先级：低</option>
+                <option value="2">优先级：中</option>
+                <option value="3">优先级：高</option>
+              </select>
+            </div>
 
             <input
               v-model.trim="editingTask.deadline"
@@ -667,6 +794,38 @@ const incompleteTasks = computed(() =>
 const completedTasks = computed(() =>
   displayedTasks.value.filter((task) => task.status === 'DONE')
 );
+
+// 待办任务分页
+const activePage = ref(1);
+const activePageSize = ref(8); // 每页显示 8 个
+const paginatedActiveTasks = computed(() => {
+  const start = (activePage.value - 1) * activePageSize.value;
+  return incompleteTasks.value.slice(start, start + activePageSize.value);
+});
+const activeTotalPages = computed(() => Math.ceil(incompleteTasks.value.length / activePageSize.value) || 1);
+
+// 历史任务分页
+const historyPage = ref(1);
+const historyPageSize = ref(8); // 每页显示 8 个
+const paginatedHistoryTasks = computed(() => {
+  const start = (historyPage.value - 1) * historyPageSize.value;
+  return completedTasks.value.slice(start, start + historyPageSize.value);
+});
+const historyTotalPages = computed(() => Math.ceil(completedTasks.value.length / historyPageSize.value) || 1);
+
+// 监听搜索、过滤条件变化，自动回到第一页
+watch([searchQuery, filterOption, sortOption], () => {
+  activePage.value = 1;
+  historyPage.value = 1;
+});
+
+// 监听自动退页 (如果删除了当前页最后一个任务，自动退回上一页)
+watch(paginatedActiveTasks, (newVal) => {
+  if (newVal.length === 0 && activePage.value > 1) activePage.value--;
+});
+watch(paginatedHistoryTasks, (newVal) => {
+  if (newVal.length === 0 && historyPage.value > 1) historyPage.value--;
+});
 
 // 退出登录
 const logout = async () => {
@@ -1029,7 +1188,7 @@ const priorityLabel = (priority) => {
 // 页面加载时获取任务列表
 onMounted(() => {
   document.addEventListener('click', handleOutsideClick);
-  fetchUserTeams(); // 👇 新增：挂载时加载团队
+  fetchUserTeams(); //挂载时加载团队
   loadTasks();
 });
 
@@ -1912,4 +2071,20 @@ onBeforeUnmount(() => {
     transform: translate3d(0, 0, 0) scale(1);
   }
 }
+/*分页控件样式*/
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #e5e7eb;
+}
+.page-info {
+  font-size: 0.875rem;
+  color: #6b7280;
+  font-weight: 500;
+}
+
 </style>
