@@ -98,43 +98,51 @@
           {{ isSearching ? '未找到包含关键词的匹配任务。' : '当前暂无匹配任务。' }}
         </div>
         
-        <div v-else class="task-list">
-          <div v-for="task in displayedTeamTasks" :key="task.id" class="task-item">
-            <div class="task-main">
-              <div class="task-title-section">
-                <h3>{{ task.title }}</h3>
-                <span class="status-badge" :class="`status-${task.status.toLowerCase()}`">
-                  {{ statusLabel(task.status) }}
-                </span>
-                <span class="priority-badge" :class="`priority-${task.priority}`">
-                  优先级: {{ priorityLabel(task.priority) }}
-                </span>
-                <span v-if="task.assignee_id" class="priority-badge" style="background: #eef2ff; color: #4f46e5;">
-                  执行者: {{ getAssigneeName(task.assignee_id) }}
-                </span>
-                <span v-else class="priority-badge" style="background: #f1f5f9; color: #64748b;">
-                  待分配
-                </span>
+        <div v-else>
+          <div class="task-list">
+            <div v-for="task in paginatedTeamTasks" :key="task.id" class="task-item">
+              <div class="task-main">
+                <div class="task-title-section">
+                  <h3>{{ task.title }}</h3>
+                  <span class="status-badge" :class="`status-${task.status.toLowerCase()}`">
+                    {{ statusLabel(task.status) }}
+                  </span>
+                  <span class="priority-badge" :class="`priority-${task.priority}`">
+                    优先级: {{ priorityLabel(task.priority) }}
+                  </span>
+                  <span v-if="task.assignee_id" class="priority-badge" style="background: #eef2ff; color: #4f46e5;">
+                    执行者: {{ getAssigneeName(task.assignee_id) }}
+                  </span>
+                  <span v-else class="priority-badge" style="background: #f1f5f9; color: #64748b;">
+                    待分配
+                  </span>
+                </div>
+                <p class="task-description">{{ task.description || '暂无描述' }}</p>
               </div>
-              <p class="task-description">{{ task.description || '暂无描述' }}</p>
-            </div>
 
-            <div class="task-actions">
-              <RouterLink
-                class="btn btn-small btn-dependency"
-                :to="`/tasks/${task.id}/dependencies`"
-              >
-                依赖详情
-              </RouterLink>
-              <button v-if="canEditTask(task)" class="btn btn-small btn-edit" @click="startEdit(task)">编辑</button>
-              <button 
-                v-if="myRole === 'Owner' || myRole === 'Admin'" 
-                class="btn btn-small btn-danger" 
-                @click="handleDeleteTask(task.id)"
-              >
-                删除
-              </button>
+              <div class="task-actions">
+                <RouterLink
+                  class="btn btn-small btn-dependency"
+                  :to="`/tasks/${task.id}/dependencies`"
+                >
+                  依赖详情
+                </RouterLink>
+                <button v-if="canEditTask(task)" class="btn btn-small btn-edit" @click="startEdit(task)">编辑</button>
+                <button 
+                  v-if="myRole === 'Owner' || myRole === 'Admin'" 
+                  class="btn btn-small btn-danger" 
+                  @click="handleDeleteTask(task.id)"
+                >
+                  删除
+                </button>
+              </div>
             </div>
+          </div>
+          
+          <div v-if="totalPages > 1" class="pagination">
+            <button class="btn btn-outline btn-small" :disabled="currentPage === 1" @click="currentPage--">上一页</button>
+            <span class="page-info">第 {{ currentPage }} 页 / 共 {{ totalPages }} 页</span>
+            <button class="btn btn-outline btn-small" :disabled="currentPage === totalPages" @click="currentPage++">下一页</button>
           </div>
         </div>
       </div>
@@ -357,14 +365,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue'; // 新增导入 watch
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { authStore } from '../stores/auth'; 
 import { teamStore } from '../stores/team';
 import {
   getTeamsApi, getTeamMembersApi, addTeamMemberApi, deleteTeamMemberApi, updateTeamMemberRoleApi,
   getTeamTasksApi, updateTeamApi, dissolveTeamApi,
-  // 👇 Lab3 引入：退出与转让 API
   leaveTeamApi, transferTeamApi
 } from '../services/team';
 import { 
@@ -410,7 +417,6 @@ const teamLoadError = ref('');
 const renamingTeam = ref(false);
 const dissolvingTeam = ref(false);
 
-// 👇 Lab3 新增：转让团队状态
 const newOwnerId = ref(null);
 const transferringTeam = ref(false);
 
@@ -449,6 +455,7 @@ const findTaskTitleById = (id) => {
 
 const isSearching = computed(() => searchQuery.value.trim().length > 0);
 
+// ================== 分页逻辑与过滤 ==================
 const displayedTeamTasks = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase();
   if (!keyword) return tasks.value;
@@ -457,7 +464,29 @@ const displayedTeamTasks = computed(() => {
   );
 });
 
-// 👇 Lab3 新增：细化移除成员权限校验
+const currentPage = ref(1);
+const pageSize = ref(8); // 每页显示 8 个任务
+
+const totalPages = computed(() => Math.ceil(displayedTeamTasks.value.length / pageSize.value) || 1);
+
+const paginatedTeamTasks = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value;
+  return displayedTeamTasks.value.slice(start, start + pageSize.value);
+});
+
+// 搜索条件变化时重置页码
+watch(searchQuery, () => {
+  currentPage.value = 1;
+});
+
+// 自动退页（例如：删除了最后一页的最后一个任务时，自动退回前一页）
+watch(paginatedTeamTasks, (newVal) => {
+  if (newVal.length === 0 && currentPage.value > 1) {
+    currentPage.value--;
+  }
+});
+// ===================================================
+
 const canRemoveMember = (member) => {
   if (myRole.value === 'Owner' && member.role !== 'Owner') return true;
   if (myRole.value === 'Admin' && member.role === 'Member') return true;
@@ -656,7 +685,6 @@ const handleDeleteTask = async (taskId) => {
 
 /* ================== 团队管理生命周期操作 ================== */
 
-// 成员主动退出团队
 const handleLeaveTeam = async () => {
   if (!confirm('确定要退出该团队吗？退出后您负责的未完成任务将退回团队池。')) return;
   try {
@@ -671,7 +699,6 @@ const handleLeaveTeam = async () => {
   }
 };
 
-// 转让团队所有权
 const handleTransferTeam = async () => {
   if (!newOwnerId.value) return;
   if (!confirm('确定要将团队转让给该成员吗？转让后您将失去 Owner 权限。')) return;
@@ -683,7 +710,7 @@ const handleTransferTeam = async () => {
       newOwnerId.value = null;
       await loadTeams(); 
       await loadTeamMembers();
-      activeTab.value = 'tasks'; // 失去 Owner 权限后自动切回任务大厅
+      activeTab.value = 'tasks'; 
     } else alert(getApiFailureMessage(res, '转让团队失败', '转让失败'));
   } catch (error) {
     alert(getApiErrorMessage(error, '转让团队失败'));
@@ -864,6 +891,22 @@ onMounted(() => {
 .btn-danger { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
 .btn-danger:hover { background: #fecaca; }
 
+/* 👇 新增：分页控件样式 👇 */
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #e5e7eb;
+}
+.page-info {
+  font-size: 0.875rem;
+  color: #6b7280;
+  font-weight: 500;
+}
+
 .modal-overlay { 
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0, 0, 0, 0.45); backdrop-filter: blur(3px); 
@@ -924,6 +967,7 @@ onMounted(() => {
 :global([data-theme="dark"]) .search-box { background: #0f172a; border-color: #334155; }
 :global([data-theme="dark"]) .search-input { color: #f8fafc; }
 :global([data-theme="dark"]) .search-clear { color: #94a3b8; }
+:global([data-theme="dark"]) .pagination { border-top-color: #334155; }
 
 @media (max-width: 768px) {
   .list-header {
