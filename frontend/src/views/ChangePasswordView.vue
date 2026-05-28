@@ -204,8 +204,7 @@ const onSubmit = async () => {
     }, 900);
   } catch (error) {
     if (isOldPasswordError(error)) {
-      const suffix = error?.response?.status ? `（HTTP ${error.response.status}）` : '';
-      errorMessage.value = `修改密码失败：旧密码错误，请重新输入${suffix}`;
+      errorMessage.value = '修改密码失败：旧密码错误，请重新输入';
     } else {
       errorMessage.value = getApiErrorMessage(error, '修改密码失败');
     }

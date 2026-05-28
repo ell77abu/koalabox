@@ -213,6 +213,7 @@
 
                 <div class="task-actions">
                   <button
+                    v-if="canUpdateTaskStatus(task)"
                     class="btn btn-small btn-complete"
                     @click="markTaskDone(task)"
                     :disabled="updatingId === task.id"
@@ -226,6 +227,7 @@
                     依赖详情
                   </RouterLink>
                   <button
+                    v-if="canUpdateTaskStatus(task)"
                     class="btn btn-small btn-edit"
                     @click="startEdit(task)"
                     :disabled="updatingId === task.id"
@@ -233,9 +235,9 @@
                     编辑
                   </button>
                   <button
-                    v-if="canEditTaskDetails(task)"
+                    v-if="canDeleteTask(task)"
                     class="btn btn-small btn-danger"
-                    @click="onDeleteTask(task.id)"
+                    @click="onDeleteTask(task)"
                     :disabled="deletingId === task.id"
                   >
                     {{ deletingId === task.id ? '删除中...' : '删除' }}
@@ -325,6 +327,7 @@
                       依赖详情
                     </RouterLink>
                     <button
+                      v-if="canUpdateTaskStatus(task)"
                       class="btn btn-small btn-edit"
                       @click="startEdit(task)"
                       :disabled="updatingId === task.id"
@@ -332,9 +335,9 @@
                       编辑
                     </button>
                     <button
-                      v-if="canEditTaskDetails(task)"
+                      v-if="canDeleteTask(task)"
                       class="btn btn-small btn-danger"
-                      @click="onDeleteTask(task.id)"
+                      @click="onDeleteTask(task)"
                       :disabled="deletingId === task.id"
                     >
                       {{ deletingId === task.id ? '删除中...' : '删除' }}
@@ -450,6 +453,7 @@ import { teamStore } from '../stores/team';
 import { getTeamsApi } from '../services/team';
 
 const router = useRouter();
+const isSystemAdmin = computed(() => Number(authStore.level.value) === 1);
 
 const isPersonalTask = (task) => {
   const teamId = task?.team_id;
@@ -475,13 +479,23 @@ const fetchUserTeams = async () => {
 
 // 判断当前用户在这个任务中，是否有高级编辑权限（修改标题、删除等）
 const canEditTaskDetails = (task) => {
-  if (isPersonalTask(task)) return true;
+  if (isPersonalTask(task)) return !isSystemAdmin.value;
   
   const teamId = Number(task.team_id);
   const team = teamStore.teams.value.find(t => Number(t.team_id) === teamId);
   const role = team ? team.role : 'Member'; 
   
   return role === 'Owner' || role === 'Admin';
+};
+
+const canDeleteTask = (task) => {
+  return isSystemAdmin.value || canEditTaskDetails(task);
+};
+
+const canUpdateTaskStatus = (task) => {
+  if (canEditTaskDetails(task)) return true;
+  if (isSystemAdmin.value) return false;
+  return !isPersonalTask(task);
 };
 
 const getTeamName = (task) => {
@@ -727,6 +741,11 @@ const onCreateTask = async () => {
 
 // 更新任务
 const onUpdateTask = async () => {
+  if (!canUpdateTaskStatus(editingTask)) {
+    updateError.value = '无权限更新该任务';
+    return;
+  }
+
   updatingId.value = editingTask.id;
   updateError.value = '';
   try {
@@ -811,6 +830,10 @@ const markTaskDone = async (task) => {
   if (task.status === 'DONE') {
     return;
   }
+  if (!canUpdateTaskStatus(task)) {
+    alert('无权限更新该任务');
+    return;
+  }
 
   updatingId.value = task.id;
   try {
@@ -864,7 +887,13 @@ const markTaskDone = async (task) => {
 };
 
 // 删除任务
-const onDeleteTask = async (id) => {
+const onDeleteTask = async (task) => {
+  if (!canDeleteTask(task)) {
+    alert('无权限删除该任务');
+    return;
+  }
+
+  const id = task.id;
   if (!window.confirm('确定要删除这个任务吗？')) {
     return;
   }
@@ -886,6 +915,11 @@ const onDeleteTask = async (id) => {
 
 // 开始编辑任务
 const startEdit = async (task) => {
+  if (!canUpdateTaskStatus(task)) {
+    updateError.value = '无权限编辑该任务';
+    return;
+  }
+
   updateError.value = '';
   editingTask.id = task.id;
   editingTask.title = task.title;

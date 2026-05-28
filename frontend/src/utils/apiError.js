@@ -12,12 +12,38 @@ const HTTP_ERROR_MESSAGES = {
   504: '服务响应超时，请稍后再试',
 };
 
+const duplicateMessageByContext = (context, message) => {
+  const contextText = String(context || '');
+  const messageText = String(message || '').toLowerCase();
+  const isDuplicate =
+    /already exists|duplicate|重复|已存在/.test(messageText) ||
+    messageText.includes('member already exists or invitation pending');
+
+  if (!isDuplicate) return '';
+
+  if (contextText.includes('注册')) {
+    return '用户名已存在，请更换用户名';
+  }
+  if (contextText.includes('邀请成员') || contextText.includes('添加成员')) {
+    return '该用户已在团队中，或已有待处理邀请，请勿重复邀请';
+  }
+  if (contextText.includes('创建团队') || contextText.includes('修改团队名称')) {
+    return '团队名称已存在，请更换团队名称';
+  }
+  if (contextText.includes('添加前置依赖') || contextText.includes('关联前置任务')) {
+    return '该前置依赖已存在，请勿重复添加';
+  }
+
+  return '数据已存在，请勿重复提交';
+};
+
 const MESSAGE_TRANSLATIONS = [
   [/invalid username or password/i, '用户名或密码错误'],
   [/invalid old password|old password/i, '旧密码错误，请重新输入'],
   [/unauthorized|invalid token|token expired/i, '登录状态已失效，请重新登录'],
   [/forbidden|permission denied|not authorized/i, '权限不足，无法执行该操作'],
   [/not found|record not found/i, '请求的资源不存在或已被删除'],
+  [/member already exists or invitation pending/i, '该用户已在团队中，或已有待处理邀请，请勿重复邀请'],
   [/already exists|duplicate/i, '数据已存在，请勿重复提交'],
   [/invalid task title/i, '任务标题不合法'],
   [/invalid task status/i, '任务状态不合法'],
@@ -40,9 +66,12 @@ const MESSAGE_TRANSLATIONS = [
 
 const hasChinese = (message) => /[\u4e00-\u9fff]/.test(String(message || ''));
 
-const translateMessage = (message) => {
+const translateMessage = (message, context = '') => {
   const text = String(message || '').trim();
   if (!text) return '';
+
+  const duplicateMessage = duplicateMessageByContext(context, text);
+  if (duplicateMessage) return duplicateMessage;
   if (hasChinese(text)) return text;
 
   const matched = MESSAGE_TRANSLATIONS.find(([pattern]) => pattern.test(text));
@@ -55,20 +84,20 @@ const extractServerMessage = (data) => {
   return data.message || data.error || data.msg || data.detail || '';
 };
 
-const withContext = (context, detail, suffix = '') => {
+const withContext = (context, detail) => {
   const safeContext = String(context || '操作失败').trim();
   const safeDetail = String(detail || '请求失败').trim();
-  return `${safeContext}：${safeDetail}${suffix}`;
+  return `${safeContext}：${safeDetail}`;
 };
 
 export const getApiErrorMessage = (error, context = '操作失败', fallback = '请求失败') => {
   const status = error?.response?.status;
   const serverMessage = extractServerMessage(error?.response?.data);
-  const translatedMessage = translateMessage(serverMessage);
+  const translatedMessage = translateMessage(serverMessage, context);
   const statusMessage = status ? HTTP_ERROR_MESSAGES[status] : '';
 
   if (error?.code === 'ECONNABORTED') {
-    return withContext(context, '请求超时，请稍后重试', '（请求超时）');
+    return withContext(context, '请求超时，请稍后重试');
   }
 
   if (!error?.response && error?.request) {
@@ -78,18 +107,15 @@ export const getApiErrorMessage = (error, context = '操作失败', fallback = '
   const detail =
     translatedMessage ||
     statusMessage ||
-    translateMessage(error?.message) ||
+    translateMessage(error?.message, context) ||
     fallback;
-  const suffix = status ? `（HTTP ${status}）` : '';
-  return withContext(context, detail, suffix);
+  return withContext(context, detail);
 };
 
 export const getApiFailureMessage = (response, context = '操作失败', fallback = '请求失败') => {
-  const code = response?.data?.code;
   const message = extractServerMessage(response?.data);
-  const detail = translateMessage(message) || (hasChinese(message) ? message : '') || fallback;
-  const suffix = code !== undefined && code !== 0 ? `（业务码 ${code}）` : '';
-  return withContext(context, detail, suffix);
+  const detail = translateMessage(message, context) || (hasChinese(message) ? message : '') || fallback;
+  return withContext(context, detail);
 };
 
 export const getUnresolvedDependenciesMessage = (error, findTaskTitleById, context = '操作失败') => {
@@ -114,8 +140,7 @@ export const getUnresolvedDependenciesMessage = (error, findTaskTitleById, conte
 
   const uniqueNames = [...new Set(names)];
   if (uniqueNames.length > 0) {
-    const suffix = error?.response?.status ? `（HTTP ${error.response.status}）` : '';
-    return withContext(context, `前置任务「${uniqueNames.join('」、「')}」尚未完成`, suffix);
+    return withContext(context, `前置任务「${uniqueNames.join('」、「')}」尚未完成`);
   }
 
   return getApiErrorMessage(error, context, '尚有前置任务未完成');
