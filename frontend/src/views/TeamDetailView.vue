@@ -137,6 +137,7 @@
               </button>
             </div>
           </div>
+          </div>
           
           <div v-if="totalPages > 1" class="pagination">
             <button class="btn btn-outline btn-small" :disabled="currentPage === 1" @click="currentPage--">上一页</button>

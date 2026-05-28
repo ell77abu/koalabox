@@ -647,7 +647,7 @@ func (s *taskService) createAssignmentNotification(ctx context.Context, task *mo
 		TeamID:      *task.TeamID,
 		RequesterID: requesterID,
 		AssigneeID:  *task.AssigneeID,
-		Status:      model.InvitationStatusAccepted,
+		Status:      model.InvitationStatusPending,
 	}
 	if err := s.assignRepo.Create(ctx, req); err != nil {
 		if errors.Is(err, repository.ErrConflict) {

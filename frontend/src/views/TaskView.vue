@@ -160,9 +160,10 @@
             </div>
 
             <!-- 有任务，且有【未完成】的任务 -->
-            <div v-else-if="incompleteTasks.length > 0" class="task-group-list">
-              <div
-                v-for="task in incompleteTasks"
+            <div v-else-if="incompleteTasks.length > 0">
+              <div class="task-group-list">
+                <div
+                  v-for="task in paginatedActiveTasks"
                 :key="task.id"
                 class="task-item"
                 :class="{
@@ -246,114 +247,6 @@
               </div>
             </div>
 
-            <!-- 有任务，全都是【已完成】的任务 -->
-            <div v-else class="sub-empty-state">
-              <p>当前没有未完成任务。</p>
-            </div>
-          </section>
-
-          <section class="task-group task-group-history">
-            <button
-              type="button"
-              class="history-toggle"
-              @click="showCompletedHistory = !showCompletedHistory"
-            >
-              <div>
-                <h3>已完成历史</h3>
-                <p>点击 {{ showCompletedHistory ? '收起' : '展开' }}</p>
-              </div>
-              <div class="history-toggle-meta">
-                <span class="task-group-count done">{{ completedTasks.length }}</span>
-              </div>
-            </button>
-
-            <div v-if="showCompletedHistory">
-              <div v-if="completedTasks.length" class="task-group-list">
-                <div
-                  v-for="task in paginatedActiveTasks"
-                  :key="task.id"
-                  class="task-item"
-                  :class="{
-                    'task-item-celebrating': celebrationTaskId === task.id,
-                    'task-item-completing': completingTaskId === task.id,
-                  }"
-                >
-                  <div v-if="celebrationTaskId === task.id" class="confetti-burst" aria-hidden="true">
-                    <span
-                      v-for="piece in confettiPieces"
-                      :key="`${task.id}-${piece}`"
-                      class="confetti-piece"
-                      :style="{ '--piece-index': piece }"
-                    ></span>
-                  </div>
-                  <div class="task-main">
-                    <div class="task-title-section">
-                      <h3>{{ task.title }}</h3>
-                      <RouterLink
-                        v-if="!isPersonalTask(task)"
-                        class="priority-badge team-link-badge"
-                        :to="`/teams/${task.team_id}`"
-                      >
-                        👥 {{ getTeamName(task) }}
-                      </RouterLink>
-                      <span class="status-badge" :class="`status-${task.status.toLowerCase()}`">
-                        {{ statusLabel(task.status) }}
-                      </span>
-                      <span
-                        class="priority-badge"
-                        :class="`priority-${task.priority}`"
-                      >
-                        {{ priorityLabel(task.priority) }}
-                      </span>
-                    </div>
-
-                    <p v-if="task.description" class="task-description">{{ task.description }}</p>
-
-                    <div class="task-meta">
-                      <span v-if="task.deadline" class="meta-item">
-                        <span class="meta-label">截止时间：</span>{{ formatDate(task.deadline) }}
-                      </span>
-                      <span class="meta-item">
-                        <span class="meta-label">创建时间：</span>{{ formatDate(task.created_at) }}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div class="task-actions">
-                    <button
-                      class="btn btn-small btn-complete"
-                      @click="markTaskDone(task)"
-                      :disabled="updatingId === task.id"
-                    >
-                      {{ updatingId === task.id ? '完成中...' : '完成任务' }}
-                    </button>
-                    <RouterLink
-                      class="btn btn-small btn-dependency"
-                      :to="`/tasks/${task.id}/dependencies`"
-                    >
-                      依赖详情
-                    </RouterLink>
-                    <button
-                      v-if="canUpdateTaskStatus(task)"
-                      class="btn btn-small btn-edit"
-                      @click="startEdit(task)"
-                      :disabled="updatingId === task.id"
-                    >
-                      编辑
-                    </button>
-                    <button
-                      v-if="canDeleteTask(task)"
-                      class="btn btn-small btn-danger"
-                      @click="onDeleteTask(task)"
-                      :disabled="deletingId === task.id"
-                    >
-                      {{ deletingId === task.id ? '删除中...' : '删除' }}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 分页控件被安全地包裹在了 v-else-if 内部，不会再打断链条了！ -->
               <div v-if="activeTotalPages > 1" class="pagination">
                 <button class="btn btn-outline btn-small" :disabled="activePage === 1" @click="activePage--">上一页</button>
                 <span class="page-info">第 {{ activePage }} 页 / 共 {{ activeTotalPages }} 页</span>
@@ -361,7 +254,7 @@
               </div>
             </div>
 
-            <!-- 情况3：有任务，但全都是【已完成】的任务 -->
+            <!-- 有任务，全都是【已完成】的任务 -->
             <div v-else class="sub-empty-state">
               <p>当前没有未完成任务。</p>
             </div>
@@ -453,7 +346,7 @@
                       <button
                         v-if="canEditTaskDetails(task)"
                         class="btn btn-small btn-danger"
-                        @click="onDeleteTask(task.id)"
+                        @click="onDeleteTask(task)"
                         :disabled="deletingId === task.id"
                       >
                         {{ deletingId === task.id ? '删除中...' : '删除' }}
