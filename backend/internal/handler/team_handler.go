@@ -3,15 +3,13 @@ package handler
 import (
 	"context"
 	"errors"
-	"log"
-	"runtime/debug"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"task-backend/internal/apperror"
 	"task-backend/internal/model"
-	"task-backend/internal/repository"
 	"task-backend/internal/service"
 	"task-backend/pkg/response"
 )
@@ -59,7 +57,7 @@ func (h *TeamHandler) ListMine(c *gin.Context) {
 
 	list, err := h.teamService.ListMine(c.Request.Context(), userID, search)
 	if err != nil {
-		response.InternalError(c, "query teams failed")
+		apperror.Respond(c, err, "team list mine")
 		return
 	}
 
@@ -74,17 +72,13 @@ func (h *TeamHandler) Create(c *gin.Context) {
 
 	var req service.CreateTeamRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "invalid request body")
+		apperror.Respond(c, apperror.BadRequest("请求体格式不正确"), "team create")
 		return
 	}
 
 	team, err := h.teamService.Create(c.Request.Context(), userID, req)
-	if errors.Is(err, service.ErrInvalidTeamName) {
-		response.BadRequest(c, err.Error())
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "create team failed")
+		apperror.Respond(c, err, "team create")
 		return
 	}
 
@@ -103,31 +97,19 @@ func (h *TeamHandler) Update(c *gin.Context) {
 
 	teamID, err := strconv.ParseUint(c.Param("team_id"), 10, 64)
 	if err != nil {
-		response.BadRequest(c, "invalid team id")
+		apperror.Respond(c, apperror.BadRequest("团队ID不合法"), "team update")
 		return
 	}
 
 	var req service.UpdateTeamRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "invalid request body")
+		apperror.Respond(c, apperror.BadRequest("请求体格式不正确"), "team update")
 		return
 	}
 
 	err = h.teamService.Update(c.Request.Context(), userID, teamID, req)
-	if errors.Is(err, service.ErrInvalidTeamName) {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	if errors.Is(err, service.ErrTeamOwnerOnly) || errors.Is(err, repository.ErrForbidden) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, repository.ErrNotFound) {
-		response.NotFound(c, "team not found")
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "rename team failed")
+		apperror.Respond(c, err, "team update")
 		return
 	}
 
@@ -142,51 +124,25 @@ func (h *TeamHandler) AddMember(c *gin.Context) {
 
 	teamID, err := strconv.ParseUint(c.Param("team_id"), 10, 64)
 	if err != nil {
-		response.BadRequest(c, "invalid team id")
+		apperror.Respond(c, apperror.BadRequest("团队ID不合法"), "team add member")
 		return
 	}
 
 	var req service.AddTeamMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "invalid request body")
+		apperror.Respond(c, apperror.BadRequest("请求体格式不正确"), "team add member")
 		return
 	}
 
 	// 输入校验：要求至少提供 user_id 或 username 中的一个
 	if req.UserID == 0 && strings.TrimSpace(req.Username) == "" {
-		response.BadRequest(c, "user_id or username is required")
+		apperror.Respond(c, apperror.BadRequest("请提供用户ID或用户名"), "team add member")
 		return
 	}
 
 	member, err := h.teamService.AddMember(c.Request.Context(), userID, teamID, req)
-	if errors.Is(err, service.ErrInvalidTeamMember) {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	if errors.Is(err, service.ErrInvalidTeamRole) {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	if errors.Is(err, service.ErrTeamOwnerOnly) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, repository.ErrForbidden) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, repository.ErrNotFound) {
-		response.NotFound(c, "team or user not found")
-		return
-	}
-	if errors.Is(err, repository.ErrConflict) {
-		response.Conflict(c, "member already exists or invitation pending")
-		return
-	}
 	if err != nil {
-		// 记录详细错误与堆栈到服务器日志，便于排查；对外只返回统一的内部错误信息
-		log.Printf("AddMember error: %v\n%s", err, debug.Stack())
-		response.InternalError(c, "add member failed")
+		apperror.Respond(c, err, "team add member")
 		return
 	}
 
@@ -206,31 +162,19 @@ func (h *TeamHandler) RemoveMember(c *gin.Context) {
 
 	teamID, err := strconv.ParseUint(c.Param("team_id"), 10, 64)
 	if err != nil {
-		response.BadRequest(c, "invalid team id")
+		apperror.Respond(c, apperror.BadRequest("团队ID不合法"), "team remove member")
 		return
 	}
 
 	targetUserID, err := strconv.ParseUint(c.Param("user_id"), 10, 64)
 	if err != nil {
-		response.BadRequest(c, "invalid user id")
+		apperror.Respond(c, apperror.BadRequest("用户ID不合法"), "team remove member")
 		return
 	}
 
 	err = h.teamService.RemoveMember(c.Request.Context(), userID, teamID, targetUserID)
-	if errors.Is(err, service.ErrTeamOwnerOnly) || errors.Is(err, service.ErrCannotRemoveSelf) || errors.Is(err, service.ErrCannotModifyOwner) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, repository.ErrForbidden) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, repository.ErrNotFound) {
-		response.NotFound(c, "team or member not found")
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "remove member failed")
+		apperror.Respond(c, err, "team remove member")
 		return
 	}
 
@@ -245,41 +189,25 @@ func (h *TeamHandler) UpdateMemberRole(c *gin.Context) {
 
 	teamID, err := strconv.ParseUint(c.Param("team_id"), 10, 64)
 	if err != nil {
-		response.BadRequest(c, "invalid team id")
+		apperror.Respond(c, apperror.BadRequest("团队ID不合法"), "team update member role")
 		return
 	}
 
 	targetUserID, err := strconv.ParseUint(c.Param("user_id"), 10, 64)
 	if err != nil {
-		response.BadRequest(c, "invalid user id")
+		apperror.Respond(c, apperror.BadRequest("用户ID不合法"), "team update member role")
 		return
 	}
 
 	var req service.UpdateTeamMemberRoleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "invalid request body")
+		apperror.Respond(c, apperror.BadRequest("请求体格式不正确"), "team update member role")
 		return
 	}
 
 	member, err := h.teamService.UpdateMemberRole(c.Request.Context(), userID, teamID, targetUserID, req)
-	if errors.Is(err, service.ErrInvalidTeamRole) {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	if errors.Is(err, service.ErrTeamOwnerOnly) || errors.Is(err, service.ErrCannotModifyOwner) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, repository.ErrForbidden) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, repository.ErrNotFound) {
-		response.NotFound(c, "team or member not found")
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "update member role failed")
+		apperror.Respond(c, err, "team update member role")
 		return
 	}
 
@@ -294,21 +222,13 @@ func (h *TeamHandler) ListMembers(c *gin.Context) {
 
 	teamID, err := strconv.ParseUint(c.Param("team_id"), 10, 64)
 	if err != nil {
-		response.BadRequest(c, "invalid team id")
+		apperror.Respond(c, apperror.BadRequest("团队ID不合法"), "team list members")
 		return
 	}
 
 	list, err := h.teamService.ListMembers(c.Request.Context(), userID, teamID)
-	if errors.Is(err, repository.ErrForbidden) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, repository.ErrNotFound) {
-		response.NotFound(c, "team not found")
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "query team members failed")
+		apperror.Respond(c, err, "team list members")
 		return
 	}
 
@@ -323,7 +243,7 @@ func (h *TeamHandler) ListPendingInvitations(c *gin.Context) {
 
 	list, err := h.teamService.ListPendingInvitations(c.Request.Context(), userID)
 	if err != nil {
-		response.InternalError(c, "query invitations failed")
+		apperror.Respond(c, err, "team list invitations")
 		return
 	}
 
@@ -338,25 +258,13 @@ func (h *TeamHandler) AcceptInvitation(c *gin.Context) {
 
 	invitationID, err := strconv.ParseUint(c.Param("invitation_id"), 10, 64)
 	if err != nil {
-		response.BadRequest(c, "invalid invitation id")
+		apperror.Respond(c, apperror.BadRequest("邀请ID不合法"), "team accept invitation")
 		return
 	}
 
 	err = h.teamService.AcceptInvitation(c.Request.Context(), userID, invitationID)
-	if errors.Is(err, service.ErrInvitationNotPending) {
-		response.BadRequest(c, "invitation is not pending")
-		return
-	}
-	if errors.Is(err, repository.ErrForbidden) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, repository.ErrNotFound) {
-		response.NotFound(c, "invitation or team not found")
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "accept invitation failed")
+		apperror.Respond(c, err, "team accept invitation")
 		return
 	}
 
@@ -371,25 +279,13 @@ func (h *TeamHandler) DeclineInvitation(c *gin.Context) {
 
 	invitationID, err := strconv.ParseUint(c.Param("invitation_id"), 10, 64)
 	if err != nil {
-		response.BadRequest(c, "invalid invitation id")
+		apperror.Respond(c, apperror.BadRequest("邀请ID不合法"), "team decline invitation")
 		return
 	}
 
 	err = h.teamService.DeclineInvitation(c.Request.Context(), userID, invitationID)
-	if errors.Is(err, service.ErrInvitationNotPending) {
-		response.BadRequest(c, "invitation is not pending")
-		return
-	}
-	if errors.Is(err, repository.ErrForbidden) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, repository.ErrNotFound) {
-		response.NotFound(c, "invitation not found")
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "decline invitation failed")
+		apperror.Respond(c, err, "team decline invitation")
 		return
 	}
 
@@ -404,21 +300,13 @@ func (h *TeamHandler) Leave(c *gin.Context) {
 
 	teamID, err := strconv.ParseUint(c.Param("team_id"), 10, 64)
 	if err != nil {
-		response.BadRequest(c, "invalid team id")
+		apperror.Respond(c, apperror.BadRequest("团队ID不合法"), "team leave")
 		return
 	}
 
 	err = h.teamService.Leave(c.Request.Context(), userID, teamID)
-	if errors.Is(err, service.ErrOwnerCannotLeave) || errors.Is(err, repository.ErrForbidden) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, repository.ErrNotFound) {
-		response.NotFound(c, "team not found")
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "leave team failed")
+		apperror.Respond(c, err, "team leave")
 		return
 	}
 
@@ -433,31 +321,19 @@ func (h *TeamHandler) TransferOwnership(c *gin.Context) {
 
 	teamID, err := strconv.ParseUint(c.Param("team_id"), 10, 64)
 	if err != nil {
-		response.BadRequest(c, "invalid team id")
+		apperror.Respond(c, apperror.BadRequest("团队ID不合法"), "team transfer ownership")
 		return
 	}
 
 	var req transferTeamRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "invalid request body")
+		apperror.Respond(c, apperror.BadRequest("请求体格式不正确"), "team transfer ownership")
 		return
 	}
 
 	err = h.teamService.TransferOwnership(c.Request.Context(), userID, teamID, req.NewOwnerID)
-	if errors.Is(err, service.ErrTeamOwnerOnly) || errors.Is(err, repository.ErrForbidden) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, service.ErrInvalidTransferTarget) {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	if errors.Is(err, repository.ErrNotFound) {
-		response.NotFound(c, "team not found")
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "transfer owner failed")
+		apperror.Respond(c, err, "team transfer ownership")
 		return
 	}
 
@@ -472,27 +348,19 @@ func (h *TeamHandler) Delete(c *gin.Context) {
 
 	teamID, err := strconv.ParseUint(c.Param("team_id"), 10, 64)
 	if err != nil {
-		response.BadRequest(c, "invalid team id")
+		apperror.Respond(c, apperror.BadRequest("团队ID不合法"), "team delete")
 		return
 	}
 
 	deleter, ok := h.teamService.(teamDeleter)
 	if !ok {
-		response.InternalError(c, "team delete not supported")
+		apperror.Respond(c, errors.New("team delete not supported"), "team delete")
 		return
 	}
 
 	err = deleter.DeleteTeam(c.Request.Context(), userID, teamID)
-	if errors.Is(err, service.ErrTeamOwnerOnly) || errors.Is(err, repository.ErrForbidden) {
-		response.Forbidden(c, "forbidden")
-		return
-	}
-	if errors.Is(err, repository.ErrNotFound) {
-		response.NotFound(c, "team not found")
-		return
-	}
 	if err != nil {
-		response.InternalError(c, "delete team failed")
+		apperror.Respond(c, err, "team delete")
 		return
 	}
 

@@ -142,7 +142,7 @@ func TestTeamHandler_AddMember_InvalidBody(t *testing.T) {
 	var resp response.Common
 	assert.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.Equal(t, 400, resp.Code)
-	assert.Equal(t, "invalid request body", resp.Message)
+	assert.Equal(t, "请求体格式不正确", resp.Message)
 }
 
 func TestTeamHandler_AddMember_Forbidden(t *testing.T) {
@@ -172,7 +172,7 @@ func TestTeamHandler_AddMember_Forbidden(t *testing.T) {
 	var resp response.Common
 	assert.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.Equal(t, 403, resp.Code)
-	assert.Equal(t, "forbidden", resp.Message)
+	assert.Equal(t, "权限不足，无法执行该操作", resp.Message)
 }
 
 func TestTeamHandler_Leave_OwnerForbidden(t *testing.T) {
@@ -205,7 +205,7 @@ func TestTeamHandler_Leave_OwnerForbidden(t *testing.T) {
 	var resp response.Common
 	assert.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.Equal(t, 403, resp.Code)
-	assert.Equal(t, "forbidden", resp.Message)
+	assert.Equal(t, "权限不足，无法执行该操作", resp.Message)
 }
 
 func TestTeamHandler_Leave_Success(t *testing.T) {

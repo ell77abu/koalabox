@@ -64,6 +64,6 @@ func Gone(c *gin.Context, message string) {
 	JSON(c, 410, 410, message, nil)
 }
 
-func InternalError(c *gin.Context, message string) {
-	JSON(c, 500, 500, message, nil)
+func InternalError(c *gin.Context, _ string) {
+	JSON(c, 500, 500, "服务器内部错误，请稍后重试", nil)
 }

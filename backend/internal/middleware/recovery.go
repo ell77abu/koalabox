@@ -1,13 +1,9 @@
 package middleware
 
 import (
-	"log"
-	"net/http"
-	"runtime/debug"
-
 	"github.com/gin-gonic/gin"
 
-	"task-backend/pkg/response"
+	"task-backend/internal/apperror"
 )
 
 // RecoverWithLog 捕获 panic，记录堆栈信息并向客户端返回统一的 500 响应。
@@ -17,11 +13,7 @@ func RecoverWithLog() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if r := recover(); r != nil {
-				// 记录详细堆栈到服务器日志，便于排查
-				log.Printf("panic recovered: %v\n%s", r, debug.Stack())
-				// 对外返回统一的错误信息，避免泄露内部实现细节
-				response.JSON(c, http.StatusInternalServerError, 500, "internal server error", nil)
-				c.Abort()
+				apperror.RecoverPanic(c, r)
 			}
 		}()
 		c.Next()
