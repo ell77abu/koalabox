@@ -128,9 +128,9 @@
               </RouterLink>
               <button v-if="canEditTask(task)" class="btn btn-small btn-edit" @click="startEdit(task)">编辑</button>
               <button 
-                v-if="myRole === 'Owner' || myRole === 'Admin'" 
+                v-if="canDeleteTeamTask(task)" 
                 class="btn btn-small btn-danger" 
-                @click="handleDeleteTask(task.id)"
+                @click="handleDeleteTask(task)"
               >
                 删除
               </button>
@@ -380,6 +380,7 @@ import {
 const route = useRoute();
 const router = useRouter();
 const teamId = Number(route.params.team_id);
+const isSystemAdmin = computed(() => Number(authStore.level.value) === 1);
 
 const activeTab = ref('tasks');
 
@@ -440,6 +441,10 @@ const canEditTask = (task) => {
   if (myRole.value === 'Owner' || myRole.value === 'Admin') return true;
   const currentMember = members.value.find(m => m.username === authStore.username.value);
   return currentMember ? Number(task.assignee_id) === Number(currentMember.user_id) : false;
+};
+
+const canDeleteTeamTask = (task) => {
+  return isSystemAdmin.value || myRole.value === 'Owner' || myRole.value === 'Admin';
 };
 
 const findTaskTitleById = (id) => {
@@ -644,7 +649,13 @@ const handleUpdateTask = async () => {
   } finally { submittingTask.value = false; }
 };
 
-const handleDeleteTask = async (taskId) => {
+const handleDeleteTask = async (task) => {
+  if (!canDeleteTeamTask(task)) {
+    alert('无权限删除该团队任务');
+    return;
+  }
+
+  const taskId = task.id;
   if (!confirm('确定要删除这个团队任务吗？此操作不可撤销。')) return;
   try {
     const res = await deleteTaskApi(taskId);

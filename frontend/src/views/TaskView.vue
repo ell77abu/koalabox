@@ -233,9 +233,9 @@
                     编辑
                   </button>
                   <button
-                    v-if="canEditTaskDetails(task)"
+                    v-if="canDeleteTask(task)"
                     class="btn btn-small btn-danger"
-                    @click="onDeleteTask(task.id)"
+                    @click="onDeleteTask(task)"
                     :disabled="deletingId === task.id"
                   >
                     {{ deletingId === task.id ? '删除中...' : '删除' }}
@@ -332,9 +332,9 @@
                       编辑
                     </button>
                     <button
-                      v-if="canEditTaskDetails(task)"
+                      v-if="canDeleteTask(task)"
                       class="btn btn-small btn-danger"
-                      @click="onDeleteTask(task.id)"
+                      @click="onDeleteTask(task)"
                       :disabled="deletingId === task.id"
                     >
                       {{ deletingId === task.id ? '删除中...' : '删除' }}
@@ -450,6 +450,7 @@ import { teamStore } from '../stores/team';
 import { getTeamsApi } from '../services/team';
 
 const router = useRouter();
+const isSystemAdmin = computed(() => Number(authStore.level.value) === 1);
 
 const isPersonalTask = (task) => {
   const teamId = task?.team_id;
@@ -482,6 +483,10 @@ const canEditTaskDetails = (task) => {
   const role = team ? team.role : 'Member'; 
   
   return role === 'Owner' || role === 'Admin';
+};
+
+const canDeleteTask = (task) => {
+  return isSystemAdmin.value || canEditTaskDetails(task);
 };
 
 const getTeamName = (task) => {
@@ -864,7 +869,13 @@ const markTaskDone = async (task) => {
 };
 
 // 删除任务
-const onDeleteTask = async (id) => {
+const onDeleteTask = async (task) => {
+  if (!canDeleteTask(task)) {
+    alert('无权限删除该任务');
+    return;
+  }
+
+  const id = task.id;
   if (!window.confirm('确定要删除这个任务吗？')) {
     return;
   }
