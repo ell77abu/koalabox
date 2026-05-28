@@ -213,6 +213,7 @@
 
                 <div class="task-actions">
                   <button
+                    v-if="canUpdateTaskStatus(task)"
                     class="btn btn-small btn-complete"
                     @click="markTaskDone(task)"
                     :disabled="updatingId === task.id"
@@ -226,6 +227,7 @@
                     依赖详情
                   </RouterLink>
                   <button
+                    v-if="canUpdateTaskStatus(task)"
                     class="btn btn-small btn-edit"
                     @click="startEdit(task)"
                     :disabled="updatingId === task.id"
@@ -325,6 +327,7 @@
                       依赖详情
                     </RouterLink>
                     <button
+                      v-if="canUpdateTaskStatus(task)"
                       class="btn btn-small btn-edit"
                       @click="startEdit(task)"
                       :disabled="updatingId === task.id"
@@ -476,7 +479,7 @@ const fetchUserTeams = async () => {
 
 // 判断当前用户在这个任务中，是否有高级编辑权限（修改标题、删除等）
 const canEditTaskDetails = (task) => {
-  if (isPersonalTask(task)) return true;
+  if (isPersonalTask(task)) return !isSystemAdmin.value;
   
   const teamId = Number(task.team_id);
   const team = teamStore.teams.value.find(t => Number(t.team_id) === teamId);
@@ -487,6 +490,12 @@ const canEditTaskDetails = (task) => {
 
 const canDeleteTask = (task) => {
   return isSystemAdmin.value || canEditTaskDetails(task);
+};
+
+const canUpdateTaskStatus = (task) => {
+  if (canEditTaskDetails(task)) return true;
+  if (isSystemAdmin.value) return false;
+  return !isPersonalTask(task);
 };
 
 const getTeamName = (task) => {
@@ -732,6 +741,11 @@ const onCreateTask = async () => {
 
 // 更新任务
 const onUpdateTask = async () => {
+  if (!canUpdateTaskStatus(editingTask)) {
+    updateError.value = '无权限更新该任务';
+    return;
+  }
+
   updatingId.value = editingTask.id;
   updateError.value = '';
   try {
@@ -816,6 +830,10 @@ const markTaskDone = async (task) => {
   if (task.status === 'DONE') {
     return;
   }
+  if (!canUpdateTaskStatus(task)) {
+    alert('无权限更新该任务');
+    return;
+  }
 
   updatingId.value = task.id;
   try {
@@ -897,6 +915,11 @@ const onDeleteTask = async (task) => {
 
 // 开始编辑任务
 const startEdit = async (task) => {
+  if (!canUpdateTaskStatus(task)) {
+    updateError.value = '无权限编辑该任务';
+    return;
+  }
+
   updateError.value = '';
   editingTask.id = task.id;
   editingTask.title = task.title;
