@@ -30,6 +30,7 @@ var (
 	ErrDependencyCycle       = errors.New("dependency cycle detected")
 	ErrTeamIDImmutable       = errors.New("cannot change team id for existing task")
 	ErrTeamGone              = errors.New("team is gone")
+	ErrDoneSuccessorsExist   = errors.New("cannot rollback task status because done successors depend on it")
 )
 
 type CreateTaskRequest struct {
@@ -102,6 +103,19 @@ func (e *UnresolvedDependenciesError) Error() string {
 
 func (e *UnresolvedDependenciesError) Is(target error) bool {
 	return target == ErrDependenciesNotDone
+}
+
+type DoneSuccessorsError struct {
+	IDs        []uint64
+	Successors []model.TaskDependencyNode
+}
+
+func (e *DoneSuccessorsError) Error() string {
+	return fmt.Sprintf("done successors depend on task: %v", e.IDs)
+}
+
+func (e *DoneSuccessorsError) Is(target error) bool {
+	return target == ErrDoneSuccessorsExist
 }
 
 type TaskService interface {
@@ -286,6 +300,11 @@ func (s *taskService) Update(ctx context.Context, userID uint64, taskID uint64, 
 			return nil, err
 		}
 	}
+	if task.Status == model.TaskStatusDONE && status != model.TaskStatusDONE {
+		if err := s.ensureNoDoneSuccessors(ctx, task.ID); err != nil {
+			return nil, err
+		}
+	}
 	task.Status = status
 
 	if err := s.taskRepo.UpdateByID(ctx, task); err != nil {
@@ -338,6 +357,11 @@ func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.T
 		}
 		if status == model.TaskStatusDONE && task.Status != model.TaskStatusDONE {
 			if err := s.ensureDependenciesCompleted(ctx, task.ID); err != nil {
+				return nil, err
+			}
+		}
+		if task.Status == model.TaskStatusDONE && status != model.TaskStatusDONE {
+			if err := s.ensureNoDoneSuccessors(ctx, task.ID); err != nil {
 				return nil, err
 			}
 		}
@@ -645,6 +669,21 @@ func (s *taskService) ensureDependenciesCompleted(ctx context.Context, taskID ui
 			ids = append(ids, predecessor.ID)
 		}
 		return &UnresolvedDependenciesError{IDs: ids, Predecessors: predecessors}
+	}
+	return nil
+}
+
+func (s *taskService) ensureNoDoneSuccessors(ctx context.Context, taskID uint64) error {
+	successors, err := s.taskRepo.ListDoneSuccessors(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if len(successors) > 0 {
+		ids := make([]uint64, 0, len(successors))
+		for _, successor := range successors {
+			ids = append(ids, successor.ID)
+		}
+		return &DoneSuccessorsError{IDs: ids, Successors: successors}
 	}
 	return nil
 }

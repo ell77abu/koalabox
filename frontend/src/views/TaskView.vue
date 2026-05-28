@@ -159,9 +159,116 @@
               <p v-else>当前分类下暂无任务。</p>
             </div>
 
-            <!-- 情况2：有任务，且有【未完成】的任务 -->
-            <div v-else-if="incompleteTasks.length > 0">
-              <div class="task-group-list">
+            <!-- 有任务，且有【未完成】的任务 -->
+            <div v-else-if="incompleteTasks.length > 0" class="task-group-list">
+              <div
+                v-for="task in incompleteTasks"
+                :key="task.id"
+                class="task-item"
+                :class="{
+                  'task-item-celebrating': celebrationTaskId === task.id,
+                  'task-item-completing': completingTaskId === task.id,
+                }"
+              >
+                <div v-if="celebrationTaskId === task.id" class="confetti-burst" aria-hidden="true">
+                  <span
+                    v-for="piece in confettiPieces"
+                    :key="`${task.id}-${piece}`"
+                    class="confetti-piece"
+                    :style="{ '--piece-index': piece }"
+                  ></span>
+                </div>
+                <div class="task-main">
+                  <div class="task-title-section">
+                    <h3>{{ task.title }}</h3>
+                    <RouterLink
+                      v-if="!isPersonalTask(task)"
+                      class="priority-badge team-link-badge"
+                      :to="`/teams/${task.team_id}`"
+                    >
+                      👥 {{ getTeamName(task) }}
+                    </RouterLink>
+                    <span class="status-badge" :class="`status-${task.status.toLowerCase()}`">
+                      {{ statusLabel(task.status) }}
+                    </span>
+                    <span
+                      class="priority-badge"
+                      :class="`priority-${task.priority}`"
+                    >
+                      {{ priorityLabel(task.priority) }}
+                    </span>
+                  </div>
+
+                  <p v-if="task.description" class="task-description">{{ task.description }}</p>
+
+                  <div class="task-meta">
+                    <span v-if="task.deadline" class="meta-item">
+                      <span class="meta-label">截止时间：</span>{{ formatDate(task.deadline) }}
+                    </span>
+                    <span class="meta-item">
+                      <span class="meta-label">创建时间：</span>{{ formatDate(task.created_at) }}
+                    </span>
+                  </div>
+                </div>
+
+                <div class="task-actions">
+                  <button
+                    v-if="canUpdateTaskStatus(task)"
+                    class="btn btn-small btn-complete"
+                    @click="markTaskDone(task)"
+                    :disabled="updatingId === task.id"
+                  >
+                    {{ updatingId === task.id ? '完成中...' : '完成任务' }}
+                  </button>
+                  <RouterLink
+                    class="btn btn-small btn-dependency"
+                    :to="`/tasks/${task.id}/dependencies`"
+                  >
+                    依赖详情
+                  </RouterLink>
+                  <button
+                    v-if="canUpdateTaskStatus(task)"
+                    class="btn btn-small btn-edit"
+                    @click="startEdit(task)"
+                    :disabled="updatingId === task.id"
+                  >
+                    编辑
+                  </button>
+                  <button
+                    v-if="canDeleteTask(task)"
+                    class="btn btn-small btn-danger"
+                    @click="onDeleteTask(task)"
+                    :disabled="deletingId === task.id"
+                  >
+                    {{ deletingId === task.id ? '删除中...' : '删除' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 有任务，全都是【已完成】的任务 -->
+            <div v-else class="sub-empty-state">
+              <p>当前没有未完成任务。</p>
+            </div>
+          </section>
+
+          <section class="task-group task-group-history">
+            <button
+              type="button"
+              class="history-toggle"
+              @click="showCompletedHistory = !showCompletedHistory"
+            >
+              <div>
+                <h3>已完成历史</h3>
+                <p>点击 {{ showCompletedHistory ? '收起' : '展开' }}</p>
+              </div>
+              <div class="history-toggle-meta">
+                <span class="task-group-count done">{{ completedTasks.length }}</span>
+              </div>
+            </button>
+
+            <div v-if="showCompletedHistory">
+              <div v-if="completedTasks.length" class="task-group-list">
                 <div
                   v-for="task in paginatedActiveTasks"
                   :key="task.id"
@@ -227,6 +334,7 @@
                       依赖详情
                     </RouterLink>
                     <button
+                      v-if="canUpdateTaskStatus(task)"
                       class="btn btn-small btn-edit"
                       @click="startEdit(task)"
                       :disabled="updatingId === task.id"
@@ -234,9 +342,9 @@
                       编辑
                     </button>
                     <button
-                      v-if="canEditTaskDetails(task)"
+                      v-if="canDeleteTask(task)"
                       class="btn btn-small btn-danger"
-                      @click="onDeleteTask(task.id)"
+                      @click="onDeleteTask(task)"
                       :disabled="deletingId === task.id"
                     >
                       {{ deletingId === task.id ? '删除中...' : '删除' }}
@@ -472,6 +580,7 @@ import { teamStore } from '../stores/team';
 import { getTeamsApi } from '../services/team';
 
 const router = useRouter();
+const isSystemAdmin = computed(() => Number(authStore.level.value) === 1);
 
 const isPersonalTask = (task) => {
   const teamId = task?.team_id;
@@ -497,13 +606,23 @@ const fetchUserTeams = async () => {
 
 // 判断当前用户在这个任务中，是否有高级编辑权限（修改标题、删除等）
 const canEditTaskDetails = (task) => {
-  if (isPersonalTask(task)) return true;
+  if (isPersonalTask(task)) return !isSystemAdmin.value;
   
   const teamId = Number(task.team_id);
   const team = teamStore.teams.value.find(t => Number(t.team_id) === teamId);
   const role = team ? team.role : 'Member'; 
   
   return role === 'Owner' || role === 'Admin';
+};
+
+const canDeleteTask = (task) => {
+  return isSystemAdmin.value || canEditTaskDetails(task);
+};
+
+const canUpdateTaskStatus = (task) => {
+  if (canEditTaskDetails(task)) return true;
+  if (isSystemAdmin.value) return false;
+  return !isPersonalTask(task);
 };
 
 const getTeamName = (task) => {
@@ -781,6 +900,11 @@ const onCreateTask = async () => {
 
 // 更新任务
 const onUpdateTask = async () => {
+  if (!canUpdateTaskStatus(editingTask)) {
+    updateError.value = '无权限更新该任务';
+    return;
+  }
+
   updatingId.value = editingTask.id;
   updateError.value = '';
   try {
@@ -865,6 +989,10 @@ const markTaskDone = async (task) => {
   if (task.status === 'DONE') {
     return;
   }
+  if (!canUpdateTaskStatus(task)) {
+    alert('无权限更新该任务');
+    return;
+  }
 
   updatingId.value = task.id;
   try {
@@ -918,7 +1046,13 @@ const markTaskDone = async (task) => {
 };
 
 // 删除任务
-const onDeleteTask = async (id) => {
+const onDeleteTask = async (task) => {
+  if (!canDeleteTask(task)) {
+    alert('无权限删除该任务');
+    return;
+  }
+
+  const id = task.id;
   if (!window.confirm('确定要删除这个任务吗？')) {
     return;
   }
@@ -940,6 +1074,11 @@ const onDeleteTask = async (id) => {
 
 // 开始编辑任务
 const startEdit = async (task) => {
+  if (!canUpdateTaskStatus(task)) {
+    updateError.value = '无权限编辑该任务';
+    return;
+  }
+
   updateError.value = '';
   editingTask.id = task.id;
   editingTask.title = task.title;

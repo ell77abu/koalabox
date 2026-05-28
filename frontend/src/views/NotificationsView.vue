@@ -50,10 +50,10 @@
 
             <!-- 操作区：仅对团队邀请且状态为 PENDING 时展示按钮 (任务指派不展示按钮) -->
             <div class="task-actions" v-if="item.type === 'INVITATION' && item.status === 'PENDING'">
-              <button class="btn btn-small btn-complete" @click="handleAccept(item.id)" :disabled="processingId === item.id">
+              <button class="btn btn-small btn-complete" @click="handleAccept(item)" :disabled="processingId === item.id">
                 同意
               </button>
-              <button class="btn btn-small btn-danger" @click="handleDecline(item.id)" :disabled="processingId === item.id">
+              <button class="btn btn-small btn-danger" @click="handleDecline(item)" :disabled="processingId === item.id">
                 拒绝
               </button>
             </div>
@@ -143,7 +143,17 @@ const loadNotifications = async () => {
   }
 };
 
-const handleAccept = async (id) => {
+const canProcessInvitation = (item) => {
+  return item?.type === 'INVITATION' && item.status === 'PENDING';
+};
+
+const handleAccept = async (item) => {
+  if (!canProcessInvitation(item)) {
+    alert('该邀请当前不可处理');
+    return;
+  }
+
+  const id = item.id;
   if (processingId.value === id) return;
   processingId.value = id;
   try {
@@ -160,7 +170,13 @@ const handleAccept = async (id) => {
   }
 };
 
-const handleDecline = async (id) => {
+const handleDecline = async (item) => {
+  if (!canProcessInvitation(item)) {
+    alert('该邀请当前不可处理');
+    return;
+  }
+
+  const id = item.id;
   if (processingId.value === id) return;  
   processingId.value = id;
   try {

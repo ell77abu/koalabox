@@ -39,6 +39,7 @@ type TaskRepository interface {
 	CountIncompletePredecessors(ctx context.Context, taskID uint64) (int64, error)
 	ListIncompletePredecessorIDs(ctx context.Context, taskID uint64) ([]uint64, error)
 	ListIncompletePredecessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error)
+	ListDoneSuccessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error)
 	HasDependencyPath(ctx context.Context, fromID, toID uint64) (bool, error)
 	GetDependencyGraph(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, []model.TaskDependencyLink, error)
 }
@@ -715,6 +716,25 @@ func (r *taskRepository) ListIncompletePredecessors(ctx context.Context, taskID 
 		Joins("JOIN tasks t ON t.id = td.predecessor_id AND t.deleted_at IS NULL").
 		Where("td.successor_id = ?", taskID).
 		Where("t.status <> ?", model.TaskStatusDONE).
+		Order("t.id ASC").
+		Find(&list).Error
+	if err != nil {
+		return nil, err
+	}
+	if list == nil {
+		list = make([]model.TaskDependencyNode, 0)
+	}
+	return list, nil
+}
+
+func (r *taskRepository) ListDoneSuccessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error) {
+	var list []model.TaskDependencyNode
+	err := r.db.WithContext(ctx).
+		Table("task_dependencies td").
+		Select("t.id, t.title, t.status").
+		Joins("JOIN tasks t ON t.id = td.successor_id AND t.deleted_at IS NULL").
+		Where("td.predecessor_id = ?", taskID).
+		Where("t.status = ?", model.TaskStatusDONE).
 		Order("t.id ASC").
 		Find(&list).Error
 	if err != nil {

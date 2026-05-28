@@ -129,6 +129,14 @@ func (h *TaskHandler) Update(c *gin.Context) {
 		})
 		return
 	}
+	var doneSuccessorsErr *service.DoneSuccessorsError
+	if errors.As(err, &doneSuccessorsErr) {
+		response.JSON(c, 409, 409, "操作失败：当前任务已被已完成后继任务依赖，不能回退状态", gin.H{
+			"done_successor_ids": doneSuccessorsErr.IDs,
+			"done_successors":    doneSuccessorsErr.Successors,
+		})
+		return
+	}
 	if isTaskValidationError(err) {
 		response.BadRequest(c, err.Error())
 		return
@@ -502,7 +510,8 @@ func isTaskValidationError(err error) bool {
 		errors.Is(err, service.ErrAssigneeNotInTeam) ||
 		errors.Is(err, service.ErrInvalidTaskDependency) ||
 		errors.Is(err, service.ErrDependencyOnDoneTask) ||
-		errors.Is(err, service.ErrDependenciesNotDone)
+		errors.Is(err, service.ErrDependenciesNotDone) ||
+		errors.Is(err, service.ErrDoneSuccessorsExist)
 }
 
 func isTaskForbiddenError(err error) bool {
