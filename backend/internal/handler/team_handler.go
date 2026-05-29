@@ -83,6 +83,10 @@ func (h *TeamHandler) Create(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
+	if errors.Is(err, repository.ErrConflict) {
+		response.Conflict(c, "team name already exists")
+		return
+	}
 	if err != nil {
 		response.InternalError(c, "create team failed")
 		return
@@ -116,6 +120,10 @@ func (h *TeamHandler) Update(c *gin.Context) {
 	err = h.teamService.Update(c.Request.Context(), userID, teamID, req)
 	if errors.Is(err, service.ErrInvalidTeamName) {
 		response.BadRequest(c, err.Error())
+		return
+	}
+	if errors.Is(err, repository.ErrConflict) {
+		response.Conflict(c, "team name already exists")
 		return
 	}
 	if errors.Is(err, service.ErrTeamOwnerOnly) || errors.Is(err, repository.ErrForbidden) {
