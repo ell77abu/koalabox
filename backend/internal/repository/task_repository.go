@@ -76,32 +76,30 @@ func (r *taskRepository) ListPersonalAndAssignedTeam(ctx context.Context, userID
 	}
 	offset := (page - 1) * size
 
-	visibleScope := `(tasks.team_id IS NULL AND tasks.user_id = ?) OR
-		(tasks.team_id IS NOT NULL AND tasks.assignee_id = ? AND EXISTS (
-			SELECT 1
-			FROM team_members tm
-			JOIN teams t ON t.id = tm.team_id AND t.deleted_at IS NULL
-			WHERE tm.team_id = tasks.team_id
-				AND tm.user_id = ?
-				AND tm.deleted_at IS NULL
-		))`
-
-	countQuery := r.db.WithContext(ctx).
+	baseQuery := r.db.WithContext(ctx).
 		Table("tasks").
 		Where("tasks.deleted_at IS NULL").
-		Where(visibleScope, userID, userID, userID)
+		Where(
+			`(tasks.team_id IS NULL AND tasks.user_id = ?) OR
+			(tasks.team_id IS NOT NULL AND tasks.assignee_id = ? AND EXISTS (
+				SELECT 1
+				FROM team_members tm
+				JOIN teams t ON t.id = tm.team_id AND t.deleted_at IS NULL
+				WHERE tm.team_id = tasks.team_id
+					AND tm.user_id = ?
+					AND tm.deleted_at IS NULL
+			))`,
+			userID, userID, userID,
+		)
 
 	var total int64
-	if err := countQuery.Count(&total).Error; err != nil {
+	if err := baseQuery.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
 	tasks := make([]model.Task, 0)
-	err := r.db.WithContext(ctx).
-		Table("tasks").
+	err := baseQuery.
 		Select("tasks.*").
-		Where("tasks.deleted_at IS NULL").
-		Where(visibleScope, userID, userID, userID).
 		Order("created_at DESC").
 		Limit(size).
 		Offset(offset).
