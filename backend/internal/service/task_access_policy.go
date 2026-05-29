@@ -9,29 +9,19 @@ import (
 )
 
 func (s *taskService) requireExistingTeamMember(ctx context.Context, teamID, userID uint64) error {
-	if _, err := s.teamRepo.GetByID(ctx, teamID); err != nil {
-		return ErrInvalidTeamID
-	}
-	isMember, err := s.teamRepo.IsMember(ctx, teamID, userID)
-	if err != nil {
-		return err
-	}
-	if !isMember {
+	if _, err := s.teamRepo.GetByIDForMemberScope(ctx, teamID, userID); errors.Is(err, repository.ErrNotFound) {
 		return repository.ErrForbidden
+	} else if err != nil {
+		return err
 	}
 	return nil
 }
 
 func (s *taskService) requireActiveTeamMember(ctx context.Context, teamID, userID uint64) error {
-	if err := s.ensureTeamActive(ctx, teamID); err != nil {
-		return err
-	}
-	isMember, err := s.teamRepo.IsMember(ctx, teamID, userID)
-	if err != nil {
-		return err
-	}
-	if !isMember {
+	if _, err := s.teamRepo.GetByIDForMemberScope(ctx, teamID, userID); errors.Is(err, repository.ErrNotFound) {
 		return repository.ErrForbidden
+	} else if err != nil {
+		return err
 	}
 	return nil
 }
@@ -59,4 +49,3 @@ func (s *taskService) requireTaskReadAccess(ctx context.Context, task *model.Tas
 	}
 	return s.requireActiveTeamMember(ctx, *task.TeamID, userID)
 }
-

@@ -15,6 +15,9 @@ CREATE TABLE IF NOT EXISTS teams (
 );
 
 CREATE INDEX IF NOT EXISTS idx_teams_owner_id ON teams (owner_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_teams_name_active
+  ON teams (name)
+  WHERE deleted_at IS NULL;
 
 -- 2) team_members table (Lab2)
 CREATE TABLE IF NOT EXISTS team_members (
