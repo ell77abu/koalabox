@@ -13,17 +13,23 @@ import (
 
 	"task-backend/internal/middleware"
 	"task-backend/internal/model"
+	"task-backend/internal/repository"
 	"task-backend/internal/service"
 	"task-backend/pkg/response"
 )
 
 type mockTeamService struct {
+	createFn    func(ctx context.Context, ownerID uint64, req service.CreateTeamRequest) (*model.Team, error)
+	updateFn    func(ctx context.Context, operatorID, teamID uint64, req service.UpdateTeamRequest) error
 	addMemberFn func(ctx context.Context, operatorID, teamID uint64, req service.AddTeamMemberRequest) (*model.TeamMember, error)
 	leaveFn     func(ctx context.Context, userID, teamID uint64) error
 }
 
 func (m *mockTeamService) Create(ctx context.Context, ownerID uint64, req service.CreateTeamRequest) (*model.Team, error) {
-	panic("not used")
+	if m.createFn == nil {
+		panic("createFn not set")
+	}
+	return m.createFn(ctx, ownerID, req)
 }
 
 func (m *mockTeamService) ListMine(ctx context.Context, userID uint64, search string) ([]model.TeamWithRole, error) {
@@ -31,7 +37,10 @@ func (m *mockTeamService) ListMine(ctx context.Context, userID uint64, search st
 }
 
 func (m *mockTeamService) Update(ctx context.Context, operatorID, teamID uint64, req service.UpdateTeamRequest) error {
-	panic("not used")
+	if m.updateFn == nil {
+		panic("updateFn not set")
+	}
+	return m.updateFn(ctx, operatorID, teamID, req)
 }
 
 func (m *mockTeamService) AddMember(ctx context.Context, operatorID, teamID uint64, req service.AddTeamMemberRequest) (*model.TeamMember, error) {
@@ -74,6 +83,72 @@ func (m *mockTeamService) Leave(ctx context.Context, userID, teamID uint64) erro
 
 func (m *mockTeamService) TransferOwnership(ctx context.Context, operatorID, teamID, newOwnerID uint64) error {
 	panic("not used")
+}
+
+func TestTeamHandler_CreateDuplicateName(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	ownerID := uint64(9)
+	mock := &mockTeamService{
+		createFn: func(ctx context.Context, gotOwnerID uint64, req service.CreateTeamRequest) (*model.Team, error) {
+			assert.Equal(t, ownerID, gotOwnerID)
+			assert.Equal(t, "Alpha", req.Name)
+			return nil, repository.ErrConflict
+		},
+	}
+
+	h := NewTeamHandler(mock)
+	r := gin.New()
+	r.POST("/teams", func(c *gin.Context) {
+		c.Set(middleware.ContextUserIDKey, ownerID)
+		h.Create(c)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/teams", strings.NewReader(`{"name":"Alpha"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusConflict, rr.Code)
+
+	var resp response.Common
+	assert.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, 409, resp.Code)
+	assert.Equal(t, "team name already exists", resp.Message)
+}
+
+func TestTeamHandler_UpdateDuplicateName(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	operatorID := uint64(9)
+	teamID := uint64(123)
+	mock := &mockTeamService{
+		updateFn: func(ctx context.Context, gotOperatorID, gotTeamID uint64, req service.UpdateTeamRequest) error {
+			assert.Equal(t, operatorID, gotOperatorID)
+			assert.Equal(t, teamID, gotTeamID)
+			assert.Equal(t, "Beta", req.Name)
+			return repository.ErrConflict
+		},
+	}
+
+	h := NewTeamHandler(mock)
+	r := gin.New()
+	r.PUT("/teams/:team_id", func(c *gin.Context) {
+		c.Set(middleware.ContextUserIDKey, operatorID)
+		h.Update(c)
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/teams/123", strings.NewReader(`{"name":"Beta"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusConflict, rr.Code)
+
+	var resp response.Common
+	assert.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, 409, resp.Code)
+	assert.Equal(t, "team name already exists", resp.Message)
 }
 
 func TestTeamHandler_AddMember_Success(t *testing.T) {
