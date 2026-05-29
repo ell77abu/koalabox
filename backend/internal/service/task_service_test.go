@@ -15,7 +15,11 @@ type taskRepoMock struct {
 	listByTeamIDFn                 func(ctx context.Context, teamID uint64, page, size int) ([]model.Task, int64, error)
 	listPersonalAndAssignedTeamFn  func(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error)
 	getByIDFn                      func(ctx context.Context, id uint64) (*model.Task, error)
+	getByIDForUserScopeFn          func(ctx context.Context, id, userID uint64) (*model.Task, error)
 	updateByIDFn                   func(ctx context.Context, task *model.Task) error
+	updateByIDForScopeFn           func(ctx context.Context, task *model.Task, userID uint64) error
+	updateStatusByScopeFn          func(ctx context.Context, taskID, userID uint64, status model.TaskStatus) error
+	deleteByIDForScopeFn           func(ctx context.Context, id, userID uint64) error
 	listIncompletePredecessorIDsFn func(ctx context.Context, taskID uint64) ([]uint64, error)
 	listIncompletePredecessorsFn   func(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error)
 	listDoneSuccessorsFn           func(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error)
@@ -45,6 +49,15 @@ func (m *taskRepoMock) ListAll(ctx context.Context, page, size int) ([]model.Tas
 func (m *taskRepoMock) GetByIDAndUserID(ctx context.Context, id, userID uint64) (*model.Task, error) {
 	panic("unexpected call to GetByIDAndUserID")
 }
+func (m *taskRepoMock) GetByIDForUserScope(ctx context.Context, id, userID uint64) (*model.Task, error) {
+	if m.getByIDForUserScopeFn != nil {
+		return m.getByIDForUserScopeFn(ctx, id, userID)
+	}
+	if m.getByIDFn != nil {
+		return m.getByIDFn(ctx, id)
+	}
+	panic("unexpected call to GetByIDForUserScope")
+}
 func (m *taskRepoMock) GetByID(ctx context.Context, id uint64) (*model.Task, error) {
 	if m.getByIDFn == nil {
 		panic("unexpected call to GetByID")
@@ -60,8 +73,29 @@ func (m *taskRepoMock) UpdateByID(ctx context.Context, task *model.Task) error {
 	}
 	return m.updateByIDFn(ctx, task)
 }
+func (m *taskRepoMock) UpdateByIDForOwnerOrTeamManagerScope(ctx context.Context, task *model.Task, userID uint64) error {
+	if m.updateByIDForScopeFn != nil {
+		return m.updateByIDForScopeFn(ctx, task, userID)
+	}
+	if m.updateByIDFn != nil {
+		return m.updateByIDFn(ctx, task)
+	}
+	panic("unexpected call to UpdateByIDForOwnerOrTeamManagerScope")
+}
+func (m *taskRepoMock) UpdateStatusByIDForAssignedMemberScope(ctx context.Context, taskID, userID uint64, status model.TaskStatus) error {
+	if m.updateStatusByScopeFn != nil {
+		return m.updateStatusByScopeFn(ctx, taskID, userID, status)
+	}
+	panic("unexpected call to UpdateStatusByIDForAssignedMemberScope")
+}
 func (m *taskRepoMock) DeleteByIDAndUserID(ctx context.Context, id, userID uint64) error {
 	panic("unexpected call to DeleteByIDAndUserID")
+}
+func (m *taskRepoMock) DeleteByIDForOwnerOrTeamManagerScope(ctx context.Context, id, userID uint64) error {
+	if m.deleteByIDForScopeFn != nil {
+		return m.deleteByIDForScopeFn(ctx, id, userID)
+	}
+	panic("unexpected call to DeleteByIDForOwnerOrTeamManagerScope")
 }
 func (m *taskRepoMock) DeleteByID(ctx context.Context, id uint64) error {
 	panic("unexpected call to DeleteByID")
@@ -125,10 +159,11 @@ func (m *taskRepoMock) GetDependencyGraph(ctx context.Context, taskID uint64) ([
 }
 
 type teamRepoForTaskMock struct {
-	getByIDFn       func(ctx context.Context, teamID uint64) (*model.Team, error)
-	isMemberFn      func(ctx context.Context, teamID, userID uint64) (bool, error)
-	getMemberRoleFn func(ctx context.Context, teamID, userID uint64) (model.TeamRole, error)
-	isDeletedFn     func(ctx context.Context, teamID uint64) (bool, error)
+	getByIDFn               func(ctx context.Context, teamID uint64) (*model.Team, error)
+	getByIDForMemberScopeFn func(ctx context.Context, teamID, userID uint64) (*model.Team, error)
+	isMemberFn              func(ctx context.Context, teamID, userID uint64) (bool, error)
+	getMemberRoleFn         func(ctx context.Context, teamID, userID uint64) (model.TeamRole, error)
+	isDeletedFn             func(ctx context.Context, teamID uint64) (bool, error)
 }
 
 func (m *teamRepoForTaskMock) Create(ctx context.Context, team *model.Team) error {
@@ -142,6 +177,28 @@ func (m *teamRepoForTaskMock) GetByID(ctx context.Context, teamID uint64) (*mode
 		panic("unexpected call to GetByID")
 	}
 	return m.getByIDFn(ctx, teamID)
+}
+func (m *teamRepoForTaskMock) GetByIDForMemberScope(ctx context.Context, teamID, userID uint64) (*model.Team, error) {
+	if m.getByIDForMemberScopeFn != nil {
+		return m.getByIDForMemberScopeFn(ctx, teamID, userID)
+	}
+	if m.isMemberFn != nil {
+		isMember, err := m.isMemberFn(ctx, teamID, userID)
+		if err != nil {
+			return nil, err
+		}
+		if !isMember {
+			return nil, repository.ErrNotFound
+		}
+		return &model.Team{ID: teamID}, nil
+	}
+	if m.getByIDFn != nil {
+		return m.getByIDFn(ctx, teamID)
+	}
+	panic("unexpected call to GetByIDForMemberScope")
+}
+func (m *teamRepoForTaskMock) GetByName(ctx context.Context, name string) (*model.Team, error) {
+	panic("unexpected call to GetByName")
 }
 func (m *teamRepoForTaskMock) UpdateName(ctx context.Context, teamID uint64, name string) error {
 	panic("unexpected call to UpdateName")
@@ -203,6 +260,9 @@ func (s *taskAssignRepoStub) Create(ctx context.Context, req *model.TaskAssignme
 func (s *taskAssignRepoStub) GetByID(ctx context.Context, id uint64) (*model.TaskAssignmentRequest, error) {
 	panic("unexpected call")
 }
+func (s *taskAssignRepoStub) GetByIDForAssigneeScope(ctx context.Context, id, assigneeID uint64) (*model.TaskAssignmentRequest, error) {
+	panic("unexpected call")
+}
 func (s *taskAssignRepoStub) GetPendingByTaskAndAssignee(ctx context.Context, taskID, assigneeID uint64) (*model.TaskAssignmentRequest, error) {
 	panic("unexpected call")
 }
@@ -210,6 +270,12 @@ func (s *taskAssignRepoStub) ListPendingByAssignee(ctx context.Context, assignee
 	panic("unexpected call")
 }
 func (s *taskAssignRepoStub) UpdateStatus(ctx context.Context, id uint64, status model.InvitationStatus) error {
+	panic("unexpected call")
+}
+func (s *taskAssignRepoStub) UpdatePendingStatusForAssigneeScope(ctx context.Context, id, assigneeID uint64, status model.InvitationStatus) error {
+	panic("unexpected call")
+}
+func (s *taskAssignRepoStub) AcceptPendingForAssigneeScope(ctx context.Context, id, assigneeID uint64) error {
 	panic("unexpected call")
 }
 func (s *taskAssignRepoStub) DeclinePendingByTaskID(ctx context.Context, taskID uint64) error {

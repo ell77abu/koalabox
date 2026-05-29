@@ -25,10 +25,14 @@ type TaskRepository interface {
 	ListByUserIDWithSearch(ctx context.Context, userID uint64, page, size int, search, orderBy string) ([]model.Task, int64, error)
 	ListAllWithSearch(ctx context.Context, page, size int, search, orderBy string) ([]model.Task, int64, error)
 	GetByIDAndUserID(ctx context.Context, id, userID uint64) (*model.Task, error)
+	GetByIDForUserScope(ctx context.Context, id, userID uint64) (*model.Task, error)
 	GetByID(ctx context.Context, id uint64) (*model.Task, error)
 	UpdateByIDAndUserID(ctx context.Context, task *model.Task) error
 	UpdateByID(ctx context.Context, task *model.Task) error
+	UpdateByIDForOwnerOrTeamManagerScope(ctx context.Context, task *model.Task, userID uint64) error
+	UpdateStatusByIDForAssignedMemberScope(ctx context.Context, taskID, userID uint64, status model.TaskStatus) error
 	DeleteByIDAndUserID(ctx context.Context, id, userID uint64) error
+	DeleteByIDForOwnerOrTeamManagerScope(ctx context.Context, id, userID uint64) error
 	DeleteByID(ctx context.Context, id uint64) error
 	ClearAssigneeForTeamTasks(ctx context.Context, teamID, assigneeID uint64) error
 	AddDependency(ctx context.Context, predecessorID, successorID uint64) (*model.TaskDependency, error)
@@ -419,6 +423,35 @@ func (r *taskRepository) GetByIDAndUserID(ctx context.Context, id, userID uint64
 	return &task, nil
 }
 
+func (r *taskRepository) GetByIDForUserScope(ctx context.Context, id, userID uint64) (*model.Task, error) {
+	var task model.Task
+	err := r.db.WithContext(ctx).
+		Table("tasks").
+		Select("tasks.*").
+		Where("tasks.id = ?", id).
+		Where("tasks.deleted_at IS NULL").
+		Where(
+			`(tasks.team_id IS NULL AND tasks.user_id = ?) OR
+			(tasks.team_id IS NOT NULL AND EXISTS (
+				SELECT 1
+				FROM team_members tm
+				JOIN teams t ON t.id = tm.team_id AND t.deleted_at IS NULL
+				WHERE tm.team_id = tasks.team_id
+					AND tm.user_id = ?
+					AND tm.deleted_at IS NULL
+			))`,
+			userID, userID,
+		).
+		First(&task).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
 func (r *taskRepository) GetByID(ctx context.Context, id uint64) (*model.Task, error) {
 	var task model.Task
 	err := r.db.WithContext(ctx).
@@ -462,7 +495,22 @@ func (r *taskRepository) UpdateByIDAndUserID(ctx context.Context, task *model.Ta
 }
 
 func (r *taskRepository) UpdateByID(ctx context.Context, task *model.Task) error {
-	updates := map[string]interface{}{
+	res := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("id = ?", task.ID).
+		Where("deleted_at IS NULL").
+		Updates(taskUpdateMap(task))
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func taskUpdateMap(task *model.Task) map[string]interface{} {
+	return map[string]interface{}{
 		"title":       task.Title,
 		"description": task.Description,
 		"status":      task.Status,
@@ -472,12 +520,60 @@ func (r *taskRepository) UpdateByID(ctx context.Context, task *model.Task) error
 		"assignee_id": task.AssigneeID,
 		"updated_at":  time.Now(),
 	}
+}
 
+func activeTeamMemberScopeSQL() string {
+	return `EXISTS (
+		SELECT 1
+		FROM team_members tm
+		JOIN teams teams_scope ON teams_scope.id = tm.team_id AND teams_scope.deleted_at IS NULL
+		WHERE tm.team_id = tasks.team_id
+			AND tm.user_id = ?
+			AND tm.deleted_at IS NULL
+	)`
+}
+
+func ownerOrTeamManagerScopeSQL() string {
+	return `(team_id IS NULL AND user_id = ?) OR
+		(team_id IS NOT NULL AND EXISTS (
+			SELECT 1
+			FROM team_members tm
+			JOIN teams teams_scope ON teams_scope.id = tm.team_id AND teams_scope.deleted_at IS NULL
+			WHERE tm.team_id = tasks.team_id
+				AND tm.user_id = ?
+				AND tm.role IN (?, ?)
+				AND tm.deleted_at IS NULL
+		))`
+}
+
+func (r *taskRepository) UpdateByIDForOwnerOrTeamManagerScope(ctx context.Context, task *model.Task, userID uint64) error {
 	res := r.db.WithContext(ctx).
 		Model(&model.Task{}).
 		Where("id = ?", task.ID).
 		Where("deleted_at IS NULL").
-		Updates(updates)
+		Where(ownerOrTeamManagerScopeSQL(), userID, userID, model.TeamRoleOwner, model.TeamRoleAdmin).
+		Updates(taskUpdateMap(task))
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *taskRepository) UpdateStatusByIDForAssignedMemberScope(ctx context.Context, taskID, userID uint64, status model.TaskStatus) error {
+	res := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("id = ?", taskID).
+		Where("deleted_at IS NULL").
+		Where("team_id IS NOT NULL").
+		Where("assignee_id = ?", userID).
+		Where(activeTeamMemberScopeSQL(), userID).
+		Updates(map[string]interface{}{
+			"status":     status,
+			"updated_at": time.Now(),
+		})
 	if res.Error != nil {
 		return res.Error
 	}
@@ -511,6 +607,30 @@ func (r *taskRepository) DeleteByIDAndUserID(ctx context.Context, id, userID uin
 			return ErrNotFound
 		}
 		return nil
+	})
+}
+
+func (r *taskRepository) DeleteByIDForOwnerOrTeamManagerScope(ctx context.Context, id, userID uint64) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.
+			Model(&model.Task{}).
+			Where("id = ?", id).
+			Where("deleted_at IS NULL").
+			Where(ownerOrTeamManagerScopeSQL(), userID, userID, model.TeamRoleOwner, model.TeamRoleAdmin).
+			Updates(map[string]interface{}{
+				"deleted_at": time.Now(),
+				"updated_at": time.Now(),
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+
+		return tx.
+			Where("predecessor_id = ? OR successor_id = ?", id, id).
+			Delete(&model.TaskDependency{}).Error
 	})
 }
 
