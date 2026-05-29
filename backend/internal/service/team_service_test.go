@@ -13,16 +13,17 @@ import (
 )
 
 type teamRepoMock struct {
-	getByIDFn          func(ctx context.Context, teamID uint64) (*model.Team, error)
-	getMemberRoleFn    func(ctx context.Context, teamID, userID uint64) (model.TeamRole, error)
-	isMemberFn         func(ctx context.Context, teamID, userID uint64) (bool, error)
-	addMemberFn        func(ctx context.Context, member *model.TeamMember) error
-	listByUserIDFn     func(ctx context.Context, userID uint64, search string) ([]model.TeamWithRole, error)
-	updateNameFn       func(ctx context.Context, teamID uint64, name string) error
-	removeMemberFn     func(ctx context.Context, teamID, userID uint64) error
-	updateMemberRoleFn func(ctx context.Context, teamID, userID uint64, role model.TeamRole) error
-	listMembersFn      func(ctx context.Context, teamID uint64) ([]model.TeamMemberDetail, error)
-	isDeletedFn        func(ctx context.Context, teamID uint64) (bool, error)
+	getByIDFn               func(ctx context.Context, teamID uint64) (*model.Team, error)
+	getByIDForMemberScopeFn func(ctx context.Context, teamID, userID uint64) (*model.Team, error)
+	getMemberRoleFn         func(ctx context.Context, teamID, userID uint64) (model.TeamRole, error)
+	isMemberFn              func(ctx context.Context, teamID, userID uint64) (bool, error)
+	addMemberFn             func(ctx context.Context, member *model.TeamMember) error
+	listByUserIDFn          func(ctx context.Context, userID uint64, search string) ([]model.TeamWithRole, error)
+	updateNameFn            func(ctx context.Context, teamID uint64, name string) error
+	removeMemberFn          func(ctx context.Context, teamID, userID uint64) error
+	updateMemberRoleFn      func(ctx context.Context, teamID, userID uint64, role model.TeamRole) error
+	listMembersFn           func(ctx context.Context, teamID uint64) ([]model.TeamMemberDetail, error)
+	isDeletedFn             func(ctx context.Context, teamID uint64) (bool, error)
 }
 
 func (m *teamRepoMock) Create(ctx context.Context, team *model.Team) error {
@@ -41,6 +42,26 @@ func (m *teamRepoMock) GetByID(ctx context.Context, teamID uint64) (*model.Team,
 		panic("unexpected call to GetByID")
 	}
 	return m.getByIDFn(ctx, teamID)
+}
+
+func (m *teamRepoMock) GetByIDForMemberScope(ctx context.Context, teamID, userID uint64) (*model.Team, error) {
+	if m.getByIDForMemberScopeFn != nil {
+		return m.getByIDForMemberScopeFn(ctx, teamID, userID)
+	}
+	if m.isMemberFn != nil {
+		isMember, err := m.isMemberFn(ctx, teamID, userID)
+		if err != nil {
+			return nil, err
+		}
+		if !isMember {
+			return nil, repository.ErrNotFound
+		}
+		return &model.Team{ID: teamID}, nil
+	}
+	if m.getByIDFn != nil {
+		return m.getByIDFn(ctx, teamID)
+	}
+	panic("unexpected call to GetByIDForMemberScope")
 }
 
 func (m *teamRepoMock) UpdateName(ctx context.Context, teamID uint64, name string) error {
@@ -133,6 +154,7 @@ type inviteRepoMock struct {
 	getPendingByTeamAndInviteeFn func(ctx context.Context, teamID, inviteeID uint64) (*model.TeamInvitation, error)
 	createFn                     func(ctx context.Context, invite *model.TeamInvitation) error
 	getByIDFn                    func(ctx context.Context, id uint64) (*model.TeamInvitation, error)
+	getByIDForInviteeFn          func(ctx context.Context, id, inviteeID uint64) (*model.TeamInvitation, error)
 	updateStatusFn               func(ctx context.Context, id uint64, status model.InvitationStatus) error
 }
 
@@ -148,6 +170,23 @@ func (m *inviteRepoMock) GetByID(ctx context.Context, id uint64) (*model.TeamInv
 		panic("unexpected call to GetByID")
 	}
 	return m.getByIDFn(ctx, id)
+}
+
+func (m *inviteRepoMock) GetByIDForInvitee(ctx context.Context, id, inviteeID uint64) (*model.TeamInvitation, error) {
+	if m.getByIDForInviteeFn != nil {
+		return m.getByIDForInviteeFn(ctx, id, inviteeID)
+	}
+	if m.getByIDFn != nil {
+		invite, err := m.getByIDFn(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if invite.InviteeID != inviteeID {
+			return nil, repository.ErrNotFound
+		}
+		return invite, nil
+	}
+	panic("unexpected call to GetByIDForInvitee")
 }
 
 func (m *inviteRepoMock) GetPendingByTeamAndInvitee(ctx context.Context, teamID, inviteeID uint64) (*model.TeamInvitation, error) {
@@ -351,7 +390,7 @@ func TestTeamServiceAcceptInvitationRejectsWrongInvitee(t *testing.T) {
 
 	err := svc.AcceptInvitation(context.Background(), 1, 7)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, repository.ErrForbidden)
+	assert.ErrorIs(t, err, repository.ErrNotFound)
 }
 
 func TestTeamServiceLeaveRejectsOwner(t *testing.T) {

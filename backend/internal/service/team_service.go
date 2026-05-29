@@ -259,19 +259,12 @@ func (s *teamService) ListPendingInvitations(ctx context.Context, userID uint64)
 }
 
 func (s *teamService) AcceptInvitation(ctx context.Context, userID, invitationID uint64) error {
-	invite, err := s.inviteRepo.GetByID(ctx, invitationID)
+	invite, err := s.inviteRepo.GetByIDForInvitee(ctx, invitationID, userID)
 	if err != nil {
 		return err
 	}
-	if invite.InviteeID != userID {
-		return repository.ErrForbidden
-	}
 	if invite.Status != model.InvitationStatusPending {
 		return ErrInvitationNotPending
-	}
-
-	if _, err := s.teamRepo.GetByID(ctx, invite.TeamID); err != nil {
-		return err
 	}
 
 	isMember, err := s.teamRepo.IsMember(ctx, invite.TeamID, userID)
@@ -293,12 +286,9 @@ func (s *teamService) AcceptInvitation(ctx context.Context, userID, invitationID
 }
 
 func (s *teamService) DeclineInvitation(ctx context.Context, userID, invitationID uint64) error {
-	invite, err := s.inviteRepo.GetByID(ctx, invitationID)
+	invite, err := s.inviteRepo.GetByIDForInvitee(ctx, invitationID, userID)
 	if err != nil {
 		return err
-	}
-	if invite.InviteeID != userID {
-		return repository.ErrForbidden
 	}
 	if invite.Status != model.InvitationStatusPending {
 		return ErrInvitationNotPending
@@ -308,10 +298,6 @@ func (s *teamService) DeclineInvitation(ctx context.Context, userID, invitationI
 }
 
 func (s *teamService) Leave(ctx context.Context, userID, teamID uint64) error {
-	if _, err := s.teamRepo.GetByID(ctx, teamID); err != nil {
-		return err
-	}
-
 	role, err := s.getTeamRoleOrForbidden(ctx, teamID, userID)
 	if err != nil {
 		return err

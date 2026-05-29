@@ -13,6 +13,7 @@ import (
 type TeamInvitationRepository interface {
 	Create(ctx context.Context, invite *model.TeamInvitation) error
 	GetByID(ctx context.Context, id uint64) (*model.TeamInvitation, error)
+	GetByIDForInvitee(ctx context.Context, id, inviteeID uint64) (*model.TeamInvitation, error)
 	GetPendingByTeamAndInvitee(ctx context.Context, teamID, inviteeID uint64) (*model.TeamInvitation, error)
 	ListPendingByInvitee(ctx context.Context, inviteeID uint64) ([]model.TeamInvitationDetail, error)
 	UpdateStatus(ctx context.Context, id uint64, status model.InvitationStatus) error
@@ -43,6 +44,24 @@ func (r *teamInvitationRepository) GetByID(ctx context.Context, id uint64) (*mod
 	var invite model.TeamInvitation
 	err := r.db.WithContext(ctx).
 		Where("id = ?", id).
+		First(&invite).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &invite, nil
+}
+
+func (r *teamInvitationRepository) GetByIDForInvitee(ctx context.Context, id, inviteeID uint64) (*model.TeamInvitation, error) {
+	var invite model.TeamInvitation
+	err := r.db.WithContext(ctx).
+		Table("team_invitations ti").
+		Select("ti.*").
+		Joins("JOIN teams t ON t.id = ti.team_id AND t.deleted_at IS NULL").
+		Where("ti.id = ?", id).
+		Where("ti.invitee_id = ?", inviteeID).
 		First(&invite).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNotFound
