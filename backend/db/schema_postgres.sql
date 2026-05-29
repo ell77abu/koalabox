@@ -50,9 +50,6 @@ CREATE TABLE IF NOT EXISTS teams (
 );
 
 CREATE INDEX IF NOT EXISTS idx_teams_owner_id ON teams (owner_id);
-CREATE UNIQUE INDEX IF NOT EXISTS uk_teams_name_active
-  ON teams (name)
-  WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS team_members (
   id BIGSERIAL PRIMARY KEY,
