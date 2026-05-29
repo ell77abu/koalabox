@@ -72,18 +72,30 @@ func (r *taskRepository) ListPersonalAndAssignedTeam(ctx context.Context, userID
 	}
 	offset := (page - 1) * size
 
-	query := r.db.WithContext(ctx).
-		Model(&model.Task{}).
-		Where("deleted_at IS NULL").
-		Where("(team_id IS NULL AND user_id = ?) OR (team_id IS NOT NULL AND assignee_id = ?)", userID, userID)
+	baseQuery := r.db.WithContext(ctx).
+		Table("tasks").
+		Where("tasks.deleted_at IS NULL").
+		Where(
+			`(tasks.team_id IS NULL AND tasks.user_id = ?) OR
+			(tasks.team_id IS NOT NULL AND tasks.assignee_id = ? AND EXISTS (
+				SELECT 1
+				FROM team_members tm
+				JOIN teams t ON t.id = tm.team_id AND t.deleted_at IS NULL
+				WHERE tm.team_id = tasks.team_id
+					AND tm.user_id = ?
+					AND tm.deleted_at IS NULL
+			))`,
+			userID, userID, userID,
+		)
 
 	var total int64
-	if err := query.Count(&total).Error; err != nil {
+	if err := baseQuery.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
 	tasks := make([]model.Task, 0)
-	err := query.
+	err := baseQuery.
+		Select("tasks.*").
 		Order("created_at DESC").
 		Limit(size).
 		Offset(offset).
