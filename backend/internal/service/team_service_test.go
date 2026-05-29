@@ -223,6 +223,91 @@ func (m *inviteRepoMock) AcceptPendingForInvitee(ctx context.Context, id, invite
 	return m.acceptPendingForInviteeFn(ctx, id, inviteeID)
 }
 
+func TestTeamServiceCreateRejectsDuplicateName(t *testing.T) {
+	svc := NewTeamService(
+		&teamRepoMock{
+			getByNameFn: func(ctx context.Context, name string) (*model.Team, error) {
+				assert.Equal(t, "Alpha", name)
+				return &model.Team{ID: 1, Name: name}, nil
+			},
+		},
+		&userRepoMock{},
+		&inviteRepoMock{},
+	)
+
+	team, err := svc.Create(context.Background(), 9, CreateTeamRequest{Name: " Alpha "})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, repository.ErrConflict)
+	assert.Nil(t, team)
+}
+
+func TestTeamServiceUpdateRejectsDuplicateName(t *testing.T) {
+	const (
+		operatorID = uint64(11)
+		teamID     = uint64(21)
+	)
+
+	updateNameCalled := false
+	svc := NewTeamService(
+		&teamRepoMock{
+			getMemberRoleFn: func(ctx context.Context, gotTeamID, gotUserID uint64) (model.TeamRole, error) {
+				assert.Equal(t, teamID, gotTeamID)
+				assert.Equal(t, operatorID, gotUserID)
+				return model.TeamRoleOwner, nil
+			},
+			getByNameFn: func(ctx context.Context, name string) (*model.Team, error) {
+				assert.Equal(t, "Beta", name)
+				return &model.Team{ID: 99, Name: name}, nil
+			},
+			updateNameFn: func(ctx context.Context, gotTeamID uint64, name string) error {
+				updateNameCalled = true
+				return nil
+			},
+		},
+		&userRepoMock{},
+		&inviteRepoMock{},
+	)
+
+	err := svc.Update(context.Background(), operatorID, teamID, UpdateTeamRequest{Name: " Beta "})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, repository.ErrConflict)
+	assert.False(t, updateNameCalled)
+}
+
+func TestTeamServiceUpdateAllowsSameTeamName(t *testing.T) {
+	const (
+		operatorID = uint64(11)
+		teamID     = uint64(21)
+	)
+
+	updateNameCalled := false
+	svc := NewTeamService(
+		&teamRepoMock{
+			getMemberRoleFn: func(ctx context.Context, gotTeamID, gotUserID uint64) (model.TeamRole, error) {
+				assert.Equal(t, teamID, gotTeamID)
+				assert.Equal(t, operatorID, gotUserID)
+				return model.TeamRoleOwner, nil
+			},
+			getByNameFn: func(ctx context.Context, name string) (*model.Team, error) {
+				assert.Equal(t, "Alpha", name)
+				return &model.Team{ID: teamID, Name: name}, nil
+			},
+			updateNameFn: func(ctx context.Context, gotTeamID uint64, name string) error {
+				updateNameCalled = true
+				assert.Equal(t, teamID, gotTeamID)
+				assert.Equal(t, "Alpha", name)
+				return nil
+			},
+		},
+		&userRepoMock{},
+		&inviteRepoMock{},
+	)
+
+	err := svc.Update(context.Background(), operatorID, teamID, UpdateTeamRequest{Name: " Alpha "})
+	require.NoError(t, err)
+	assert.True(t, updateNameCalled)
+}
+
 func TestTeamServiceAddMemberCreatesPendingInvitationByUsername(t *testing.T) {
 	const (
 		operatorID = uint64(11)
