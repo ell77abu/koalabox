@@ -211,6 +211,9 @@ func (s *taskService) Create(ctx context.Context, userID uint64, req CreateTaskR
 	}
 
 	if req.TeamID != nil {
+		if _, err := s.teamRepo.GetByID(ctx, *req.TeamID); err != nil {
+			return nil, ErrInvalidTeamID
+		}
 		if err := s.requireTeamManager(ctx, *req.TeamID, userID); err != nil {
 			return nil, err
 		}
@@ -251,7 +254,7 @@ func (s *taskService) Create(ctx context.Context, userID uint64, req CreateTaskR
 }
 
 func (s *taskService) Update(ctx context.Context, userID uint64, taskID uint64, req UpdateTaskRequest) (*model.Task, error) {
-	task, err := s.taskRepo.GetByIDForUserScope(ctx, taskID, userID)
+	task, err := s.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -304,10 +307,10 @@ func (s *taskService) Update(ctx context.Context, userID uint64, taskID uint64, 
 	}
 	task.Status = status
 
-	if err := s.taskRepo.UpdateStatusByIDForAssignedMemberScope(ctx, task.ID, userID, status); err != nil {
+	if err := s.taskRepo.UpdateByID(ctx, task); err != nil {
 		return nil, err
 	}
-	return s.taskRepo.GetByIDForUserScope(ctx, taskID, userID)
+	return s.taskRepo.GetByID(ctx, taskID)
 }
 
 func (s *taskService) Delete(ctx context.Context, userID uint64, userLevel uint8, taskID uint64) error {
@@ -315,7 +318,7 @@ func (s *taskService) Delete(ctx context.Context, userID uint64, userLevel uint8
 		return s.taskRepo.DeleteByID(ctx, taskID)
 	}
 
-	task, err := s.taskRepo.GetByIDForUserScope(ctx, taskID, userID)
+	task, err := s.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
 		return err
 	}
@@ -324,14 +327,14 @@ func (s *taskService) Delete(ctx context.Context, userID uint64, userLevel uint8
 		if task.UserID != userID {
 			return repository.ErrForbidden
 		}
-		return s.taskRepo.DeleteByIDForOwnerOrTeamManagerScope(ctx, taskID, userID)
+		return s.taskRepo.DeleteByID(ctx, taskID)
 	}
 
 	if err := s.requireTeamManager(ctx, *task.TeamID, userID); err != nil {
 		return err
 	}
 
-	return s.taskRepo.DeleteByIDForOwnerOrTeamManagerScope(ctx, taskID, userID)
+	return s.taskRepo.DeleteByID(ctx, taskID)
 }
 
 func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.Task, req UpdateTaskRequest, operatorID uint64) (*model.Task, error) {
@@ -404,7 +407,7 @@ func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.T
 
 	assigneeChanged := !isSameUint64Ptr(originalAssigneeID, task.AssigneeID)
 
-	if err := s.taskRepo.UpdateByIDForOwnerOrTeamManagerScope(ctx, task, operatorID); err != nil {
+	if err := s.taskRepo.UpdateByID(ctx, task); err != nil {
 		return nil, err
 	}
 	if assigneeChanged && task.TeamID != nil {
@@ -412,7 +415,7 @@ func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.T
 			return nil, err
 		}
 	}
-	updatedTask, err := s.taskRepo.GetByIDForUserScope(ctx, task.ID, operatorID)
+	updatedTask, err := s.taskRepo.GetByID(ctx, task.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -427,27 +430,52 @@ func (s *taskService) ListPendingAssignments(ctx context.Context, userID uint64)
 }
 
 func (s *taskService) AcceptAssignment(ctx context.Context, userID, requestID uint64) error {
-	req, err := s.assignRepo.GetByIDForAssigneeScope(ctx, requestID, userID)
+	req, err := s.assignRepo.GetByID(ctx, requestID)
 	if err != nil {
 		return err
+	}
+	if req.AssigneeID != userID {
+		return repository.ErrForbidden
 	}
 	if req.Status != model.InvitationStatusPending {
 		return ErrAssignmentNotPending
 	}
 
-	return s.assignRepo.AcceptPendingForAssigneeScope(ctx, requestID, userID)
+	if _, err := s.teamRepo.GetByID(ctx, req.TeamID); err != nil {
+		return err
+	}
+	if inTeam, err := s.teamRepo.IsMember(ctx, req.TeamID, userID); err != nil {
+		return err
+	} else if !inTeam {
+		return repository.ErrForbidden
+	}
+
+	task, err := s.taskRepo.GetByID(ctx, req.TaskID)
+	if err != nil {
+		return err
+	}
+
+	task.AssigneeID = &userID
+	if err := s.taskRepo.UpdateByID(ctx, task); err != nil {
+		return err
+	}
+
+	return s.assignRepo.UpdateStatus(ctx, requestID, model.InvitationStatusAccepted)
 }
 
 func (s *taskService) DeclineAssignment(ctx context.Context, userID, requestID uint64) error {
-	req, err := s.assignRepo.GetByIDForAssigneeScope(ctx, requestID, userID)
+	req, err := s.assignRepo.GetByID(ctx, requestID)
 	if err != nil {
 		return err
+	}
+	if req.AssigneeID != userID {
+		return repository.ErrForbidden
 	}
 	if req.Status != model.InvitationStatusPending {
 		return ErrAssignmentNotPending
 	}
 
-	return s.assignRepo.UpdatePendingStatusForAssigneeScope(ctx, requestID, userID, model.InvitationStatusDeclined)
+	return s.assignRepo.UpdateStatus(ctx, requestID, model.InvitationStatusDeclined)
 }
 
 func (s *taskService) AddDependency(ctx context.Context, userID, taskID, predecessorID uint64) (*model.TaskDependency, error) {
@@ -455,7 +483,7 @@ func (s *taskService) AddDependency(ctx context.Context, userID, taskID, predece
 		return nil, ErrInvalidTaskDependency
 	}
 
-	successor, err := s.taskRepo.GetByIDForUserScope(ctx, taskID, userID)
+	successor, err := s.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -463,7 +491,7 @@ func (s *taskService) AddDependency(ctx context.Context, userID, taskID, predece
 		return nil, ErrDependencyOnDoneTask
 	}
 
-	predecessor, err := s.taskRepo.GetByIDForUserScope(ctx, predecessorID, userID)
+	predecessor, err := s.taskRepo.GetByID(ctx, predecessorID)
 	if err != nil {
 		return nil, err
 	}
@@ -505,12 +533,12 @@ func (s *taskService) RemoveDependency(ctx context.Context, userID, taskID, pred
 		return ErrInvalidTaskDependency
 	}
 
-	successor, err := s.taskRepo.GetByIDForUserScope(ctx, taskID, userID)
+	successor, err := s.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
 		return err
 	}
 
-	predecessor, err := s.taskRepo.GetByIDForUserScope(ctx, predecessorID, userID)
+	predecessor, err := s.taskRepo.GetByID(ctx, predecessorID)
 	if err != nil {
 		return err
 	}
@@ -544,7 +572,7 @@ func (s *taskService) GetDependencies(ctx context.Context, userID, taskID uint64
 		return nil, ErrInvalidTaskDependency
 	}
 
-	task, err := s.taskRepo.GetByIDForUserScope(ctx, taskID, userID)
+	task, err := s.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -573,7 +601,7 @@ func (s *taskService) GetDependencyGraph(ctx context.Context, userID, taskID uin
 		return nil, ErrInvalidTaskDependency
 	}
 
-	task, err := s.taskRepo.GetByIDForUserScope(ctx, taskID, userID)
+	task, err := s.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}

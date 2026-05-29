@@ -9,6 +9,9 @@ import (
 )
 
 func (s *teamService) requireTeamOwner(ctx context.Context, teamID, userID uint64) error {
+	if _, err := s.teamRepo.GetByID(ctx, teamID); err != nil {
+		return err
+	}
 	role, err := s.getTeamRoleOrForbidden(ctx, teamID, userID)
 	if err != nil {
 		return err
@@ -20,10 +23,15 @@ func (s *teamService) requireTeamOwner(ctx context.Context, teamID, userID uint6
 }
 
 func (s *teamService) requireTeamMember(ctx context.Context, teamID, userID uint64) error {
-	if _, err := s.teamRepo.GetByIDForMemberScope(ctx, teamID, userID); errors.Is(err, repository.ErrNotFound) {
-		return repository.ErrForbidden
-	} else if err != nil {
+	if _, err := s.teamRepo.GetByID(ctx, teamID); err != nil {
 		return err
+	}
+	isMember, err := s.teamRepo.IsMember(ctx, teamID, userID)
+	if err != nil {
+		return err
+	}
+	if !isMember {
+		return repository.ErrForbidden
 	}
 	return nil
 }
@@ -38,3 +46,4 @@ func (s *teamService) getTeamRoleOrForbidden(ctx context.Context, teamID, userID
 	}
 	return role, nil
 }
+

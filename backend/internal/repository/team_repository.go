@@ -16,8 +16,6 @@ type TeamRepository interface {
 	Create(ctx context.Context, team *model.Team) error
 	ListByUserID(ctx context.Context, userID uint64, search string) ([]model.TeamWithRole, error)
 	GetByID(ctx context.Context, teamID uint64) (*model.Team, error)
-	GetByIDForMemberScope(ctx context.Context, teamID, userID uint64) (*model.Team, error)
-	GetByName(ctx context.Context, name string) (*model.Team, error)
 	UpdateName(ctx context.Context, teamID uint64, name string) error
 	AddMember(ctx context.Context, member *model.TeamMember) error
 	RemoveMember(ctx context.Context, teamID, userID uint64) error
@@ -43,16 +41,7 @@ func (r *teamRepository) GetDB() *gorm.DB {
 }
 
 func (r *teamRepository) Create(ctx context.Context, team *model.Team) error {
-	err := r.db.WithContext(ctx).Create(team).Error
-	if err == nil {
-		return nil
-	}
-
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		return ErrConflict
-	}
-	return err
+	return r.db.WithContext(ctx).Create(team).Error
 }
 
 func (r *teamRepository) ListByUserID(ctx context.Context, userID uint64, search string) ([]model.TeamWithRole, error) {
@@ -95,40 +84,6 @@ func (r *teamRepository) GetByID(ctx context.Context, teamID uint64) (*model.Tea
 	return &team, nil
 }
 
-func (r *teamRepository) GetByIDForMemberScope(ctx context.Context, teamID, userID uint64) (*model.Team, error) {
-	var team model.Team
-	err := r.db.WithContext(ctx).
-		Table("teams t").
-		Select("t.*").
-		Joins("JOIN team_members tm ON tm.team_id = t.id AND tm.deleted_at IS NULL").
-		Where("t.id = ?", teamID).
-		Where("tm.user_id = ?", userID).
-		Where("t.deleted_at IS NULL").
-		First(&team).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &team, nil
-}
-
-func (r *teamRepository) GetByName(ctx context.Context, name string) (*model.Team, error) {
-	var team model.Team
-	err := r.db.WithContext(ctx).
-		Where("name = ?", name).
-		Where("deleted_at IS NULL").
-		First(&team).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &team, nil
-}
-
 func (r *teamRepository) UpdateName(ctx context.Context, teamID uint64, name string) error {
 	res := r.db.WithContext(ctx).
 		Model(&model.Team{}).
@@ -136,10 +91,6 @@ func (r *teamRepository) UpdateName(ctx context.Context, teamID uint64, name str
 		Where("deleted_at IS NULL").
 		Updates(map[string]interface{}{"name": name})
 	if res.Error != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(res.Error, &pgErr) && pgErr.Code == "23505" {
-			return ErrConflict
-		}
 		return res.Error
 	}
 	if res.RowsAffected == 0 {
@@ -195,11 +146,10 @@ func (r *teamRepository) UpdateMemberRole(ctx context.Context, teamID, userID ui
 func (r *teamRepository) IsMember(ctx context.Context, teamID, userID uint64) (bool, error) {
 	var count int64
 	err := r.db.WithContext(ctx).
-		Table("team_members tm").
-		Joins("JOIN teams t ON t.id = tm.team_id AND t.deleted_at IS NULL").
-		Where("tm.team_id = ?", teamID).
-		Where("tm.user_id = ?", userID).
-		Where("tm.deleted_at IS NULL").
+		Model(&model.TeamMember{}).
+		Where("team_id = ?", teamID).
+		Where("user_id = ?", userID).
+		Where("deleted_at IS NULL").
 		Count(&count).Error
 	if err != nil {
 		return false, err
@@ -210,12 +160,9 @@ func (r *teamRepository) IsMember(ctx context.Context, teamID, userID uint64) (b
 func (r *teamRepository) GetMemberRole(ctx context.Context, teamID, userID uint64) (model.TeamRole, error) {
 	var member model.TeamMember
 	err := r.db.WithContext(ctx).
-		Table("team_members tm").
-		Select("tm.*").
-		Joins("JOIN teams t ON t.id = tm.team_id AND t.deleted_at IS NULL").
-		Where("tm.team_id = ?", teamID).
-		Where("tm.user_id = ?", userID).
-		Where("tm.deleted_at IS NULL").
+		Where("team_id = ?", teamID).
+		Where("user_id = ?", userID).
+		Where("deleted_at IS NULL").
 		First(&member).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", ErrNotFound
