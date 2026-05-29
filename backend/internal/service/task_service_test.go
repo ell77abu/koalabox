@@ -197,6 +197,9 @@ func (m *teamRepoForTaskMock) GetByIDForMemberScope(ctx context.Context, teamID,
 	}
 	panic("unexpected call to GetByIDForMemberScope")
 }
+func (m *teamRepoForTaskMock) GetByName(ctx context.Context, name string) (*model.Team, error) {
+	panic("unexpected call to GetByName")
+}
 func (m *teamRepoForTaskMock) UpdateName(ctx context.Context, teamID uint64, name string) error {
 	panic("unexpected call to UpdateName")
 }
