@@ -80,6 +80,11 @@ func (s *teamService) Create(ctx context.Context, ownerID uint64, req CreateTeam
 	if name == "" || len(name) > 100 {
 		return nil, ErrInvalidTeamName
 	}
+	if _, err := s.teamRepo.GetByName(ctx, name); err == nil {
+		return nil, repository.ErrConflict
+	} else if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		return nil, err
+	}
 
 	db, err := getTeamRepoDB(s.teamRepo)
 	if err != nil {
@@ -127,6 +132,13 @@ func (s *teamService) Update(ctx context.Context, operatorID, teamID uint64, req
 	name := strings.TrimSpace(req.Name)
 	if name == "" || len(name) > 100 {
 		return ErrInvalidTeamName
+	}
+	if existing, err := s.teamRepo.GetByName(ctx, name); err == nil {
+		if existing.ID != teamID {
+			return repository.ErrConflict
+		}
+	} else if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		return err
 	}
 
 	return s.teamRepo.UpdateName(ctx, teamID, name)
@@ -259,46 +271,21 @@ func (s *teamService) ListPendingInvitations(ctx context.Context, userID uint64)
 }
 
 func (s *teamService) AcceptInvitation(ctx context.Context, userID, invitationID uint64) error {
-	invite, err := s.inviteRepo.GetByID(ctx, invitationID)
+	invite, err := s.inviteRepo.GetByIDForInvitee(ctx, invitationID, userID)
 	if err != nil {
 		return err
-	}
-	if invite.InviteeID != userID {
-		return repository.ErrForbidden
 	}
 	if invite.Status != model.InvitationStatusPending {
 		return ErrInvitationNotPending
 	}
 
-	if _, err := s.teamRepo.GetByID(ctx, invite.TeamID); err != nil {
-		return err
-	}
-
-	isMember, err := s.teamRepo.IsMember(ctx, invite.TeamID, userID)
-	if err != nil {
-		return err
-	}
-	if !isMember {
-		member := &model.TeamMember{
-			TeamID: invite.TeamID,
-			UserID: userID,
-			Role:   model.TeamRoleMember,
-		}
-		if err := s.teamRepo.AddMember(ctx, member); err != nil {
-			return err
-		}
-	}
-
-	return s.inviteRepo.UpdateStatus(ctx, invitationID, model.InvitationStatusAccepted)
+	return s.inviteRepo.AcceptPendingForInvitee(ctx, invitationID, userID)
 }
 
 func (s *teamService) DeclineInvitation(ctx context.Context, userID, invitationID uint64) error {
-	invite, err := s.inviteRepo.GetByID(ctx, invitationID)
+	invite, err := s.inviteRepo.GetByIDForInvitee(ctx, invitationID, userID)
 	if err != nil {
 		return err
-	}
-	if invite.InviteeID != userID {
-		return repository.ErrForbidden
 	}
 	if invite.Status != model.InvitationStatusPending {
 		return ErrInvitationNotPending
@@ -308,10 +295,6 @@ func (s *teamService) DeclineInvitation(ctx context.Context, userID, invitationI
 }
 
 func (s *teamService) Leave(ctx context.Context, userID, teamID uint64) error {
-	if _, err := s.teamRepo.GetByID(ctx, teamID); err != nil {
-		return err
-	}
-
 	role, err := s.getTeamRoleOrForbidden(ctx, teamID, userID)
 	if err != nil {
 		return err
