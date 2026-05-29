@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -12,16 +13,24 @@ import (
 )
 
 var (
-	ErrInvalidTaskTitle     = errors.New("invalid task title")
-	ErrInvalidTaskStatus    = errors.New("invalid task status")
-	ErrInvalidTaskPriority  = errors.New("invalid task priority")
-	ErrInvalidTaskDeadline  = errors.New("invalid task deadline format, expected YYYY-MM-DD HH:mm:ss")
-	ErrInvalidTeamID        = errors.New("invalid team id")
-	ErrInvalidAssigneeID    = errors.New("invalid assignee id")
-	ErrAssigneeNotInTeam    = errors.New("assignee is not in team")
-	ErrTeamRoleDenied       = errors.New("insufficient team role permission")
-	ErrMemberStatusOnly     = errors.New("member can only update status for assigned task")
-	ErrAssignmentNotPending = errors.New("assignment request is not pending")
+	ErrInvalidTaskTitle      = errors.New("invalid task title")
+	ErrInvalidTaskStatus     = errors.New("invalid task status")
+	ErrInvalidTaskPriority   = errors.New("invalid task priority")
+	ErrInvalidTaskDeadline   = errors.New("invalid task deadline format, expected YYYY-MM-DD HH:mm:ss")
+	ErrInvalidTeamID         = errors.New("invalid team id")
+	ErrInvalidAssigneeID     = errors.New("invalid assignee id")
+	ErrAssigneeNotInTeam     = errors.New("assignee is not in team")
+	ErrTeamRoleDenied        = errors.New("insufficient team role permission")
+	ErrMemberStatusOnly      = errors.New("member can only update status for assigned task")
+	ErrAssignmentNotPending  = errors.New("assignment request is not pending")
+	ErrInvalidTaskDependency = errors.New("invalid task dependency")
+	ErrDependencyOnDoneTask  = errors.New("cannot add dependency to a completed task")
+	ErrCrossTaskDependency   = errors.New("cross team or cross user task dependency is forbidden")
+	ErrDependenciesNotDone   = errors.New("predecessor tasks are not completed")
+	ErrDependencyCycle       = errors.New("dependency cycle detected")
+	ErrTeamIDImmutable       = errors.New("cannot change team id for existing task")
+	ErrTeamGone              = errors.New("team is gone")
+	ErrDoneSuccessorsExist   = errors.New("cannot rollback task status because done successors depend on it")
 )
 
 type CreateTaskRequest struct {
@@ -69,6 +78,46 @@ type UpdateTaskRequest struct {
 	AssigneeID  OptionalUint64 `json:"assignee_id"`
 }
 
+type AddTaskDependencyRequest struct {
+	PredecessorID uint64 `json:"predecessor_id"`
+}
+
+type TaskDependencies struct {
+	Predecessors []model.TaskDependencyNode `json:"predecessors"`
+	Successors   []model.TaskDependencyNode `json:"successors"`
+}
+
+type TaskDependencyGraph struct {
+	Nodes []model.TaskDependencyNode `json:"nodes"`
+	Links []model.TaskDependencyLink `json:"links"`
+}
+
+type UnresolvedDependenciesError struct {
+	IDs          []uint64
+	Predecessors []model.TaskDependencyNode
+}
+
+func (e *UnresolvedDependenciesError) Error() string {
+	return fmt.Sprintf("predecessor tasks are not completed: %v", e.IDs)
+}
+
+func (e *UnresolvedDependenciesError) Is(target error) bool {
+	return target == ErrDependenciesNotDone
+}
+
+type DoneSuccessorsError struct {
+	IDs        []uint64
+	Successors []model.TaskDependencyNode
+}
+
+func (e *DoneSuccessorsError) Error() string {
+	return fmt.Sprintf("done successors depend on task: %v", e.IDs)
+}
+
+func (e *DoneSuccessorsError) Is(target error) bool {
+	return target == ErrDoneSuccessorsExist
+}
+
 type TaskService interface {
 	List(ctx context.Context, userID uint64, userLevel uint8, page, size int, teamID *uint64) ([]model.Task, int64, int, int, error)
 	Create(ctx context.Context, userID uint64, req CreateTaskRequest) (*model.Task, error)
@@ -77,6 +126,10 @@ type TaskService interface {
 	ListPendingAssignments(ctx context.Context, userID uint64) ([]model.TaskAssignmentRequestDetail, error)
 	AcceptAssignment(ctx context.Context, userID, requestID uint64) error
 	DeclineAssignment(ctx context.Context, userID, requestID uint64) error
+	AddDependency(ctx context.Context, userID, taskID, predecessorID uint64) (*model.TaskDependency, error)
+	RemoveDependency(ctx context.Context, userID, taskID, predecessorID uint64) error
+	GetDependencies(ctx context.Context, userID, taskID uint64) (*TaskDependencies, error)
+	GetDependencyGraph(ctx context.Context, userID, taskID uint64) (*TaskDependencyGraph, error)
 }
 
 type taskService struct {
@@ -114,18 +167,9 @@ func (s *taskService) List(ctx context.Context, userID uint64, userLevel uint8, 
 			list, total, err = s.taskRepo.ListAll(ctx, page, size)
 		}
 	} else if teamID != nil {
-		if _, err = s.teamRepo.GetByID(ctx, *teamID); err != nil {
-			return nil, 0, 0, 0, ErrInvalidTeamID
+		if err := s.requireExistingTeamMember(ctx, *teamID, userID); err != nil {
+			return nil, 0, 0, 0, err
 		}
-
-		isMember, memberErr := s.teamRepo.IsMember(ctx, *teamID, userID)
-		if memberErr != nil {
-			return nil, 0, 0, 0, memberErr
-		}
-		if !isMember {
-			return nil, 0, 0, 0, repository.ErrForbidden
-		}
-
 		list, total, err = s.taskRepo.ListByTeamID(ctx, *teamID, page, size)
 	} else {
 		list, total, err = s.taskRepo.ListPersonalAndAssignedTeam(ctx, userID, page, size)
@@ -167,19 +211,8 @@ func (s *taskService) Create(ctx context.Context, userID uint64, req CreateTaskR
 	}
 
 	if req.TeamID != nil {
-		if _, err := s.teamRepo.GetByID(ctx, *req.TeamID); err != nil {
-			return nil, ErrInvalidTeamID
-		}
-
-		role, err := s.teamRepo.GetMemberRole(ctx, *req.TeamID, userID)
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, repository.ErrForbidden
-		}
-		if err != nil {
+		if err := s.requireTeamManager(ctx, *req.TeamID, userID); err != nil {
 			return nil, err
-		}
-		if !canManageTeamTasks(role) {
-			return nil, ErrTeamRoleDenied
 		}
 	}
 
@@ -218,7 +251,7 @@ func (s *taskService) Create(ctx context.Context, userID uint64, req CreateTaskR
 }
 
 func (s *taskService) Update(ctx context.Context, userID uint64, taskID uint64, req UpdateTaskRequest) (*model.Task, error) {
-	task, err := s.taskRepo.GetByID(ctx, taskID)
+	task, err := s.taskRepo.GetByIDForUserScope(ctx, taskID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -259,12 +292,22 @@ func (s *taskService) Update(ctx context.Context, userID uint64, taskID uint64, 
 	if task.Status == status {
 		return task, nil
 	}
+	if status == model.TaskStatusDONE {
+		if err := s.ensureDependenciesCompleted(ctx, task.ID); err != nil {
+			return nil, err
+		}
+	}
+	if task.Status == model.TaskStatusDONE && status != model.TaskStatusDONE {
+		if err := s.ensureNoDoneSuccessors(ctx, task.ID); err != nil {
+			return nil, err
+		}
+	}
 	task.Status = status
 
-	if err := s.taskRepo.UpdateByID(ctx, task); err != nil {
+	if err := s.taskRepo.UpdateStatusByIDForAssignedMemberScope(ctx, task.ID, userID, status); err != nil {
 		return nil, err
 	}
-	return s.taskRepo.GetByID(ctx, taskID)
+	return s.taskRepo.GetByIDForUserScope(ctx, taskID, userID)
 }
 
 func (s *taskService) Delete(ctx context.Context, userID uint64, userLevel uint8, taskID uint64) error {
@@ -272,7 +315,7 @@ func (s *taskService) Delete(ctx context.Context, userID uint64, userLevel uint8
 		return s.taskRepo.DeleteByID(ctx, taskID)
 	}
 
-	task, err := s.taskRepo.GetByID(ctx, taskID)
+	task, err := s.taskRepo.GetByIDForUserScope(ctx, taskID, userID)
 	if err != nil {
 		return err
 	}
@@ -281,21 +324,14 @@ func (s *taskService) Delete(ctx context.Context, userID uint64, userLevel uint8
 		if task.UserID != userID {
 			return repository.ErrForbidden
 		}
-		return s.taskRepo.DeleteByID(ctx, taskID)
+		return s.taskRepo.DeleteByIDForOwnerOrTeamManagerScope(ctx, taskID, userID)
 	}
 
-	role, err := s.teamRepo.GetMemberRole(ctx, *task.TeamID, userID)
-	if errors.Is(err, repository.ErrNotFound) {
-		return repository.ErrForbidden
-	}
-	if err != nil {
+	if err := s.requireTeamManager(ctx, *task.TeamID, userID); err != nil {
 		return err
 	}
-	if !canManageTeamTasks(role) {
-		return ErrTeamRoleDenied
-	}
 
-	return s.taskRepo.DeleteByID(ctx, taskID)
+	return s.taskRepo.DeleteByIDForOwnerOrTeamManagerScope(ctx, taskID, userID)
 }
 
 func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.Task, req UpdateTaskRequest, operatorID uint64) (*model.Task, error) {
@@ -316,6 +352,16 @@ func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.T
 		if !isValidTaskStatus(status) {
 			return nil, ErrInvalidTaskStatus
 		}
+		if status == model.TaskStatusDONE && task.Status != model.TaskStatusDONE {
+			if err := s.ensureDependenciesCompleted(ctx, task.ID); err != nil {
+				return nil, err
+			}
+		}
+		if task.Status == model.TaskStatusDONE && status != model.TaskStatusDONE {
+			if err := s.ensureNoDoneSuccessors(ctx, task.ID); err != nil {
+				return nil, err
+			}
+		}
 		task.Status = status
 	}
 	if req.Priority != nil {
@@ -333,10 +379,7 @@ func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.T
 		task.Deadline = deadline
 	}
 	if req.TeamID != nil {
-		if _, err := s.teamRepo.GetByID(ctx, *req.TeamID); err != nil {
-			return nil, ErrInvalidTeamID
-		}
-		task.TeamID = req.TeamID
+		return nil, ErrTeamIDImmutable
 	}
 	if req.AssigneeID.Set {
 		if !req.AssigneeID.Valid {
@@ -361,7 +404,7 @@ func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.T
 
 	assigneeChanged := !isSameUint64Ptr(originalAssigneeID, task.AssigneeID)
 
-	if err := s.taskRepo.UpdateByID(ctx, task); err != nil {
+	if err := s.taskRepo.UpdateByIDForOwnerOrTeamManagerScope(ctx, task, operatorID); err != nil {
 		return nil, err
 	}
 	if assigneeChanged && task.TeamID != nil {
@@ -369,7 +412,7 @@ func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.T
 			return nil, err
 		}
 	}
-	updatedTask, err := s.taskRepo.GetByID(ctx, task.ID)
+	updatedTask, err := s.taskRepo.GetByIDForUserScope(ctx, task.ID, operatorID)
 	if err != nil {
 		return nil, err
 	}
@@ -384,52 +427,169 @@ func (s *taskService) ListPendingAssignments(ctx context.Context, userID uint64)
 }
 
 func (s *taskService) AcceptAssignment(ctx context.Context, userID, requestID uint64) error {
-	req, err := s.assignRepo.GetByID(ctx, requestID)
+	req, err := s.assignRepo.GetByIDForAssigneeScope(ctx, requestID, userID)
 	if err != nil {
 		return err
-	}
-	if req.AssigneeID != userID {
-		return repository.ErrForbidden
 	}
 	if req.Status != model.InvitationStatusPending {
 		return ErrAssignmentNotPending
 	}
 
-	if _, err := s.teamRepo.GetByID(ctx, req.TeamID); err != nil {
-		return err
-	}
-	if inTeam, err := s.teamRepo.IsMember(ctx, req.TeamID, userID); err != nil {
-		return err
-	} else if !inTeam {
-		return repository.ErrForbidden
-	}
-
-	task, err := s.taskRepo.GetByID(ctx, req.TaskID)
-	if err != nil {
-		return err
-	}
-
-	task.AssigneeID = &userID
-	if err := s.taskRepo.UpdateByID(ctx, task); err != nil {
-		return err
-	}
-
-	return s.assignRepo.UpdateStatus(ctx, requestID, model.InvitationStatusAccepted)
+	return s.assignRepo.AcceptPendingForAssigneeScope(ctx, requestID, userID)
 }
 
 func (s *taskService) DeclineAssignment(ctx context.Context, userID, requestID uint64) error {
-	req, err := s.assignRepo.GetByID(ctx, requestID)
+	req, err := s.assignRepo.GetByIDForAssigneeScope(ctx, requestID, userID)
 	if err != nil {
 		return err
-	}
-	if req.AssigneeID != userID {
-		return repository.ErrForbidden
 	}
 	if req.Status != model.InvitationStatusPending {
 		return ErrAssignmentNotPending
 	}
 
-	return s.assignRepo.UpdateStatus(ctx, requestID, model.InvitationStatusDeclined)
+	return s.assignRepo.UpdatePendingStatusForAssigneeScope(ctx, requestID, userID, model.InvitationStatusDeclined)
+}
+
+func (s *taskService) AddDependency(ctx context.Context, userID, taskID, predecessorID uint64) (*model.TaskDependency, error) {
+	if taskID == 0 || predecessorID == 0 || taskID == predecessorID {
+		return nil, ErrInvalidTaskDependency
+	}
+
+	successor, err := s.taskRepo.GetByIDForUserScope(ctx, taskID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if successor.Status == model.TaskStatusDONE {
+		return nil, ErrDependencyOnDoneTask
+	}
+
+	predecessor, err := s.taskRepo.GetByIDForUserScope(ctx, predecessorID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	if successor.TeamID == nil && predecessor.TeamID == nil {
+		if successor.UserID != userID || predecessor.UserID != userID {
+			return nil, ErrCrossTaskDependency
+		}
+		dep, err := s.taskRepo.AddDependencyWithCycleCheck(ctx, predecessorID, taskID)
+		if errors.Is(err, repository.ErrDependencyCycle) {
+			return nil, ErrDependencyCycle
+		}
+		return dep, err
+	}
+
+	if successor.TeamID == nil || predecessor.TeamID == nil {
+		return nil, ErrCrossTaskDependency
+	}
+	if *successor.TeamID != *predecessor.TeamID {
+		return nil, ErrCrossTaskDependency
+	}
+	if err := s.ensureTeamActive(ctx, *successor.TeamID); err != nil {
+		return nil, err
+	}
+
+	if err := s.requireTeamManager(ctx, *successor.TeamID, userID); err != nil {
+		return nil, err
+	}
+
+	dep, err := s.taskRepo.AddDependencyWithCycleCheck(ctx, predecessorID, taskID)
+	if errors.Is(err, repository.ErrDependencyCycle) {
+		return nil, ErrDependencyCycle
+	}
+	return dep, err
+}
+
+func (s *taskService) RemoveDependency(ctx context.Context, userID, taskID, predecessorID uint64) error {
+	if taskID == 0 || predecessorID == 0 {
+		return ErrInvalidTaskDependency
+	}
+
+	successor, err := s.taskRepo.GetByIDForUserScope(ctx, taskID, userID)
+	if err != nil {
+		return err
+	}
+
+	predecessor, err := s.taskRepo.GetByIDForUserScope(ctx, predecessorID, userID)
+	if err != nil {
+		return err
+	}
+
+	if successor.TeamID == nil && predecessor.TeamID == nil {
+		if successor.UserID != userID || predecessor.UserID != userID {
+			return ErrCrossTaskDependency
+		}
+		return s.taskRepo.RemoveDependency(ctx, predecessorID, taskID)
+	}
+
+	if successor.TeamID == nil || predecessor.TeamID == nil {
+		return ErrCrossTaskDependency
+	}
+	if *successor.TeamID != *predecessor.TeamID {
+		return ErrCrossTaskDependency
+	}
+	if err := s.ensureTeamActive(ctx, *successor.TeamID); err != nil {
+		return err
+	}
+
+	if err := s.requireTeamManager(ctx, *successor.TeamID, userID); err != nil {
+		return err
+	}
+
+	return s.taskRepo.RemoveDependency(ctx, predecessorID, taskID)
+}
+
+func (s *taskService) GetDependencies(ctx context.Context, userID, taskID uint64) (*TaskDependencies, error) {
+	if taskID == 0 {
+		return nil, ErrInvalidTaskDependency
+	}
+
+	task, err := s.taskRepo.GetByIDForUserScope(ctx, taskID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.requireTaskReadAccess(ctx, task, userID); err != nil {
+		return nil, err
+	}
+
+	predecessors, err := s.taskRepo.ListPredecessors(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	successors, err := s.taskRepo.ListSuccessors(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &TaskDependencies{
+		Predecessors: predecessors,
+		Successors:   successors,
+	}, nil
+}
+
+func (s *taskService) GetDependencyGraph(ctx context.Context, userID, taskID uint64) (*TaskDependencyGraph, error) {
+	if taskID == 0 {
+		return nil, ErrInvalidTaskDependency
+	}
+
+	task, err := s.taskRepo.GetByIDForUserScope(ctx, taskID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.requireTaskReadAccess(ctx, task, userID); err != nil {
+		return nil, err
+	}
+
+	nodes, links, err := s.taskRepo.GetDependencyGraph(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return &TaskDependencyGraph{
+		Nodes: nodes,
+		Links: links,
+	}, nil
 }
 
 func (s *taskService) createAssignmentNotification(ctx context.Context, task *model.Task, requesterID uint64, originalAssigneeID, originalTeamID *uint64) error {
@@ -459,11 +619,57 @@ func (s *taskService) createAssignmentNotification(ctx context.Context, task *mo
 		TeamID:      *task.TeamID,
 		RequesterID: requesterID,
 		AssigneeID:  *task.AssigneeID,
-		Status:      model.InvitationStatusAccepted,
+		Status:      model.InvitationStatusPending,
 	}
 	if err := s.assignRepo.Create(ctx, req); err != nil {
 		if errors.Is(err, repository.ErrConflict) {
 			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *taskService) ensureDependenciesCompleted(ctx context.Context, taskID uint64) error {
+	predecessors, err := s.taskRepo.ListIncompletePredecessors(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if len(predecessors) > 0 {
+		ids := make([]uint64, 0, len(predecessors))
+		for _, predecessor := range predecessors {
+			ids = append(ids, predecessor.ID)
+		}
+		return &UnresolvedDependenciesError{IDs: ids, Predecessors: predecessors}
+	}
+	return nil
+}
+
+func (s *taskService) ensureNoDoneSuccessors(ctx context.Context, taskID uint64) error {
+	successors, err := s.taskRepo.ListDoneSuccessors(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if len(successors) > 0 {
+		ids := make([]uint64, 0, len(successors))
+		for _, successor := range successors {
+			ids = append(ids, successor.ID)
+		}
+		return &DoneSuccessorsError{IDs: ids, Successors: successors}
+	}
+	return nil
+}
+
+func (s *taskService) ensureTeamActive(ctx context.Context, teamID uint64) error {
+	if _, err := s.teamRepo.GetByID(ctx, teamID); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			deleted, derr := s.teamRepo.IsDeleted(ctx, teamID)
+			if derr != nil {
+				return derr
+			}
+			if deleted {
+				return ErrTeamGone
+			}
 		}
 		return err
 	}

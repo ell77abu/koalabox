@@ -52,6 +52,13 @@
           <p>加载中...</p>
         </div>
 
+        <div v-else-if="loadError" class="empty-state error-state">
+          <p>{{ loadError }}</p>
+          <div class="error-actions">
+            <button class="btn btn-small btn-primary-style" type="button" @click="loadTeams">重试</button>
+          </div>
+        </div>
+
         <div v-else-if="displayedTeams.length === 0" class="empty-state">
           <p v-if="isSearching">未找到匹配的团队。</p>
           <p v-else>你还没有加入任何团队，快去创建一个吧！</p>
@@ -61,7 +68,7 @@
           <section class="task-group">
             <div class="task-group-list">
               <div
-                v-for="team in displayedTeams"
+                v-for="team in paginatedTeams"
                 :key="team.team_id"
                 class="task-item"
               >
@@ -90,6 +97,12 @@
                 </div>
               </div>
             </div>
+
+            <div v-if="totalPages > 1" class="pagination">
+              <button class="btn btn-outline btn-small" :disabled="currentPage === 1" @click="currentPage--">上一页</button>
+              <span class="page-info">第 {{ currentPage }} 页 / 共 {{ totalPages }} 页</span>
+              <button class="btn btn-outline btn-small" :disabled="currentPage === totalPages" @click="currentPage++">下一页</button>
+            </div>
           </section>
         </div>
       </div>
@@ -98,23 +111,51 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue'; // 新增导入 watch
 import { useRouter, RouterLink } from 'vue-router';
 import { teamStore } from '../stores/team';
 import { getTeamsApi } from '../services/team';
+import { getApiErrorMessage, getApiFailureMessage } from '../utils/apiError';
 
 const router = useRouter();
 const loading = ref(false);
+const loadError = ref('');
 const searchQuery = ref('');
 
 const isSearching = computed(() => searchQuery.value.trim().length > 0);
 
+// 原始过滤后的团队列表
 const displayedTeams = computed(() => {
   const list = teamStore.teams.value;
   const keyword = searchQuery.value.trim().toLowerCase();
   if (!keyword) return list;
   return list.filter((team) => String(team.name || '').toLowerCase().includes(keyword));
 });
+
+// ================== 分页逻辑 ==================
+const currentPage = ref(1);
+const pageSize = ref(8); // 每页显示 8 个团队
+
+const totalPages = computed(() => Math.ceil(displayedTeams.value.length / pageSize.value) || 1);
+
+// 当前页显示的数据
+const paginatedTeams = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value;
+  return displayedTeams.value.slice(start, start + pageSize.value);
+});
+
+// 搜索条件变化时重置页码
+watch(searchQuery, () => {
+  currentPage.value = 1;
+});
+
+// 自动退页（例如：解散或退出了最后一页的最后一个团队时）
+watch(paginatedTeams, (newVal) => {
+  if (newVal.length === 0 && currentPage.value > 1) {
+    currentPage.value--;
+  }
+});
+// ==============================================
 
 const roleBadgeClass = (role) => {
   if (role === 'Owner') return 'priority-3';
@@ -124,13 +165,19 @@ const roleBadgeClass = (role) => {
 
 const loadTeams = async () => {
   loading.value = true;
+  loadError.value = '';
   try {
     const res = await getTeamsApi();
     if (res.data.code === 0) {
       teamStore.setTeams(res.data.data.list || []);
+    } else {
+      teamStore.setTeams([]);
+      loadError.value = getApiFailureMessage(res, '加载团队失败');
     }
   } catch (error) {
-    console.error('加载团队失败', error);
+    teamStore.setTeams([]);
+    loadError.value = getApiErrorMessage(error, '加载团队失败');
+    console.error(loadError.value, error);
   } finally {
     loading.value = false;
   }
@@ -247,6 +294,25 @@ onMounted(() => {
 .btn-primary-style { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
 .btn-primary-style:hover { background: #2563eb; color: #fff; border-color: #2563eb; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2); }
 
+/*分页控件及其配套按钮样式*/
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #e5e7eb;
+}
+.page-info {
+  font-size: 0.875rem;
+  color: #6b7280;
+  font-weight: 500;
+}
+.btn-outline { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+.btn-outline:hover:not(:disabled) { background: #e2e8f0; }
+.btn-outline:disabled { opacity: 0.5; cursor: not-allowed; }
+
 @media (max-width: 768px) {
   .task-item { flex-direction: column; align-items: flex-start; gap: 1rem; }
   .task-actions { margin-left: 0; width: 100%; }
@@ -263,4 +329,9 @@ onMounted(() => {
 :global([data-theme="dark"]) .task-meta { color: #cbd5e1; }
 :global([data-theme="dark"]) .btn-primary-style { background: #1e3a8a; color: #bfdbfe; border-color: #1e40af; }
 :global([data-theme="dark"]) .btn-primary-style:hover { background: #2563eb; color: #fff; }
+
+/* 深色模式：分页控件 */
+:global([data-theme="dark"]) .pagination { border-top-color: #334155; }
+:global([data-theme="dark"]) .btn-outline { background: #0f172a; color: #cbd5e1; border-color: #334155; }
+:global([data-theme="dark"]) .page-info { color: #94a3b8; }
 </style>

@@ -43,6 +43,7 @@ import { computed } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import { logoutApi } from '../services/auth';
 import { authStore } from '../stores/auth';
+import { getApiErrorMessage } from '../utils/apiError';
 
 const router = useRouter();
 
@@ -58,6 +59,7 @@ const onLogout = async () => {
       await logoutApi();
     } catch (error) {
       // Ignore API logout errors and clear local state anyway.
+      console.warn(getApiErrorMessage(error, '退出登录接口失败，本地登录状态已清除'));
     }
     authStore.clearAuth();
     router.replace('/login');

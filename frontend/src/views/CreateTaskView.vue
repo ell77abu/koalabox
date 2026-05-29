@@ -64,6 +64,23 @@
         </label>
       </div>
 
+      <div class="dependency-section" style="margin-top: 10px;">
+        <label style="display: block; margin-bottom: 8px; color: #334155; font-size: 14px; font-weight: 600;">
+          📌 设置前置依赖 (可选)
+        </label>
+        <div class="checkbox-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 160px; overflow-y: auto; padding: 12px; background: rgba(255, 255, 255, 0.6); border: 1px solid #d7e2ef; border-radius: 12px;">
+          <span v-if="dependencyLoadError" class="error">{{ dependencyLoadError }}</span>
+          <label v-for="t in availablePersonalTasks" :key="t.id" style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #1e293b; cursor: pointer; font-weight: 500;">
+            <input type="checkbox" :value="t.id" v-model="newTask.predecessor_ids" style="accent-color: #3b82f6; width: 16px; height: 16px; cursor: pointer; margin: 0;" />
+            {{ t.title }}
+            <span class="status-badge" :class="taskStatusClass(t)">
+              {{ statusLabel(t.status) }}
+            </span>
+          </label>
+          <span v-if="availablePersonalTasks.length === 0" style="font-size: 13px; color: #94a3b8; font-weight: 400;">暂无可依赖的其他个人任务</span>
+        </div>
+      </div>
+
       <div class="actions">
         <button class="btn cancel-btn" type="button" @click="router.back()">取消</button>
         <button class="btn" type="submit" :disabled="submitting">
@@ -75,19 +92,51 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { onBeforeUnmount, onMounted, reactive, ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
-import { createTaskApi } from '../services/task';
+// 引入依赖管理相关的 API 与 Store
+import { createTaskApi, addTaskDependencyApi, getTasksApi } from '../services/task';
+import { taskStore } from '../stores/task';
+import { getApiErrorMessage, getApiFailureMessage } from '../utils/apiError';
 
 const router = useRouter();
 const submitting = ref(false);
+const dependencyLoadError = ref('');
 
 const newTask = reactive({
   title: '',
   description: '',
   priority: 2,
   deadline: '',
+  predecessor_ids: [] // 新增：用来存储勾选的前置任务 ID
 });
+
+// 计算属性：过滤出所有的个人任务作为依赖选项 (严格隔离团队任务)
+const isPersonalTask = (task) => {
+  const teamId = task?.team_id;
+  return teamId === null || teamId === undefined || teamId === '' || teamId === 0 || teamId === '0';
+};
+
+const availablePersonalTasks = computed(() => {
+  return taskStore.tasks.value.filter(isPersonalTask);
+});
+
+const statusLabel = (status) => {
+  const map = {
+    TODO: '待做',
+    DOING: '进行中',
+    DONE: '已完成',
+    ERROR: '异常',
+  };
+  return map[status] || status || '未知';
+};
+
+const taskStatusClass = (task) => `status-${String(task?.status || 'TODO').toLowerCase()}`;
+
+const findTaskTitleById = (id) => {
+  const task = taskStore.tasks.value.find((item) => Number(item.id) === Number(id));
+  return task?.title || '';
+};
 
 const priorityOpen = ref(false);
 const priorityDropdownRef = ref(null);
@@ -139,8 +188,24 @@ const toBackendDeadline = (value) => {
   return date.toISOString();
 };
 
-onMounted(() => {
+onMounted(async () => {
   document.addEventListener('click', handleOutsideClick);
+  
+  // 👇 确保进入页面时有任务数据供依赖勾选 (若 store 为空则拉取一次)
+  if (taskStore.tasks.value.length === 0) {
+    try {
+      const res = await getTasksApi(1, 1000);
+      if (res.data && res.data.code === 0) {
+        taskStore.setTasks(res.data.data.list || []);
+        dependencyLoadError.value = '';
+      } else {
+        dependencyLoadError.value = getApiFailureMessage(res, '预加载依赖任务失败');
+      }
+    } catch (e) {
+      dependencyLoadError.value = getApiErrorMessage(e, '预加载依赖任务失败');
+      console.error(dependencyLoadError.value, e);
+    }
+  }
 });
 
 onBeforeUnmount(() => {
@@ -152,17 +217,41 @@ const onCreateTask = async () => {
   
   submitting.value = true;
   try {
-    // 转换日期格式为后端需要的字符串（如果后端需要 ISO 格式）
     const payload = {
-      ...newTask,
+      title: newTask.title,
+      description: newTask.description,
+      priority: newTask.priority,
       deadline: toBackendDeadline(newTask.deadline),
       status: 'TODO'
     };
     
-    await createTaskApi(payload);
+    // 1. 先调用 API 创建任务
+    const res = await createTaskApi(payload);
+    if (res.data?.code !== 0) {
+      alert(getApiFailureMessage(res, '创建任务失败', '创建任务失败'));
+      return;
+    }
+    
+    // 2. 🪄 串联逻辑：创建成功后，如果有勾选依赖，则依次添加依赖
+    const newTaskId = res.data?.data?.id;
+    const dependencyErrors = [];
+    if (newTaskId && newTask.predecessor_ids.length > 0) {
+      for (const predId of newTask.predecessor_ids) {
+        try {
+          await addTaskDependencyApi(newTaskId, predId);
+        } catch (err) {
+          const title = findTaskTitleById(predId) || `ID ${predId}`;
+          dependencyErrors.push(getApiErrorMessage(err, `关联前置任务「${title}」失败`));
+        }
+      }
+    }
+
+    if (dependencyErrors.length > 0) {
+      alert(`任务已创建，但部分前置依赖设置失败：${dependencyErrors.join('；')}`);
+    }
     router.push('/tasks');
   } catch (error) {
-    alert(error.response?.data?.message || '创建任务失败');
+    alert(getApiErrorMessage(error, '创建任务失败'));
   } finally {
     submitting.value = false;
   }
@@ -170,6 +259,7 @@ const onCreateTask = async () => {
 </script>
 
 <style scoped>
+/* 原有样式保持 100% 不变 */
 .create-task-page {
   position: relative;
   max-width: 900px;
@@ -316,6 +406,7 @@ const onCreateTask = async () => {
 
 .priority-field {
   position: relative;
+  z-index: 10; /*强制提升层级，确保下拉菜单盖住下方的所有元素 */
 }
 
 .priority-dropdown {
@@ -465,6 +556,34 @@ const onCreateTask = async () => {
 .priority-menu-fade-leave-to {
   opacity: 0;
   transform: translateY(-4px);
+}
+
+.status-badge {
+  padding: 0.18rem 0.45rem;
+  border-radius: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.status-todo {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.status-doing {
+  background: #fef08a;
+  color: #92400e;
+}
+
+.status-done {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status-error {
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 .actions {

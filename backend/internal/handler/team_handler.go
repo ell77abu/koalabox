@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"log"
 	"runtime/debug"
@@ -34,6 +35,14 @@ type addMemberResponse struct {
 
 type teamListResponse struct {
 	List interface{} `json:"list"`
+}
+
+type transferTeamRequest struct {
+	NewOwnerID uint64 `json:"new_owner_id"`
+}
+
+type teamDeleter interface {
+	DeleteTeam(ctx context.Context, operatorID, teamID uint64) error
 }
 
 func NewTeamHandler(teamService service.TeamService) *TeamHandler {
@@ -74,6 +83,10 @@ func (h *TeamHandler) Create(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
+	if errors.Is(err, repository.ErrConflict) {
+		response.Conflict(c, "team name already exists")
+		return
+	}
 	if err != nil {
 		response.InternalError(c, "create team failed")
 		return
@@ -107,6 +120,10 @@ func (h *TeamHandler) Update(c *gin.Context) {
 	err = h.teamService.Update(c.Request.Context(), userID, teamID, req)
 	if errors.Is(err, service.ErrInvalidTeamName) {
 		response.BadRequest(c, err.Error())
+		return
+	}
+	if errors.Is(err, repository.ErrConflict) {
+		response.Conflict(c, "team name already exists")
 		return
 	}
 	if errors.Is(err, service.ErrTeamOwnerOnly) || errors.Is(err, repository.ErrForbidden) {
@@ -385,4 +402,107 @@ func (h *TeamHandler) DeclineInvitation(c *gin.Context) {
 	}
 
 	response.Success(c, "invitation declined", nil)
+}
+
+func (h *TeamHandler) Leave(c *gin.Context) {
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
+
+	teamID, err := strconv.ParseUint(c.Param("team_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid team id")
+		return
+	}
+
+	err = h.teamService.Leave(c.Request.Context(), userID, teamID)
+	if errors.Is(err, service.ErrOwnerCannotLeave) || errors.Is(err, repository.ErrForbidden) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
+	if errors.Is(err, repository.ErrNotFound) {
+		response.NotFound(c, "team not found")
+		return
+	}
+	if err != nil {
+		response.InternalError(c, "leave team failed")
+		return
+	}
+
+	response.Success(c, "已成功离开团队", nil)
+}
+
+func (h *TeamHandler) TransferOwnership(c *gin.Context) {
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
+
+	teamID, err := strconv.ParseUint(c.Param("team_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid team id")
+		return
+	}
+
+	var req transferTeamRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "invalid request body")
+		return
+	}
+
+	err = h.teamService.TransferOwnership(c.Request.Context(), userID, teamID, req.NewOwnerID)
+	if errors.Is(err, service.ErrTeamOwnerOnly) || errors.Is(err, repository.ErrForbidden) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
+	if errors.Is(err, service.ErrInvalidTransferTarget) {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if errors.Is(err, repository.ErrNotFound) {
+		response.NotFound(c, "team not found")
+		return
+	}
+	if err != nil {
+		response.InternalError(c, "transfer owner failed")
+		return
+	}
+
+	response.Success(c, "团队所有权转让成功", nil)
+}
+
+func (h *TeamHandler) Delete(c *gin.Context) {
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
+
+	teamID, err := strconv.ParseUint(c.Param("team_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid team id")
+		return
+	}
+
+	deleter, ok := h.teamService.(teamDeleter)
+	if !ok {
+		response.InternalError(c, "team delete not supported")
+		return
+	}
+
+	err = deleter.DeleteTeam(c.Request.Context(), userID, teamID)
+	if errors.Is(err, service.ErrTeamOwnerOnly) || errors.Is(err, repository.ErrForbidden) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
+	if errors.Is(err, repository.ErrNotFound) {
+		response.NotFound(c, "team not found")
+		return
+	}
+	if err != nil {
+		response.InternalError(c, "delete team failed")
+		return
+	}
+
+	response.Success(c, "delete team success", nil)
 }

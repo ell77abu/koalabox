@@ -11,6 +11,7 @@
       </header>
 
       <div class="list-section">
+        <p v-if="loadError" class="error-banner">{{ loadError }}</p>
         <div v-if="loading" class="loading-state">加载消息中...</div>
         <div v-else-if="notifications.length === 0" class="empty-state">
           你目前没有任何待处理的消息
@@ -49,10 +50,10 @@
 
             <!-- 操作区：仅对团队邀请且状态为 PENDING 时展示按钮 (任务指派不展示按钮) -->
             <div class="task-actions" v-if="item.type === 'INVITATION' && item.status === 'PENDING'">
-              <button class="btn btn-small btn-complete" @click="handleAccept(item.id)" :disabled="processingId === item.id">
+              <button class="btn btn-small btn-complete" @click="handleAccept(item)" :disabled="processingId === item.id">
                 同意
               </button>
-              <button class="btn btn-small btn-danger" @click="handleDecline(item.id)" :disabled="processingId === item.id">
+              <button class="btn btn-small btn-danger" @click="handleDecline(item)" :disabled="processingId === item.id">
                 拒绝
               </button>
             </div>
@@ -72,9 +73,11 @@ import {
   getAssignmentRequestsApi, 
   acceptAssignmentApi 
 } from '../services/team';
+import { getApiErrorMessage, getApiFailureMessage } from '../utils/apiError';
 
 const notifications = ref([]);
 const loading = ref(false);
+const loadError = ref('');
 const processingId = ref(null);
 
 const formatDate = (dateString) => {
@@ -87,68 +90,104 @@ const formatDate = (dateString) => {
 
 const loadNotifications = async () => {
   loading.value = true;
+  loadError.value = '';
   try {
     const [invRes, assignRes] = await Promise.allSettled([
       getInvitationsApi(),
       getAssignmentRequestsApi()
     ]);
 
+    const requestErrors = [];
     let invList = [];
     if (invRes.status === 'fulfilled') {
-      invList = Array.isArray(invRes.value.data) ? invRes.value.data : (invRes.value.data?.data || []);
+      // 兼容后端新旧两种格式：[...] 或 { code: 0, data: [...] }
+      const resData = invRes.value.data;
+      invList = Array.isArray(resData) ? resData : (resData?.data || []);
       invList = invList.map(item => ({ ...item, type: 'INVITATION' }));
+    } else {
+      requestErrors.push(getApiErrorMessage(invRes.reason, '加载团队邀请失败'));
     }
 
     let assignList = [];
     if (assignRes.status === 'fulfilled') {
-      assignList = Array.isArray(assignRes.value.data) ? assignRes.value.data : (assignRes.value.data?.data || []);
+      const resData = assignRes.value.data;
+      assignList = Array.isArray(resData) ? resData : (resData?.data || []);
       assignList = assignList.map(item => ({ ...item, type: 'ASSIGNMENT' }));
-
-      // 🪄 核心魔法：无感静默已读
+      
+      // 无感静默已读
       const pendingAssignments = assignList.filter(a => a.status === 'PENDING');
       if (pendingAssignments.length > 0) {
-        // 后台偷偷发送已读请求，不阻塞页面渲染
-        Promise.all(pendingAssignments.map(a => acceptAssignmentApi(a.id))).then(() => {
-          console.log(`已自动将 ${pendingAssignments.length} 条任务通知标记为已读`);
-        }).catch(err => console.error('自动标记已读失败', err));
-        
-        // 本地立即变更为已读状态
-        assignList.forEach(a => {
-          if (a.status === 'PENDING') a.status = 'ACCEPTED';
+        const readResults = await Promise.allSettled(pendingAssignments.map(a => acceptAssignmentApi(a.id)));
+        readResults.forEach((result, index) => {
+          if (result.status === 'rejected') {
+            const assignment = pendingAssignments[index];
+            requestErrors.push(getApiErrorMessage(result.reason, `确认任务指派 #${assignment.task_id || assignment.id} 已读失败`));
+          }
         });
+        assignList.forEach(a => { if (a.status === 'PENDING') a.status = 'ACCEPTED'; });
       }
+    } else {
+      requestErrors.push(getApiErrorMessage(assignRes.reason, '加载任务指派通知失败'));
     }
 
     const combinedList = [...invList, ...assignList];
     notifications.value = combinedList.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    if (requestErrors.length > 0) {
+      loadError.value = requestErrors.join('；');
+    }
   } catch (error) {
-    console.error('加载通知失败', error);
+    loadError.value = getApiErrorMessage(error, '加载通知失败');
+    console.error(loadError.value, error);
   } finally {
     loading.value = false;
   }
 };
 
-const handleAccept = async (id) => {
+const canProcessInvitation = (item) => {
+  return item?.type === 'INVITATION' && item.status === 'PENDING';
+};
+
+const handleAccept = async (item) => {
+  if (!canProcessInvitation(item)) {
+    alert('该邀请当前不可处理');
+    return;
+  }
+
+  const id = item.id;
   if (processingId.value === id) return;
   processingId.value = id;
   try {
     const res = await acceptInvitationApi(id);
-    if (res.status === 200) await loadNotifications(); 
+    if (res.status === 200 && (res.data?.code === undefined || res.data.code === 0)) {
+      await loadNotifications();
+    } else {
+      alert(getApiFailureMessage(res, '同意团队邀请失败', '操作失败，请重试'));
+    }
   } catch (error) {
-    alert(error.response?.data?.message || '操作失败，请重试');
+    alert(getApiErrorMessage(error, '同意团队邀请失败'));
   } finally {
     processingId.value = null;
   }
 };
 
-const handleDecline = async (id) => {
+const handleDecline = async (item) => {
+  if (!canProcessInvitation(item)) {
+    alert('该邀请当前不可处理');
+    return;
+  }
+
+  const id = item.id;
   if (processingId.value === id) return;  
   processingId.value = id;
   try {
     const res = await declineInvitationApi(id);
-    if (res.status === 200) await loadNotifications(); 
+    if (res.status === 200 && (res.data?.code === undefined || res.data.code === 0)) {
+      await loadNotifications();
+    } else {
+      alert(getApiFailureMessage(res, '拒绝团队邀请失败', '操作失败，请重试'));
+    }
   } catch (error) {
-    alert(error.response?.data?.message || '操作失败，请重试');
+    alert(getApiErrorMessage(error, '拒绝团队邀请失败'));
   } finally {
     processingId.value = null;
   }

@@ -69,6 +69,7 @@ import { reactive, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { loginApi } from '../services/auth';
 import { authStore } from '../stores/auth';
+import { getApiErrorMessage } from '../utils/apiError';
 
 const router = useRouter();
 const route = useRoute();
@@ -102,14 +103,14 @@ const onSubmit = async () => {
     }
 
     authStore.setAuth(payload.username, payload.level ?? 0);
-    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/tasks';
+    let redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/tasks';
+    // 安全合规校验：防止恶意外链重定向
+    if (!redirect.startsWith('/') || redirect.startsWith('//') || redirect.startsWith('\\\\')) {
+      redirect = '/tasks';
+    }
     await router.replace(redirect);
   } catch (error) {
-    if (error.response?.status === 401) {
-      errorMessage.value = '用户名或密码错误';
-    } else {
-      errorMessage.value = error.response?.data?.message || '登录失败，请稍后重试';
-    }
+    errorMessage.value = getApiErrorMessage(error, '登录失败');
   } finally {
     submitting.value = false;
   }

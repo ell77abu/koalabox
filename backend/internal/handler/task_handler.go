@@ -16,6 +16,10 @@ type TaskHandler struct {
 	taskService service.TaskService
 }
 
+type addTaskDependencyRequest struct {
+	PredecessorID uint64 `json:"predecessor_id"`
+}
+
 // NewTaskHandler 创建任务模块的 HTTP 处理器。
 func NewTaskHandler(taskService service.TaskService) *TaskHandler {
 	return &TaskHandler{taskService: taskService}
@@ -117,6 +121,22 @@ func (h *TaskHandler) Update(c *gin.Context) {
 	}
 
 	task, err := h.taskService.Update(c.Request.Context(), userID, id, req)
+	var unresolvedErr *service.UnresolvedDependenciesError
+	if errors.As(err, &unresolvedErr) {
+		response.JSON(c, 409, 409, "操作失败：尚有前置任务未完成", gin.H{
+			"unresolved_predecessor_ids": unresolvedErr.IDs,
+			"unresolved_predecessors":    unresolvedErr.Predecessors,
+		})
+		return
+	}
+	var doneSuccessorsErr *service.DoneSuccessorsError
+	if errors.As(err, &doneSuccessorsErr) {
+		response.JSON(c, 409, 409, "操作失败：当前任务已被已完成后继任务依赖，不能回退状态", gin.H{
+			"done_successor_ids": doneSuccessorsErr.IDs,
+			"done_successors":    doneSuccessorsErr.Successors,
+		})
+		return
+	}
 	if isTaskValidationError(err) {
 		response.BadRequest(c, err.Error())
 		return
@@ -267,6 +287,190 @@ func (h *TaskHandler) DeclineAssignment(c *gin.Context) {
 	response.Success(c, "assignment declined", nil)
 }
 
+// AddDependency 为任务添加前置依赖。
+func (h *TaskHandler) AddDependency(c *gin.Context) {
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
+
+	taskID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid task id")
+		return
+	}
+
+	var req addTaskDependencyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "invalid request body")
+		return
+	}
+
+	dep, err := h.taskService.AddDependency(c.Request.Context(), userID, taskID, req.PredecessorID)
+	if errors.Is(err, service.ErrDependencyCycle) {
+		response.BadRequest(c, "无法添加依赖：检测到依赖循环")
+		return
+	}
+	if errors.Is(err, service.ErrCrossTaskDependency) {
+		response.Forbidden(c, "跨团队或跨用户任务禁止建立依赖关系")
+		return
+	}
+	if errors.Is(err, service.ErrDependencyOnDoneTask) {
+		response.BadRequest(c, "已完成任务不能再设置前置依赖")
+		return
+	}
+	if errors.Is(err, service.ErrTeamGone) {
+		response.Gone(c, "team has been deleted")
+		return
+	}
+	if isTaskValidationError(err) {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if isTaskForbiddenError(err) || errors.Is(err, repository.ErrForbidden) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
+	if errors.Is(err, repository.ErrNotFound) {
+		response.NotFound(c, "task not found")
+		return
+	}
+	if errors.Is(err, repository.ErrConflict) {
+		response.Conflict(c, "dependency already exists")
+		return
+	}
+	if err != nil {
+		response.InternalError(c, "add dependency failed")
+		return
+	}
+
+	response.Created(c, "依赖添加成功", dep)
+}
+
+// RemoveDependency 移除任务的前置依赖。
+func (h *TaskHandler) RemoveDependency(c *gin.Context) {
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
+
+	taskID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid task id")
+		return
+	}
+
+	predecessorID, err := strconv.ParseUint(c.Param("predecessor_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid predecessor id")
+		return
+	}
+
+	err = h.taskService.RemoveDependency(c.Request.Context(), userID, taskID, predecessorID)
+	if errors.Is(err, service.ErrCrossTaskDependency) {
+		response.Forbidden(c, "跨团队或跨用户任务禁止建立依赖关系")
+		return
+	}
+	if errors.Is(err, service.ErrTeamGone) {
+		response.Gone(c, "team has been deleted")
+		return
+	}
+	if isTaskValidationError(err) {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if errors.Is(err, service.ErrTeamGone) {
+		response.Gone(c, "team has been deleted")
+		return
+	}
+	if isTaskForbiddenError(err) || errors.Is(err, repository.ErrForbidden) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
+	if errors.Is(err, repository.ErrNotFound) {
+		response.NotFound(c, "dependency not found")
+		return
+	}
+	if err != nil {
+		response.InternalError(c, "remove dependency failed")
+		return
+	}
+
+	response.Success(c, "依赖移除成功", nil)
+}
+
+// GetDependencies 查询任务的前置与后继依赖。
+func (h *TaskHandler) GetDependencies(c *gin.Context) {
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
+
+	taskID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid task id")
+		return
+	}
+
+	data, err := h.taskService.GetDependencies(c.Request.Context(), userID, taskID)
+	if isTaskValidationError(err) {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if errors.Is(err, service.ErrTeamGone) {
+		response.Gone(c, "team has been deleted")
+		return
+	}
+	if errors.Is(err, repository.ErrForbidden) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
+	if errors.Is(err, repository.ErrNotFound) {
+		response.NotFound(c, "task not found")
+		return
+	}
+	if err != nil {
+		response.InternalError(c, "query dependencies failed")
+		return
+	}
+
+	response.Success(c, "query success", data)
+}
+
+// GetDependencyGraph 查询任务依赖图的所有祖先、后代节点与依赖边。
+func (h *TaskHandler) GetDependencyGraph(c *gin.Context) {
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
+
+	taskID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid task id")
+		return
+	}
+
+	data, err := h.taskService.GetDependencyGraph(c.Request.Context(), userID, taskID)
+	if isTaskValidationError(err) {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if errors.Is(err, repository.ErrForbidden) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
+	if errors.Is(err, repository.ErrNotFound) {
+		response.NotFound(c, "task not found")
+		return
+	}
+	if err != nil {
+		response.InternalError(c, "query dependency graph failed")
+		return
+	}
+
+	response.Success(c, "query success", data)
+}
+
 func getUserIDFromContext(c *gin.Context) (uint64, bool) {
 	v, exists := c.Get(middleware.ContextUserIDKey)
 	if !exists {
@@ -301,8 +505,13 @@ func isTaskValidationError(err error) bool {
 		errors.Is(err, service.ErrInvalidTaskPriority) ||
 		errors.Is(err, service.ErrInvalidTaskDeadline) ||
 		errors.Is(err, service.ErrInvalidTeamID) ||
+		errors.Is(err, service.ErrTeamIDImmutable) ||
 		errors.Is(err, service.ErrInvalidAssigneeID) ||
-		errors.Is(err, service.ErrAssigneeNotInTeam)
+		errors.Is(err, service.ErrAssigneeNotInTeam) ||
+		errors.Is(err, service.ErrInvalidTaskDependency) ||
+		errors.Is(err, service.ErrDependencyOnDoneTask) ||
+		errors.Is(err, service.ErrDependenciesNotDone) ||
+		errors.Is(err, service.ErrDoneSuccessorsExist)
 }
 
 func isTaskForbiddenError(err error) bool {

@@ -12,10 +12,17 @@ import (
 )
 
 type taskRepoMock struct {
-	listByTeamIDFn                func(ctx context.Context, teamID uint64, page, size int) ([]model.Task, int64, error)
-	listPersonalAndAssignedTeamFn func(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error)
-	getByIDFn                     func(ctx context.Context, id uint64) (*model.Task, error)
-	updateByIDFn                  func(ctx context.Context, task *model.Task) error
+	listByTeamIDFn                 func(ctx context.Context, teamID uint64, page, size int) ([]model.Task, int64, error)
+	listPersonalAndAssignedTeamFn  func(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error)
+	getByIDFn                      func(ctx context.Context, id uint64) (*model.Task, error)
+	getByIDForUserScopeFn          func(ctx context.Context, id, userID uint64) (*model.Task, error)
+	updateByIDFn                   func(ctx context.Context, task *model.Task) error
+	updateByIDForScopeFn           func(ctx context.Context, task *model.Task, userID uint64) error
+	updateStatusByScopeFn          func(ctx context.Context, taskID, userID uint64, status model.TaskStatus) error
+	deleteByIDForScopeFn           func(ctx context.Context, id, userID uint64) error
+	listIncompletePredecessorIDsFn func(ctx context.Context, taskID uint64) ([]uint64, error)
+	listIncompletePredecessorsFn   func(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error)
+	listDoneSuccessorsFn           func(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error)
 }
 
 func (m *taskRepoMock) Create(ctx context.Context, task *model.Task) error {
@@ -42,6 +49,15 @@ func (m *taskRepoMock) ListAll(ctx context.Context, page, size int) ([]model.Tas
 func (m *taskRepoMock) GetByIDAndUserID(ctx context.Context, id, userID uint64) (*model.Task, error) {
 	panic("unexpected call to GetByIDAndUserID")
 }
+func (m *taskRepoMock) GetByIDForUserScope(ctx context.Context, id, userID uint64) (*model.Task, error) {
+	if m.getByIDForUserScopeFn != nil {
+		return m.getByIDForUserScopeFn(ctx, id, userID)
+	}
+	if m.getByIDFn != nil {
+		return m.getByIDFn(ctx, id)
+	}
+	panic("unexpected call to GetByIDForUserScope")
+}
 func (m *taskRepoMock) GetByID(ctx context.Context, id uint64) (*model.Task, error) {
 	if m.getByIDFn == nil {
 		panic("unexpected call to GetByID")
@@ -57,8 +73,29 @@ func (m *taskRepoMock) UpdateByID(ctx context.Context, task *model.Task) error {
 	}
 	return m.updateByIDFn(ctx, task)
 }
+func (m *taskRepoMock) UpdateByIDForOwnerOrTeamManagerScope(ctx context.Context, task *model.Task, userID uint64) error {
+	if m.updateByIDForScopeFn != nil {
+		return m.updateByIDForScopeFn(ctx, task, userID)
+	}
+	if m.updateByIDFn != nil {
+		return m.updateByIDFn(ctx, task)
+	}
+	panic("unexpected call to UpdateByIDForOwnerOrTeamManagerScope")
+}
+func (m *taskRepoMock) UpdateStatusByIDForAssignedMemberScope(ctx context.Context, taskID, userID uint64, status model.TaskStatus) error {
+	if m.updateStatusByScopeFn != nil {
+		return m.updateStatusByScopeFn(ctx, taskID, userID, status)
+	}
+	panic("unexpected call to UpdateStatusByIDForAssignedMemberScope")
+}
 func (m *taskRepoMock) DeleteByIDAndUserID(ctx context.Context, id, userID uint64) error {
 	panic("unexpected call to DeleteByIDAndUserID")
+}
+func (m *taskRepoMock) DeleteByIDForOwnerOrTeamManagerScope(ctx context.Context, id, userID uint64) error {
+	if m.deleteByIDForScopeFn != nil {
+		return m.deleteByIDForScopeFn(ctx, id, userID)
+	}
+	panic("unexpected call to DeleteByIDForOwnerOrTeamManagerScope")
 }
 func (m *taskRepoMock) DeleteByID(ctx context.Context, id uint64) error {
 	panic("unexpected call to DeleteByID")
@@ -75,11 +112,58 @@ func (m *taskRepoMock) ListByUserIDWithSearch(ctx context.Context, userID uint64
 func (m *taskRepoMock) ListAllWithSearch(ctx context.Context, page, size int, search, orderBy string) ([]model.Task, int64, error) {
 	panic("unexpected call to ListAllWithSearch")
 }
+func (m *taskRepoMock) ClearAssigneeForTeamTasks(ctx context.Context, teamID, assigneeID uint64) error {
+	panic("unexpected call to ClearAssigneeForTeamTasks")
+}
+func (m *taskRepoMock) AddDependency(ctx context.Context, predecessorID, successorID uint64) (*model.TaskDependency, error) {
+	panic("unexpected call to AddDependency")
+}
+func (m *taskRepoMock) AddDependencyWithCycleCheck(ctx context.Context, predecessorID, successorID uint64) (*model.TaskDependency, error) {
+	panic("unexpected call to AddDependencyWithCycleCheck")
+}
+func (m *taskRepoMock) RemoveDependency(ctx context.Context, predecessorID, successorID uint64) error {
+	panic("unexpected call to RemoveDependency")
+}
+func (m *taskRepoMock) ListPredecessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error) {
+	panic("unexpected call to ListPredecessors")
+}
+func (m *taskRepoMock) ListSuccessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error) {
+	panic("unexpected call to ListSuccessors")
+}
+func (m *taskRepoMock) CountIncompletePredecessors(ctx context.Context, taskID uint64) (int64, error) {
+	panic("unexpected call to CountIncompletePredecessors")
+}
+func (m *taskRepoMock) ListIncompletePredecessorIDs(ctx context.Context, taskID uint64) ([]uint64, error) {
+	if m.listIncompletePredecessorIDsFn == nil {
+		panic("unexpected call to ListIncompletePredecessorIDs")
+	}
+	return m.listIncompletePredecessorIDsFn(ctx, taskID)
+}
+func (m *taskRepoMock) ListIncompletePredecessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error) {
+	if m.listIncompletePredecessorsFn == nil {
+		panic("unexpected call to ListIncompletePredecessors")
+	}
+	return m.listIncompletePredecessorsFn(ctx, taskID)
+}
+func (m *taskRepoMock) ListDoneSuccessors(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error) {
+	if m.listDoneSuccessorsFn == nil {
+		panic("unexpected call to ListDoneSuccessors")
+	}
+	return m.listDoneSuccessorsFn(ctx, taskID)
+}
+func (m *taskRepoMock) HasDependencyPath(ctx context.Context, fromID, toID uint64) (bool, error) {
+	panic("unexpected call to HasDependencyPath")
+}
+func (m *taskRepoMock) GetDependencyGraph(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, []model.TaskDependencyLink, error) {
+	panic("unexpected call to GetDependencyGraph")
+}
 
 type teamRepoForTaskMock struct {
-	getByIDFn       func(ctx context.Context, teamID uint64) (*model.Team, error)
-	isMemberFn      func(ctx context.Context, teamID, userID uint64) (bool, error)
-	getMemberRoleFn func(ctx context.Context, teamID, userID uint64) (model.TeamRole, error)
+	getByIDFn               func(ctx context.Context, teamID uint64) (*model.Team, error)
+	getByIDForMemberScopeFn func(ctx context.Context, teamID, userID uint64) (*model.Team, error)
+	isMemberFn              func(ctx context.Context, teamID, userID uint64) (bool, error)
+	getMemberRoleFn         func(ctx context.Context, teamID, userID uint64) (model.TeamRole, error)
+	isDeletedFn             func(ctx context.Context, teamID uint64) (bool, error)
 }
 
 func (m *teamRepoForTaskMock) Create(ctx context.Context, team *model.Team) error {
@@ -93,6 +177,28 @@ func (m *teamRepoForTaskMock) GetByID(ctx context.Context, teamID uint64) (*mode
 		panic("unexpected call to GetByID")
 	}
 	return m.getByIDFn(ctx, teamID)
+}
+func (m *teamRepoForTaskMock) GetByIDForMemberScope(ctx context.Context, teamID, userID uint64) (*model.Team, error) {
+	if m.getByIDForMemberScopeFn != nil {
+		return m.getByIDForMemberScopeFn(ctx, teamID, userID)
+	}
+	if m.isMemberFn != nil {
+		isMember, err := m.isMemberFn(ctx, teamID, userID)
+		if err != nil {
+			return nil, err
+		}
+		if !isMember {
+			return nil, repository.ErrNotFound
+		}
+		return &model.Team{ID: teamID}, nil
+	}
+	if m.getByIDFn != nil {
+		return m.getByIDFn(ctx, teamID)
+	}
+	panic("unexpected call to GetByIDForMemberScope")
+}
+func (m *teamRepoForTaskMock) GetByName(ctx context.Context, name string) (*model.Team, error) {
+	panic("unexpected call to GetByName")
 }
 func (m *teamRepoForTaskMock) UpdateName(ctx context.Context, teamID uint64, name string) error {
 	panic("unexpected call to UpdateName")
@@ -121,6 +227,15 @@ func (m *teamRepoForTaskMock) GetMemberRole(ctx context.Context, teamID, userID 
 func (m *teamRepoForTaskMock) ListMembers(ctx context.Context, teamID uint64) ([]model.TeamMemberDetail, error) {
 	panic("unexpected call to ListMembers")
 }
+func (m *teamRepoForTaskMock) TransferOwnership(ctx context.Context, teamID, oldOwnerID, newOwnerID uint64) error {
+	panic("unexpected call to TransferOwnership")
+}
+func (m *teamRepoForTaskMock) IsDeleted(ctx context.Context, teamID uint64) (bool, error) {
+	if m.isDeletedFn != nil {
+		return m.isDeletedFn(ctx, teamID)
+	}
+	return false, nil
+}
 
 type taskUserRepoStub struct{}
 
@@ -145,6 +260,9 @@ func (s *taskAssignRepoStub) Create(ctx context.Context, req *model.TaskAssignme
 func (s *taskAssignRepoStub) GetByID(ctx context.Context, id uint64) (*model.TaskAssignmentRequest, error) {
 	panic("unexpected call")
 }
+func (s *taskAssignRepoStub) GetByIDForAssigneeScope(ctx context.Context, id, assigneeID uint64) (*model.TaskAssignmentRequest, error) {
+	panic("unexpected call")
+}
 func (s *taskAssignRepoStub) GetPendingByTaskAndAssignee(ctx context.Context, taskID, assigneeID uint64) (*model.TaskAssignmentRequest, error) {
 	panic("unexpected call")
 }
@@ -152,6 +270,12 @@ func (s *taskAssignRepoStub) ListPendingByAssignee(ctx context.Context, assignee
 	panic("unexpected call")
 }
 func (s *taskAssignRepoStub) UpdateStatus(ctx context.Context, id uint64, status model.InvitationStatus) error {
+	panic("unexpected call")
+}
+func (s *taskAssignRepoStub) UpdatePendingStatusForAssigneeScope(ctx context.Context, id, assigneeID uint64, status model.InvitationStatus) error {
+	panic("unexpected call")
+}
+func (s *taskAssignRepoStub) AcceptPendingForAssigneeScope(ctx context.Context, id, assigneeID uint64) error {
 	panic("unexpected call")
 }
 func (s *taskAssignRepoStub) DeclinePendingByTaskID(ctx context.Context, taskID uint64) error {
@@ -248,6 +372,103 @@ func TestTaskServiceUpdateRejectsMemberEditingNonStatusFields(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrMemberStatusOnly)
+}
+
+func TestTaskServiceUpdateRejectsTeamIDChangeForPersonalTask(t *testing.T) {
+	newTeamID := uint64(77)
+	svc := NewTaskService(
+		&taskRepoMock{
+			getByIDFn: func(ctx context.Context, id uint64) (*model.Task, error) {
+				return &model.Task{
+					ID:     id,
+					UserID: 9,
+					Status: model.TaskStatusTODO,
+				}, nil
+			},
+		},
+		&teamRepoForTaskMock{},
+		&taskUserRepoStub{},
+		&taskAssignRepoStub{},
+	)
+
+	_, err := svc.Update(context.Background(), 9, 101, UpdateTaskRequest{
+		TeamID: &newTeamID,
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTeamIDImmutable)
+}
+
+func TestTaskServiceUpdateRejectsTeamIDChangeForTeamTask(t *testing.T) {
+	oldTeamID := uint64(5)
+	newTeamID := uint64(8)
+	svc := NewTaskService(
+		&taskRepoMock{
+			getByIDFn: func(ctx context.Context, id uint64) (*model.Task, error) {
+				return &model.Task{
+					ID:     id,
+					UserID: 2,
+					TeamID: &oldTeamID,
+					Status: model.TaskStatusTODO,
+				}, nil
+			},
+		},
+		&teamRepoForTaskMock{
+			getMemberRoleFn: func(ctx context.Context, teamID, userID uint64) (model.TeamRole, error) {
+				assert.Equal(t, oldTeamID, teamID)
+				assert.Equal(t, uint64(10), userID)
+				return model.TeamRoleOwner, nil
+			},
+		},
+		&taskUserRepoStub{},
+		&taskAssignRepoStub{},
+	)
+
+	_, err := svc.Update(context.Background(), 10, 102, UpdateTaskRequest{
+		TeamID: &newTeamID,
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTeamIDImmutable)
+}
+
+func TestTaskServiceUpdateRejectsRollbackWhenDoneSuccessorsExist(t *testing.T) {
+	taskID := uint64(55)
+	teamID := uint64(5)
+	svc := NewTaskService(
+		&taskRepoMock{
+			getByIDFn: func(ctx context.Context, id uint64) (*model.Task, error) {
+				assert.Equal(t, taskID, id)
+				return &model.Task{
+					ID:     taskID,
+					UserID: 1,
+					TeamID: &teamID,
+					Status: model.TaskStatusDONE,
+				}, nil
+			},
+			listDoneSuccessorsFn: func(ctx context.Context, id uint64) ([]model.TaskDependencyNode, error) {
+				assert.Equal(t, taskID, id)
+				return []model.TaskDependencyNode{
+					{ID: 101, Title: "done child", Status: model.TaskStatusDONE},
+				}, nil
+			},
+		},
+		&teamRepoForTaskMock{
+			getMemberRoleFn: func(ctx context.Context, gotTeamID, gotUserID uint64) (model.TeamRole, error) {
+				assert.Equal(t, teamID, gotTeamID)
+				assert.Equal(t, uint64(7), gotUserID)
+				return model.TeamRoleOwner, nil
+			},
+		},
+		&taskUserRepoStub{},
+		&taskAssignRepoStub{},
+	)
+
+	doing := "DOING"
+	_, err := svc.Update(context.Background(), 7, taskID, UpdateTaskRequest{Status: &doing})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDoneSuccessorsExist)
+	var rollbackErr *DoneSuccessorsError
+	assert.ErrorAs(t, err, &rollbackErr)
+	assert.Equal(t, []uint64{101}, rollbackErr.IDs)
 }
 
 func uint64Ptr(v uint64) *uint64 {

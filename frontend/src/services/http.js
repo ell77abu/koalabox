@@ -1,11 +1,6 @@
 import axios from 'axios';
 import { authStore } from '../stores/auth';
 
-/**
- * API 基础 URL 配置
- * - 开发环境：使用不需要 baseURL（因为 Vite 代理会处理）
- * - 生产环境：使用完整的服务器地址（例如 https://api.example.com）
- */
 const isProduction = import.meta.env.PROD;
 const baseURL = isProduction ? import.meta.env.VITE_API_BASE_URL : '/api/v1';
 
@@ -23,9 +18,8 @@ http.interceptors.response.use(
   (error) => {
     const status = error?.response?.status;
     const requestUrl = String(error?.config?.url || '');
-
-    // Ignore auth pages' own 401 handling.
     const isAuthRequest = requestUrl.includes('/auth/login') || requestUrl.includes('/auth/register');
+
     if (status === 401 && !isAuthRequest) {
       authStore.clearAuth();
       if (!window.location.pathname.startsWith('/login')) {

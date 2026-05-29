@@ -5,6 +5,7 @@ import RegisterView from '../views/RegisterView.vue';
 import TaskView from '../views/TaskView.vue';
 import ProfileView from '../views/ProfileView.vue';
 import CreateTaskView from '../views/CreateTaskView.vue';
+import TaskDependencyView from '../views/TaskDependencyView.vue';
 import ChangePasswordView from '../views/ChangePasswordView.vue';
 import TeamsView from '../views/TeamsView.vue';
 import CreateTeamView from '../views/CreateTeamView.vue';
@@ -38,6 +39,12 @@ const routes = [
     path: '/tasks/create',
     name: 'create-task',
     component: CreateTaskView,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/tasks/:id/dependencies',
+    name: 'task-dependencies',
+    component: TaskDependencyView,
     meta: { requiresAuth: true },
   },
   {

@@ -35,28 +35,35 @@
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { createTeamApi } from '../services/team';
+import { getApiErrorMessage, getApiFailureMessage } from '../utils/apiError';
 
 const router = useRouter();
 const submitting = ref(false);
 const newTeamName = ref('');
 const createError = ref('');
+const TEAM_NAME_MAX_LENGTH = 100;
+const TEAM_NAME_INVALID_MESSAGE = '团队名称不能为空且不能超过 100 个字符';
 
 const onCreateTeam = async () => {
-  if (!newTeamName.value) return;
+  const teamName = newTeamName.value.trim();
+  if (!teamName || teamName.length > TEAM_NAME_MAX_LENGTH) {
+    createError.value = TEAM_NAME_INVALID_MESSAGE;
+    return;
+  }
   
   submitting.value = true;
   createError.value = '';
 
   try {
-    const res = await createTeamApi({ name: newTeamName.value });
+    const res = await createTeamApi({ name: teamName });
     if (res.data.code === 0) {
       // 创建成功后自动跳回团队列表
       router.push('/teams');
     } else {
-      createError.value = res.data.message || '创建失败';
+      createError.value = getApiFailureMessage(res, '创建团队失败', '创建失败');
     }
   } catch (error) {
-    createError.value = error.response?.data?.message || '创建团队请求失败';
+    createError.value = getApiErrorMessage(error, '创建团队失败');
   } finally {
     submitting.value = false;
   }

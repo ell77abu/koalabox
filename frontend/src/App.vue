@@ -63,6 +63,7 @@ import { RouterView, RouterLink, useRoute } from 'vue-router';
 import { authStore } from './stores/auth';
 // 引入双重 API
 import { getInvitationsApi, getAssignmentRequestsApi } from './services/team';
+import { getApiErrorMessage } from './utils/apiError';
 
 const route = useRoute();
 const avatarUrl = computed(
@@ -104,17 +105,21 @@ const checkPendingNotifications = async () => {
     if (invRes.status === 'fulfilled') {
       const invList = Array.isArray(invRes.value.data) ? invRes.value.data : (invRes.value.data?.data || []);
       count += invList.filter(inv => inv.status === 'PENDING').length;
+    } else {
+      console.warn(getApiErrorMessage(invRes.reason, '获取团队邀请角标失败'));
     }
 
     // 2. 累加任务指派里的 PENDING 数量
     if (assignRes.status === 'fulfilled') {
       const assignList = Array.isArray(assignRes.value.data) ? assignRes.value.data : (assignRes.value.data?.data || []);
       count += assignList.filter(assign => assign.status === 'PENDING').length;
+    } else {
+      console.warn(getApiErrorMessage(assignRes.reason, '获取任务指派角标失败'));
     }
 
     pendingCount.value = count;
   } catch (error) {
-    console.error('获取全局通知角标失败', error);
+    console.error(getApiErrorMessage(error, '获取全局通知角标失败'), error);
   }
 };
 

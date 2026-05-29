@@ -35,6 +35,8 @@
         </div>
       </header>
 
+      <p v-if="teamLoadError" class="error-banner">{{ teamLoadError }}</p>
+
       <div class="list-section">
         <div class="list-header">
           <h2>任务列表</h2>
@@ -52,12 +54,20 @@
           <p>加载中...</p>
         </div>
 
+        <div v-else-if="loadError" class="empty-state error-state">
+          <p>{{ loadError }}</p>
+          <div class="error-actions">
+            <button class="btn btn-small btn-primary" type="button" @click="loadTasks">重试</button>
+          </div>
+        </div>
+
         <!-- 只有当账户里【彻底一个任务都没有】时，才显示全局大空状态 -->
-        <div v-else-if="taskStore.tasks.length === 0" class="empty-state">
+        <div v-else-if="taskStore.tasks.value.length === 0" class="empty-state">
           <p>暂无任务，创建一个新任务开始吧！</p>
         </div>
 
         <div v-else class="task-list">
+          <!-- ==================== 待办任务区 ==================== -->
           <section class="task-group">
             <div class="task-group-header">
               <div>
@@ -66,9 +76,8 @@
               <div class="task-group-actions">
                 <!-- 筛选下拉控件 -->
                 <div class="sort-control">
-                  <span class="sort-fab" aria-hidden="true" style="background: #10b981;"> <!-- 用绿色区分筛选 -->
+                  <span class="sort-fab" aria-hidden="true" style="background: #10b981;">
                     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                      <!-- 漏斗图标 -->
                       <path d="M3 4c0-.55.45-1 1-1h16c.55 0 1 .45 1 1v1.59c0 .27-.11.52-.29.71L15 13v6c0 .55-.45 1-1 1h-4c-.55 0-1-.45-1-1v-6L3.29 6.3A.996.996 0 0 1 3 5.59V4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                   </span>
@@ -144,16 +153,17 @@
               </div>
             </div>
 
-            <!-- 当前分类/搜索下，一个任务都没 -->
+            <!-- 情况1：当前分类/搜索下，一个任务都没 -->
             <div v-if="displayedTasks.length === 0" class="sub-empty-state">
               <p v-if="isSearching">未找到包含关键词的匹配任务。</p>
               <p v-else>当前分类下暂无任务。</p>
             </div>
 
             <!-- 有任务，且有【未完成】的任务 -->
-            <div v-else-if="incompleteTasks.length > 0" class="task-group-list">
-              <div
-                v-for="task in incompleteTasks"
+            <div v-else-if="incompleteTasks.length > 0">
+              <div class="task-group-list">
+                <div
+                  v-for="task in paginatedActiveTasks"
                 :key="task.id"
                 class="task-item"
                 :class="{
@@ -172,9 +182,13 @@
                 <div class="task-main">
                   <div class="task-title-section">
                     <h3>{{ task.title }}</h3>
-                    <span v-if="task.team_id" class="priority-badge" style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;">
-                      👥 团队任务
-                    </span>
+                    <RouterLink
+                      v-if="!isPersonalTask(task)"
+                      class="priority-badge team-link-badge"
+                      :to="`/teams/${task.team_id}`"
+                    >
+                      👥 {{ getTeamName(task) }}
+                    </RouterLink>
                     <span class="status-badge" :class="`status-${task.status.toLowerCase()}`">
                       {{ statusLabel(task.status) }}
                     </span>
@@ -200,13 +214,21 @@
 
                 <div class="task-actions">
                   <button
+                    v-if="canUpdateTaskStatus(task)"
                     class="btn btn-small btn-complete"
                     @click="markTaskDone(task)"
                     :disabled="updatingId === task.id"
                   >
                     {{ updatingId === task.id ? '完成中...' : '完成任务' }}
                   </button>
+                  <RouterLink
+                    class="btn btn-small btn-dependency"
+                    :to="`/tasks/${task.id}/dependencies`"
+                  >
+                    依赖详情
+                  </RouterLink>
                   <button
+                    v-if="canUpdateTaskStatus(task)"
                     class="btn btn-small btn-edit"
                     @click="startEdit(task)"
                     :disabled="updatingId === task.id"
@@ -214,14 +236,21 @@
                     编辑
                   </button>
                   <button
-                    v-if="canEditTaskDetails(task)"
+                    v-if="canDeleteTask(task)"
                     class="btn btn-small btn-danger"
-                    @click="onDeleteTask(task.id)"
+                    @click="onDeleteTask(task)"
                     :disabled="deletingId === task.id"
                   >
                     {{ deletingId === task.id ? '删除中...' : '删除' }}
                   </button>
                 </div>
+              </div>
+            </div>
+
+              <div v-if="activeTotalPages > 1" class="pagination">
+                <button class="btn btn-outline btn-small" :disabled="activePage === 1" @click="activePage--">上一页</button>
+                <span class="page-info">第 {{ activePage }} 页 / 共 {{ activeTotalPages }} 页</span>
+                <button class="btn btn-outline btn-small" :disabled="activePage === activeTotalPages" @click="activePage++">下一页</button>
               </div>
             </div>
 
@@ -231,6 +260,7 @@
             </div>
           </section>
 
+          <!-- ==================== 已完成历史区 ==================== -->
           <section class="task-group task-group-history">
             <button
               type="button"
@@ -247,73 +277,93 @@
             </button>
 
             <div v-if="showCompletedHistory">
-              <div v-if="completedTasks.length" class="task-group-list">
-                <div
-                  v-for="task in completedTasks"
-                  :key="task.id"
-                  class="task-item task-item-done"
-                  :class="{
-                    'task-item-celebrating': celebrationTaskId === task.id,
-                    'task-item-arrived': arrivedTaskId === task.id,
-                  }"
-                >
-                  <div v-if="celebrationTaskId === task.id" class="confetti-burst" aria-hidden="true">
-                    <span
-                      v-for="piece in confettiPieces"
-                      :key="`${task.id}-${piece}`"
-                      class="confetti-piece"
-                      :style="{ '--piece-index': piece }"
-                    ></span>
-                  </div>
-                  <div class="task-main">
-                    <div class="task-title-section">
-                      <h3>{{ task.title }}</h3>
-                      <span v-if="task.team_id" class="priority-badge" style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;">
-                        👥 团队任务
-                      </span>
-                      <span class="status-badge" :class="`status-${task.status.toLowerCase()}`">
-                        {{ statusLabel(task.status) }}
-                      </span>
+              <div v-if="completedTasks.length > 0">
+                <div class="task-group-list">
+                  <div
+                    v-for="task in paginatedHistoryTasks"
+                    :key="task.id"
+                    class="task-item task-item-done"
+                    :class="{
+                      'task-item-celebrating': celebrationTaskId === task.id,
+                      'task-item-arrived': arrivedTaskId === task.id,
+                    }"
+                  >
+                    <div v-if="celebrationTaskId === task.id" class="confetti-burst" aria-hidden="true">
                       <span
-                        class="priority-badge"
-                        :class="`priority-${task.priority}`"
+                        v-for="piece in confettiPieces"
+                        :key="`${task.id}-${piece}`"
+                        class="confetti-piece"
+                        :style="{ '--piece-index': piece }"
+                      ></span>
+                    </div>
+                    <div class="task-main">
+                      <div class="task-title-section">
+                        <h3>{{ task.title }}</h3>
+                        <RouterLink
+                          v-if="!isPersonalTask(task)"
+                          class="priority-badge team-link-badge"
+                          :to="`/teams/${task.team_id}`"
+                        >
+                          👥 {{ getTeamName(task) }}
+                        </RouterLink>
+                        <span class="status-badge" :class="`status-${task.status.toLowerCase()}`">
+                          {{ statusLabel(task.status) }}
+                        </span>
+                        <span
+                          class="priority-badge"
+                          :class="`priority-${task.priority}`"
+                        >
+                          {{ priorityLabel(task.priority) }}
+                        </span>
+                      </div>
+
+                      <p v-if="task.description" class="task-description">{{ task.description }}</p>
+
+                      <div class="task-meta">
+                        <span v-if="task.deadline" class="meta-item">
+                          <span class="meta-label">截止时间：</span>{{ formatDate(task.deadline) }}
+                        </span>
+                        <span class="meta-item">
+                          <span class="meta-label">创建时间：</span>{{ formatDate(task.created_at) }}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div class="task-actions">
+                      <RouterLink
+                        class="btn btn-small btn-dependency"
+                        :to="`/tasks/${task.id}/dependencies`"
                       >
-                        {{ priorityLabel(task.priority) }}
-                      </span>
-                    </div>
-
-                    <p v-if="task.description" class="task-description">{{ task.description }}</p>
-
-                    <div class="task-meta">
-                      <span v-if="task.deadline" class="meta-item">
-                        <span class="meta-label">截止时间：</span>{{ formatDate(task.deadline) }}
-                      </span>
-                      <span class="meta-item">
-                        <span class="meta-label">创建时间：</span>{{ formatDate(task.created_at) }}
-                      </span>
+                        依赖详情
+                      </RouterLink>
+                      <button
+                        class="btn btn-small btn-edit"
+                        @click="startEdit(task)"
+                        :disabled="updatingId === task.id"
+                      >
+                        编辑
+                      </button>
+                      <button
+                        v-if="canEditTaskDetails(task)"
+                        class="btn btn-small btn-danger"
+                        @click="onDeleteTask(task)"
+                        :disabled="deletingId === task.id"
+                      >
+                        {{ deletingId === task.id ? '删除中...' : '删除' }}
+                      </button>
                     </div>
                   </div>
+                </div>
 
-                  <div class="task-actions">
-                    <button
-                      class="btn btn-small btn-edit"
-                      @click="startEdit(task)"
-                      :disabled="updatingId === task.id"
-                    >
-                      编辑
-                    </button>
-                    <button
-                      v-if="canEditTaskDetails(task)"
-                      class="btn btn-small btn-danger"
-                      @click="onDeleteTask(task.id)"
-                      :disabled="deletingId === task.id"
-                    >
-                      {{ deletingId === task.id ? '删除中...' : '删除' }}
-                    </button>
-                  </div>
+                <!-- 历史分页控件也安全包裹 -->
+                <div v-if="historyTotalPages > 1" class="pagination">
+                  <button class="btn btn-outline btn-small" :disabled="historyPage === 1" @click="historyPage--">上一页</button>
+                  <span class="page-info">第 {{ historyPage }} 页 / 共 {{ historyTotalPages }} 页</span>
+                  <button class="btn btn-outline btn-small" :disabled="historyPage === historyTotalPages" @click="historyPage++">下一页</button>
                 </div>
               </div>
 
+              <!-- 当且仅当没有任何已完成任务时，才显示这句话 -->
               <div v-else class="sub-empty-state">
                 <p>还没有已完成的历史任务。</p>
               </div>
@@ -346,17 +396,19 @@
               * 作为该团队成员，您仅有权限修改此任务的执行状态。
             </p>
 
-            <select v-model="editingTask.status" class="form-input">
-              <option value="TODO">状态：待做</option>
-              <option value="DOING">状态：进行中</option>
-              <option value="DONE">状态：已完成</option>
-            </select>
+            <div class="form-row">
+              <select v-model="editingTask.status" class="form-input">
+                <option value="TODO">状态：待做</option>
+                <option value="DOING">状态：进行中</option>
+                <option value="DONE">状态：已完成</option>
+              </select>
 
-            <select v-model="editingTask.priority" class="form-input" :disabled="!canEditTaskDetails(editingTask)">
-              <option value="1">优先级：低</option>
-              <option value="2">优先级：中</option>
-              <option value="3">优先级：高</option>
-            </select>
+              <select v-model="editingTask.priority" class="form-input" :disabled="!canEditTaskDetails(editingTask)">
+                <option value="1">优先级：低</option>
+                <option value="2">优先级：中</option>
+                <option value="3">优先级：高</option>
+              </select>
+            </div>
 
             <input
               v-model.trim="editingTask.deadline"
@@ -364,6 +416,22 @@
               class="form-input date-input"
               :disabled="!canEditTaskDetails(editingTask)"
             />
+
+            <div v-if="isPersonalTask(editingTask)" class="dependency-section">
+              <label class="section-label" style="font-size: 0.9rem; font-weight: 600; color: #475569; display: block; margin-bottom: 0.5rem;">
+                设置前置依赖 (仅限个人任务)
+              </label>
+              <div class="checkbox-list" style="display: flex; flex-direction: column; gap: 0.5rem; max-height: 160px; overflow-y: auto; padding: 0.75rem; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 0.5rem;">
+                <label v-for="t in availablePersonalTasks" :key="t.id" class="checkbox-item" style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #1e293b; cursor: pointer;">
+                  <input type="checkbox" :value="t.id" v-model="editingTask.predecessor_ids" style="accent-color: #3b82f6; width: 16px; height: 16px; cursor: pointer;" />
+                  {{ t.title }}
+                  <span class="status-badge" :class="`status-${t.status.toLowerCase()}`" style="transform: scale(0.85); transform-origin: left;">
+                    {{ statusLabel(t.status) }}
+                  </span>
+                </label>
+                <span v-if="availablePersonalTasks.length === 0" style="font-size: 0.85rem; color: #94a3b8;">暂无可依赖的其他个人任务</span>
+              </div>
+            </div>
 
             <div class="modal-actions">
               <button type="button" class="btn btn-outline" @click="cancelEdit">取消</button>
@@ -390,13 +458,27 @@ import {
   createTaskApi,
   updateTaskApi,
   deleteTaskApi,
+  getTaskDependenciesApi,
+  addTaskDependencyApi,
+  removeTaskDependencyApi
 } from '../services/task';
+import {
+  getApiErrorMessage,
+  getApiFailureMessage,
+  getUnresolvedDependenciesMessage,
+} from '../utils/apiError';
 
-// 👇 新增：引入团队数据与接口
+// 团队数据与接口
 import { teamStore } from '../stores/team';
 import { getTeamsApi } from '../services/team';
 
 const router = useRouter();
+const isSystemAdmin = computed(() => Number(authStore.level.value) === 1);
+
+const isPersonalTask = (task) => {
+  const teamId = task?.team_id;
+  return teamId === null || teamId === undefined || teamId === '' || teamId === 0 || teamId === '0';
+};
 
 // === Lab2 权限控制逻辑 ===
 // 进页面时拉取用户的团队列表
@@ -405,20 +487,41 @@ const fetchUserTeams = async () => {
     const res = await getTeamsApi();
     if (res.data.code === 0) {
       teamStore.setTeams(res.data.data.list || []);
+      teamLoadError.value = '';
+    } else {
+      teamLoadError.value = getApiFailureMessage(res, '加载团队列表失败');
     }
   } catch (err) {
-    console.error('加载团队列表失败', err);
+    teamLoadError.value = getApiErrorMessage(err, '加载团队列表失败');
+    console.error(teamLoadError.value, err);
   }
 };
 
 // 判断当前用户在这个任务中，是否有高级编辑权限（修改标题、删除等）
 const canEditTaskDetails = (task) => {
-  if (!task.team_id) return true; // 个人任务完全放权
+  if (isPersonalTask(task)) return !isSystemAdmin.value;
   
-  const team = teamStore.teams.value.find(t => t.team_id === task.team_id);
+  const teamId = Number(task.team_id);
+  const team = teamStore.teams.value.find(t => Number(t.team_id) === teamId);
   const role = team ? team.role : 'Member'; 
   
   return role === 'Owner' || role === 'Admin';
+};
+
+const canDeleteTask = (task) => {
+  return isSystemAdmin.value || canEditTaskDetails(task);
+};
+
+const canUpdateTaskStatus = (task) => {
+  if (canEditTaskDetails(task)) return true;
+  if (isSystemAdmin.value) return false;
+  return !isPersonalTask(task);
+};
+
+const getTeamName = (task) => {
+  const teamId = Number(task?.team_id);
+  const team = teamStore.teams.value.find((item) => Number(item.team_id) === teamId);
+  return team?.name || '团队任务';
 };
 // === Lab2 逻辑结束 ===
 
@@ -438,11 +541,27 @@ const editingTask = reactive({
   status: 'TODO',
   priority: '2',
   deadline: '',
-  team_id: null, // 👇 新增
+  team_id: null,
+  predecessor_ids: [] // 用于绑定弹窗里的多选框（用于依赖设置）
+});
+
+//  记录打开弹窗时的原始依赖，用于比对增删
+const editingDependencies = ref([]); 
+
+// 过滤出“自己的其他个人任务”作为可选依赖池
+const availablePersonalTasks = computed(() => {
+  return taskStore.tasks.value.filter(t => isPersonalTask(t) && t.id !== editingTask.id);
 });
 
 // 状态管理
+const findTaskTitleById = (id) => {
+  const task = taskStore.tasks.value.find((item) => Number(item.id) === Number(id));
+  return task?.title || '';
+};
+
 const loading = ref(false);
+const loadError = ref('');
+const teamLoadError = ref('');
 const creatingTask = ref(false);
 const updatingId = ref(null);
 const deletingId = ref(null);
@@ -524,9 +643,9 @@ const displayedTasks = computed(() => {
 
   // 拦截层：按个人/团队筛选
   if (filterOption.value === 'personal') {
-    list = list.filter(task => !task.team_id); // 没有 team_id 的是个人任务
+    list = list.filter(isPersonalTask); // 没有 team_id 的是个人任务
   } else if (filterOption.value === 'team') {
-    list = list.filter(task => !!task.team_id); // 有 team_id 的是团队任务
+    list = list.filter(task => !isPersonalTask(task)); // 有 team_id 的是团队任务
   }
 
   // 拦截层：按关键词搜索
@@ -569,6 +688,38 @@ const completedTasks = computed(() =>
   displayedTasks.value.filter((task) => task.status === 'DONE')
 );
 
+// 待办任务分页
+const activePage = ref(1);
+const activePageSize = ref(8); // 每页显示 8 个
+const paginatedActiveTasks = computed(() => {
+  const start = (activePage.value - 1) * activePageSize.value;
+  return incompleteTasks.value.slice(start, start + activePageSize.value);
+});
+const activeTotalPages = computed(() => Math.ceil(incompleteTasks.value.length / activePageSize.value) || 1);
+
+// 历史任务分页
+const historyPage = ref(1);
+const historyPageSize = ref(8); // 每页显示 8 个
+const paginatedHistoryTasks = computed(() => {
+  const start = (historyPage.value - 1) * historyPageSize.value;
+  return completedTasks.value.slice(start, start + historyPageSize.value);
+});
+const historyTotalPages = computed(() => Math.ceil(completedTasks.value.length / historyPageSize.value) || 1);
+
+// 监听搜索、过滤条件变化，自动回到第一页
+watch([searchQuery, filterOption, sortOption], () => {
+  activePage.value = 1;
+  historyPage.value = 1;
+});
+
+// 监听自动退页 (如果删除了当前页最后一个任务，自动退回上一页)
+watch(paginatedActiveTasks, (newVal) => {
+  if (newVal.length === 0 && activePage.value > 1) activePage.value--;
+});
+watch(paginatedHistoryTasks, (newVal) => {
+  if (newVal.length === 0 && historyPage.value > 1) historyPage.value--;
+});
+
 // 退出登录
 const logout = async () => {
   taskStore.clearTasks();
@@ -579,6 +730,7 @@ const logout = async () => {
 // 加载任务列表 - 一次加载所有任务
 const loadTasks = async () => {
   loading.value = true;
+  loadError.value = '';
   taskStore.setLoading(true);
   try {
     // 一次加载所有任务，使用大的 pageSize
@@ -589,9 +741,13 @@ const loadTasks = async () => {
       taskStore.setTasks(list);
       const total = Number.isFinite(pageData.total) ? pageData.total : list.length;
       taskStore.setTotal(total);
+    } else {
+      loadError.value = getApiFailureMessage(response, '加载任务失败');
+      taskStore.clearTasks();
     }
   } catch (error) {
-    console.error('加载任务失败:', error);
+    loadError.value = getApiErrorMessage(error, '加载任务失败');
+    console.error(loadError.value, error);
   } finally {
     loading.value = false;
     taskStore.setLoading(false);
@@ -626,10 +782,10 @@ const onCreateTask = async () => {
       // 刷新列表
       await loadTasks();
     } else {
-      createError.value = response.data.message || '创建失败';
+      createError.value = getApiFailureMessage(response, '创建任务失败', '创建失败');
     }
   } catch (error) {
-    createError.value = error.response?.data?.message || '创建任务失败，请重试';
+    createError.value = getApiErrorMessage(error, '创建任务失败');
   } finally {
     creatingTask.value = false;
   }
@@ -637,6 +793,11 @@ const onCreateTask = async () => {
 
 // 更新任务
 const onUpdateTask = async () => {
+  if (!canUpdateTaskStatus(editingTask)) {
+    updateError.value = '无权限更新该任务';
+    return;
+  }
+
   updatingId.value = editingTask.id;
   updateError.value = '';
   try {
@@ -652,13 +813,45 @@ const onUpdateTask = async () => {
 
     const response = await updateTaskApi(editingTask.id, payload);
     if (response.data.code === 0) {
+      if (isPersonalTask(editingTask)) {
+        // 算出用户勾选了哪些新任务，取消了哪些老任务
+        const toAdd = editingTask.predecessor_ids.filter(id => !editingDependencies.value.includes(id));
+        const toRemove = editingDependencies.value.filter(id => !editingTask.predecessor_ids.includes(id));
+        const dependencyErrors = [];
+
+        for (const id of toAdd) {
+          try {
+            await addTaskDependencyApi(editingTask.id, id);
+          } catch (err) {
+            const title = findTaskTitleById(id) || `ID ${id}`;
+            dependencyErrors.push(getApiErrorMessage(err, `添加前置依赖「${title}」失败`));
+          }
+        }
+        for (const id of toRemove) {
+          try {
+            await removeTaskDependencyApi(editingTask.id, id);
+          } catch (err) {
+            const title = findTaskTitleById(id) || `ID ${id}`;
+            dependencyErrors.push(getApiErrorMessage(err, `移除前置依赖「${title}」失败`));
+          }
+        }
+
+        if (dependencyErrors.length > 0) {
+          updateError.value = dependencyErrors.join('；');
+          return;
+        }
+      }
       cancelEdit();
       await loadTasks();
     } else {
-      updateError.value = response.data.message || '更新失败';
+      updateError.value = getApiFailureMessage(response, '更新任务失败', '更新失败');
     }
   } catch (error) {
-    updateError.value = error.response?.data?.message || '更新任务失败，请重试';
+    if (error.response?.status === 409) {
+      updateError.value = getUnresolvedDependenciesMessage(error, findTaskTitleById, '更新任务失败');
+    } else {
+      updateError.value = getApiErrorMessage(error, '更新任务失败');
+    }
   } finally {
     updatingId.value = null;
   }
@@ -687,6 +880,10 @@ const moveTaskToCompleted = (taskId) => {
 
 const markTaskDone = async (task) => {
   if (task.status === 'DONE') {
+    return;
+  }
+  if (!canUpdateTaskStatus(task)) {
+    alert('无权限更新该任务');
     return;
   }
 
@@ -727,17 +924,28 @@ const markTaskDone = async (task) => {
         }, 850);
       }, 950);
     } else {
-      alert(response.data.message || '更新失败');
+      alert(getApiFailureMessage(response, '完成任务失败', '更新失败'));
     }
   } catch (error) {
-    alert(error.response?.data?.message || '完成任务失败，请重试');
+    // 新增：拦截 409 状态码，提示前置任务未完成
+    if (error.response?.status === 409) {
+      alert(getUnresolvedDependenciesMessage(error, findTaskTitleById, '完成任务失败'));
+    } else {
+      alert(getApiErrorMessage(error, '完成任务失败'));
+    }
   } finally {
     updatingId.value = null;
   }
 };
 
 // 删除任务
-const onDeleteTask = async (id) => {
+const onDeleteTask = async (task) => {
+  if (!canDeleteTask(task)) {
+    alert('无权限删除该任务');
+    return;
+  }
+
+  const id = task.id;
   if (!window.confirm('确定要删除这个任务吗？')) {
     return;
   }
@@ -748,24 +956,47 @@ const onDeleteTask = async (id) => {
     if (response.data.code === 0) {
       await loadTasks();
     } else {
-      alert(response.data.message || '删除失败');
+      alert(getApiFailureMessage(response, '删除任务失败', '删除失败'));
     }
   } catch (error) {
-    alert(error.response?.data?.message || '删除任务失败，请重试');
+    alert(getApiErrorMessage(error, '删除任务失败'));
   } finally {
     deletingId.value = null;
   }
 };
 
 // 开始编辑任务
-const startEdit = (task) => {
+const startEdit = async (task) => {
+  if (!canUpdateTaskStatus(task)) {
+    updateError.value = '无权限编辑该任务';
+    return;
+  }
+
+  updateError.value = '';
   editingTask.id = task.id;
   editingTask.title = task.title;
   editingTask.description = task.description || '';
   editingTask.status = task.status;
   editingTask.priority = String(task.priority);
   editingTask.deadline = task.deadline ? formatDateForInput(task.deadline) : '';
-  editingTask.team_id = task.team_id || null; // 👇 新增：记录 team_id
+  editingTask.team_id = isPersonalTask(task) ? null : task.team_id;
+  editingTask.predecessor_ids = []; // 清空重置
+  editingDependencies.value = [];   // 清空重置
+
+  // 如果是个人任务，从后端拉取现有前置依赖用于回显
+  if (isPersonalTask(task)) {
+    try {
+      const res = await getTaskDependenciesApi(task.id);
+      if (res.data && res.data.code === 0) {
+        const preds = res.data.data.predecessors || [];
+        editingDependencies.value = preds.map(p => p.id);
+        editingTask.predecessor_ids = [...editingDependencies.value]; // 绑定给多选框
+      }
+    } catch (err) {
+      updateError.value = getApiErrorMessage(err, '获取任务依赖失败');
+      console.error(updateError.value, err);
+    }
+  }
 };
 
 // 取消编辑
@@ -776,7 +1007,9 @@ const cancelEdit = () => {
   editingTask.status = 'TODO';
   editingTask.priority = '2';
   editingTask.deadline = '';
-  editingTask.team_id = null; // 👇 新增
+  editingTask.team_id = null;
+  editingTask.predecessor_ids = [];
+  editingDependencies.value = [];
 };
 
 
@@ -848,7 +1081,7 @@ const priorityLabel = (priority) => {
 // 页面加载时获取任务列表
 onMounted(() => {
   document.addEventListener('click', handleOutsideClick);
-  fetchUserTeams(); // 👇 新增：挂载时加载团队
+  fetchUserTeams(); //挂载时加载团队
   loadTasks();
 });
 
@@ -1427,6 +1660,21 @@ onBeforeUnmount(() => {
   color: #b91c1c;
 }
 
+.team-link-badge {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.team-link-badge:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
 .task-description {
   margin: 0.5rem 0;
   color: #6b7280;
@@ -1509,6 +1757,27 @@ onBeforeUnmount(() => {
 
 .btn-complete:hover:not(:disabled)::before {
   transform: translateX(120%);
+}
+
+.btn-dependency {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  background: #fff;
+  color: #1e40af;
+  border: 1px solid #93c5fd;
+  text-align: center;
+  text-decoration: none;
+  font-weight: 600;
+  line-height: 1;
+  transition: background-color 0.22s ease, border-color 0.22s ease, color 0.22s ease;
+}
+
+.btn-dependency:hover {
+  background: #eff6ff;
+  border-color: #60a5fa;
+  color: #1d4ed8;
 }
 
 .btn-danger {
@@ -1695,4 +1964,20 @@ onBeforeUnmount(() => {
     transform: translate3d(0, 0, 0) scale(1);
   }
 }
+/*分页控件样式*/
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #e5e7eb;
+}
+.page-info {
+  font-size: 0.875rem;
+  color: #6b7280;
+  font-weight: 500;
+}
+
 </style>

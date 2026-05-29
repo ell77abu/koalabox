@@ -60,6 +60,10 @@ func Conflict(c *gin.Context, message string) {
 	JSON(c, 409, 409, message, nil)
 }
 
+func Gone(c *gin.Context, message string) {
+	JSON(c, 410, 410, message, nil)
+}
+
 func InternalError(c *gin.Context, message string) {
 	JSON(c, 500, 500, message, nil)
 }

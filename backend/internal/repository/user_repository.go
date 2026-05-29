@@ -48,6 +48,7 @@ func (r *userRepository) GetByUsername(ctx context.Context, username string) (*m
 	var user model.User
 	err := r.db.WithContext(ctx).
 		Where("username = ?", username).
+		Where("deleted_at IS NULL").
 		First(&user).Error
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -64,6 +65,7 @@ func (r *userRepository) GetByID(ctx context.Context, id uint64) (*model.User, e
 	var user model.User
 	err := r.db.WithContext(ctx).
 		Where("id = ?", id).
+		Where("deleted_at IS NULL").
 		First(&user).Error
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
