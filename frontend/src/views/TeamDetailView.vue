@@ -388,6 +388,8 @@ const route = useRoute();
 const router = useRouter();
 const teamId = Number(route.params.team_id);
 const isSystemAdmin = computed(() => Number(authStore.level.value) === 1);
+const TEAM_NAME_MAX_LENGTH = 100;
+const TEAM_NAME_INVALID_MESSAGE = '团队名称不能为空且不能超过 100 个字符';
 
 const activeTab = ref('tasks');
 
@@ -763,10 +765,15 @@ const handleRenameTeam = async () => {
     return;
   }
 
-  if (!newTeamName.value) return;
+  const teamName = newTeamName.value.trim();
+  if (!teamName || teamName.length > TEAM_NAME_MAX_LENGTH) {
+    alert(TEAM_NAME_INVALID_MESSAGE);
+    return;
+  }
+
   renamingTeam.value = true;
   try {
-    const res = await updateTeamApi(teamId, { name: newTeamName.value });
+    const res = await updateTeamApi(teamId, { name: teamName });
     if (res.data.code === 0) {
       alert('团队名称修改成功');
       newTeamName.value = '';
