@@ -65,6 +65,21 @@ npm run dev   # 启动本地开发服务器
 ```
 完成后，终端会提示有监听地址，浏览器打开该地址即可。
 
+### 前端 Mock 联调
+- Mock server 是 `frontend/mock-server.js`，用于前端页面联调，不等价于真实 Go 后端。
+- 启动 Mock server：
+  ```bash
+  cd /mnt/g/code/SE/group19-base/frontend
+  npm install
+  npm run dev:mock
+  ```
+- 另开一个 WSL 终端启动前端，并把 Vite 代理指向 Mock server：
+  ```bash
+  cd /mnt/g/code/SE/group19-base/frontend
+  VITE_DEV_API_TARGET=http://127.0.0.1:3001 npm run dev
+  ```
+- 打开 Vite 输出的地址，一般是 `http://localhost:5173`。
+
 ## 服务器部署
 - 示例服务器参数：Ubuntu Server 24.04 LTS 64bit
 > 不需要在服务器上安装 Node.js 或 Go 的编译环境，服务器只负责纯粹的运行，节省系统资源。
