@@ -218,17 +218,6 @@ type ActivityLogListItem struct {
 	CreatedAt  time.Time          `json:"created_at" db:"created_at"`
 }
 
-// TaskAuditLog 映射 task_audit_logs 表。
-type TaskAuditLog struct {
-	ID        uint64    `json:"id" db:"id"`
-	TaskID    uint64    `json:"task_id" db:"task_id"`
-	UserID    uint64    `json:"user_id" db:"user_id"`
-	Action    string    `json:"action" db:"action"`
-	Before    *string   `json:"before_data" db:"before_data"`
-	After     *string   `json:"after_data" db:"after_data"`
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
-}
-
 // CommonResponse 为 API 统一响应结构。
 type CommonResponse[T any] struct {
 	Code    int    `json:"code"`

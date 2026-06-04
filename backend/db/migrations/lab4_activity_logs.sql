@@ -1,5 +1,5 @@
 -- Lab4 Activity Logs
--- Adds a dedicated operation log table without changing the legacy task_audit_logs table.
+-- Adds the dedicated operation log table used by Lab4.
 
 CREATE TABLE IF NOT EXISTS activity_logs (
   id BIGSERIAL PRIMARY KEY,
