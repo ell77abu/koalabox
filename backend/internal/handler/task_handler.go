@@ -203,6 +203,39 @@ func (h *TaskHandler) Delete(c *gin.Context) {
 	response.Success(c, "delete success", nil)
 }
 
+// ListActivityLogs 查询指定任务的操作日志。
+func (h *TaskHandler) ListActivityLogs(c *gin.Context) {
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
+
+	taskID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid task id")
+		return
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	size, _ := strconv.Atoi(c.DefaultQuery("size", "10"))
+
+	list, total, fixedPage, fixedSize, err := h.taskService.ListActivityLogs(c.Request.Context(), userID, taskID, page, size)
+	if errors.Is(err, repository.ErrForbidden) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
+	if errors.Is(err, repository.ErrNotFound) {
+		response.NotFound(c, "task not found")
+		return
+	}
+	if err != nil {
+		response.InternalError(c, "query task logs failed")
+		return
+	}
+
+	response.SuccessPage(c, "query success", list, fixedPage, fixedSize, total)
+}
+
 // ListPendingAssignments 返回当前用户待处理的团队任务分配请求。
 func (h *TaskHandler) ListPendingAssignments(c *gin.Context) {
 	userID, ok := getUserIDFromContext(c)

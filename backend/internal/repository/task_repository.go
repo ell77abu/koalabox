@@ -27,6 +27,7 @@ type TaskRepository interface {
 	GetByIDAndUserID(ctx context.Context, id, userID uint64) (*model.Task, error)
 	GetByIDForUserScope(ctx context.Context, id, userID uint64) (*model.Task, error)
 	GetByID(ctx context.Context, id uint64) (*model.Task, error)
+	GetByIDIncludingDeleted(ctx context.Context, id uint64) (*model.Task, error)
 	UpdateByIDAndUserID(ctx context.Context, task *model.Task) error
 	UpdateByID(ctx context.Context, task *model.Task) error
 	UpdateByIDForOwnerOrTeamManagerScope(ctx context.Context, task *model.Task, userID uint64) error
@@ -467,6 +468,20 @@ func (r *taskRepository) GetByID(ctx context.Context, id uint64) (*model.Task, e
 	return &task, nil
 }
 
+func (r *taskRepository) GetByIDIncludingDeleted(ctx context.Context, id uint64) (*model.Task, error) {
+	var task model.Task
+	err := r.db.WithContext(ctx).
+		Where("id = ?", id).
+		First(&task).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
 func (r *taskRepository) UpdateByIDAndUserID(ctx context.Context, task *model.Task) error {
 	updates := map[string]interface{}{
 		"title":       task.Title,
@@ -661,6 +676,26 @@ func (r *taskRepository) DeleteByID(ctx context.Context, id uint64) error {
 }
 
 func (r *taskRepository) ClearAssigneeForTeamTasks(ctx context.Context, teamID, assigneeID uint64) error {
+	return r.ClearAssigneeForOpenTeamTasks(ctx, teamID, assigneeID)
+}
+
+func (r *taskRepository) ListOpenAssignedTeamTasks(ctx context.Context, teamID, assigneeID uint64) ([]model.Task, error) {
+	tasks := make([]model.Task, 0)
+	err := r.db.WithContext(ctx).
+		Model(&model.Task{}).
+		Where("team_id = ?", teamID).
+		Where("assignee_id = ?", assigneeID).
+		Where("deleted_at IS NULL").
+		Where("status IN ?", []model.TaskStatus{model.TaskStatusTODO, model.TaskStatusDOING}).
+		Order("id ASC").
+		Find(&tasks).Error
+	if err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func (r *taskRepository) ClearAssigneeForOpenTeamTasks(ctx context.Context, teamID, assigneeID uint64) error {
 	res := r.db.WithContext(ctx).
 		Model(&model.Task{}).
 		Where("team_id = ?", teamID).
@@ -684,20 +719,6 @@ func (r *taskRepository) ClearAssigneeForTeamTasks(ctx context.Context, teamID, 
 		Updates(map[string]interface{}{
 			"assignee_id": nil,
 			"status":      model.TaskStatusTODO,
-			"updated_at":  time.Now(),
-		})
-	if res.Error != nil {
-		return res.Error
-	}
-
-	res = r.db.WithContext(ctx).
-		Model(&model.Task{}).
-		Where("team_id = ?", teamID).
-		Where("assignee_id = ?", assigneeID).
-		Where("deleted_at IS NULL").
-		Where("status = ?", model.TaskStatusDONE).
-		Updates(map[string]interface{}{
-			"assignee_id": nil,
 			"updated_at":  time.Now(),
 		})
 	if res.Error != nil {

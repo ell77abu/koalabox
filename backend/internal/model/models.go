@@ -170,6 +170,54 @@ type TaskAssignmentRequestDetail struct {
 	CreatedAt         time.Time        `json:"created_at" db:"created_at"`
 }
 
+// ActivityActionType 对应 Lab4 操作日志的任务操作类型。
+type ActivityActionType string
+
+const (
+	ActivityActionCreateTask                   ActivityActionType = "CREATE_TASK"
+	ActivityActionUpdateTaskInfo               ActivityActionType = "UPDATE_TASK_INFO"
+	ActivityActionDeleteTask                   ActivityActionType = "DELETE_TASK"
+	ActivityActionAssigneeChangedByMemberLeave ActivityActionType = "TASK_ASSIGNEE_CHANGED_BY_MEMBER_LEAVE"
+)
+
+// ActivityTargetType 表示操作对象类型，本期固定为 TASK。
+type ActivityTargetType string
+
+const (
+	ActivityTargetTask ActivityTargetType = "TASK"
+)
+
+// ActivityScope 表示日志所属任务范围。
+type ActivityScope string
+
+const (
+	ActivityScopePersonal ActivityScope = "PERSONAL"
+	ActivityScopeTeam     ActivityScope = "TEAM"
+)
+
+// ActivityLog 映射 Lab4 新增的 activity_logs 表。
+type ActivityLog struct {
+	ID         uint64             `json:"id" db:"id"`
+	ActorID    uint64             `json:"actor_id" db:"actor_id"`
+	ActorName  string             `json:"actor_name" db:"actor_name"`
+	ActionType ActivityActionType `json:"action_type" db:"action_type"`
+	TargetType ActivityTargetType `json:"target_type" db:"target_type"`
+	TargetID   uint64             `json:"target_id" db:"target_id"`
+	Scope      ActivityScope      `json:"scope" db:"scope"`
+	TeamID     *uint64            `json:"team_id" db:"team_id"`
+	Content    string             `json:"content" db:"content"`
+	CreatedAt  time.Time          `json:"created_at" db:"created_at"`
+}
+
+// ActivityLogListItem 是任务日志列表对前端暴露的最小展示字段。
+type ActivityLogListItem struct {
+	ID         uint64             `json:"id" db:"id"`
+	ActorName  string             `json:"actor_name" db:"actor_name"`
+	ActionType ActivityActionType `json:"action_type" db:"action_type"`
+	Content    string             `json:"content" db:"content"`
+	CreatedAt  time.Time          `json:"created_at" db:"created_at"`
+}
+
 // TaskAuditLog 映射 task_audit_logs 表。
 type TaskAuditLog struct {
 	ID        uint64    `json:"id" db:"id"`

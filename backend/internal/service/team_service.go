@@ -61,18 +61,29 @@ type TeamService interface {
 }
 
 type teamService struct {
-	teamRepo   repository.TeamRepository
-	userRepo   repository.UserRepository
-	inviteRepo repository.TeamInvitationRepository
-	taskRepo   repository.TaskRepository
+	teamRepo        repository.TeamRepository
+	userRepo        repository.UserRepository
+	inviteRepo      repository.TeamInvitationRepository
+	taskRepo        repository.TaskRepository
+	activityLogRepo repository.ActivityLogRepository
 }
 
 func NewTeamService(teamRepo repository.TeamRepository, userRepo repository.UserRepository, inviteRepo repository.TeamInvitationRepository) TeamService {
 	return NewTeamServiceWithTaskRepo(teamRepo, userRepo, inviteRepo, nil)
 }
 
-func NewTeamServiceWithTaskRepo(teamRepo repository.TeamRepository, userRepo repository.UserRepository, inviteRepo repository.TeamInvitationRepository, taskRepo repository.TaskRepository) TeamService {
-	return &teamService{teamRepo: teamRepo, userRepo: userRepo, inviteRepo: inviteRepo, taskRepo: taskRepo}
+func NewTeamServiceWithTaskRepo(teamRepo repository.TeamRepository, userRepo repository.UserRepository, inviteRepo repository.TeamInvitationRepository, taskRepo repository.TaskRepository, activityLogRepo ...repository.ActivityLogRepository) TeamService {
+	var logRepo repository.ActivityLogRepository
+	if len(activityLogRepo) > 0 {
+		logRepo = activityLogRepo[0]
+	}
+	return &teamService{
+		teamRepo:        teamRepo,
+		userRepo:        userRepo,
+		inviteRepo:      inviteRepo,
+		taskRepo:        taskRepo,
+		activityLogRepo: logRepo,
+	}
 }
 
 func (s *teamService) Create(ctx context.Context, ownerID uint64, req CreateTeamRequest) (*model.Team, error) {
@@ -212,6 +223,14 @@ func (s *teamService) RemoveMember(ctx context.Context, operatorID, teamID, targ
 	if targetRole == model.TeamRoleOwner {
 		return ErrCannotModifyOwner
 	}
+	departingUsername := ""
+	if s.activityLogRepo != nil {
+		targetUser, err := s.userRepo.GetByID(ctx, targetUserID)
+		if err != nil {
+			return err
+		}
+		departingUsername = targetUser.Username
+	}
 	if s.taskRepo == nil {
 		return errors.New("task repository is not configured")
 	}
@@ -222,7 +241,7 @@ func (s *teamService) RemoveMember(ctx context.Context, operatorID, teamID, targ
 
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		teamRepoTx := repository.NewTeamRepository(tx)
-		if err := s.cleanupDepartingMember(ctx, tx, teamID, targetUserID); err != nil {
+		if err := s.cleanupDepartingMember(ctx, tx, teamID, targetUserID, operatorID, departingUsername); err != nil {
 			return err
 		}
 		return teamRepoTx.RemoveMember(ctx, teamID, targetUserID)
@@ -305,6 +324,14 @@ func (s *teamService) Leave(ctx context.Context, userID, teamID uint64) error {
 	if s.taskRepo == nil {
 		return errors.New("task repository is not configured")
 	}
+	departingUsername := ""
+	if s.activityLogRepo != nil {
+		departingUser, err := s.userRepo.GetByID(ctx, userID)
+		if err != nil {
+			return err
+		}
+		departingUsername = departingUser.Username
+	}
 	db, err := getTeamRepoDB(s.teamRepo)
 	if err != nil {
 		return err
@@ -312,16 +339,35 @@ func (s *teamService) Leave(ctx context.Context, userID, teamID uint64) error {
 
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		teamRepoTx := repository.NewTeamRepository(tx)
-		if err := s.cleanupDepartingMember(ctx, tx, teamID, userID); err != nil {
+		if err := s.cleanupDepartingMember(ctx, tx, teamID, userID, userID, departingUsername); err != nil {
 			return err
 		}
 		return teamRepoTx.RemoveMember(ctx, teamID, userID)
 	})
 }
 
-func (s *teamService) cleanupDepartingMember(ctx context.Context, tx *gorm.DB, teamID, userID uint64) error {
+func (s *teamService) cleanupDepartingMember(ctx context.Context, tx *gorm.DB, teamID, userID, actorID uint64, departingUsername string) error {
 	taskRepoTx := repository.NewTaskRepository(tx)
-	if err := taskRepoTx.ClearAssigneeForTeamTasks(ctx, teamID, userID); err != nil {
+	lister, ok := taskRepoTx.(interface {
+		ListOpenAssignedTeamTasks(ctx context.Context, teamID, assigneeID uint64) ([]model.Task, error)
+	})
+	if !ok {
+		return errors.New("task repository does not support listing open assigned tasks")
+	}
+	affectedTasks, err := lister.ListOpenAssignedTeamTasks(ctx, teamID, userID)
+	if err != nil {
+		return err
+	}
+	clearer, ok := taskRepoTx.(interface {
+		ClearAssigneeForOpenTeamTasks(ctx context.Context, teamID, assigneeID uint64) error
+	})
+	if !ok {
+		return errors.New("task repository does not support clearing open assigned tasks")
+	}
+	if err := clearer.ClearAssigneeForOpenTeamTasks(ctx, teamID, userID); err != nil {
+		return err
+	}
+	if err := s.writeMemberLeaveActivityLogs(ctx, tx, actorID, departingUsername, affectedTasks); err != nil {
 		return err
 	}
 
@@ -334,6 +380,33 @@ func (s *teamService) cleanupDepartingMember(ctx context.Context, tx *gorm.DB, t
 		Updates(map[string]interface{}{
 			"status": model.InvitationStatusDeclined,
 		}).Error
+}
+
+func (s *teamService) writeMemberLeaveActivityLogs(ctx context.Context, tx *gorm.DB, actorID uint64, departingUsername string, tasks []model.Task) error {
+	if s.activityLogRepo == nil || len(tasks) == 0 {
+		return nil
+	}
+	actor, err := s.userRepo.GetByID(ctx, actorID)
+	if err != nil {
+		return err
+	}
+	logRepoTx := repository.NewActivityLogRepository(tx)
+	content := fmt.Sprintf("成员 %s 离开团队，任务执行者已置空", departingUsername)
+	for _, task := range tasks {
+		if err := logRepoTx.Create(ctx, &model.ActivityLog{
+			ActorID:    actorID,
+			ActorName:  actor.Username,
+			ActionType: model.ActivityActionAssigneeChangedByMemberLeave,
+			TargetType: model.ActivityTargetTask,
+			TargetID:   task.ID,
+			Scope:      model.ActivityScopeTeam,
+			TeamID:     cloneUint64Ptr(task.TeamID),
+			Content:    content,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *teamService) TransferOwnership(ctx context.Context, operatorID, teamID, newOwnerID uint64) error {
