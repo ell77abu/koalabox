@@ -73,6 +73,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { taskStore } from '../stores/task';
 import { getTasksApi, getTaskLogsApi } from '../services/task';
+import { getTeamTasksApi } from '../services/team';
 import { getApiErrorMessage, getApiFailureMessage } from '../utils/apiError';
 
 const route = useRoute();
@@ -87,6 +88,12 @@ const logTotal = ref(0);
 const taskTitle = ref('');
 
 const taskId = computed(() => Number(route.params.id));
+const teamIdFromQuery = computed(() => {
+  const raw = route.query.team_id;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+});
 const taskTitleDisplay = computed(() => taskTitle.value || `任务 #${taskId.value}`);
 
 const logTotalPages = computed(() => Math.ceil(logTotal.value / logSize.value) || 1);
@@ -124,6 +131,20 @@ const loadTaskTitle = async () => {
   }
 
   try {
+    const teamId = teamIdFromQuery.value;
+    if (teamId) {
+      const teamRes = await getTeamTasksApi(teamId);
+      if (teamRes.data?.code !== 0) {
+        throw new Error(getApiFailureMessage(teamRes, '加载任务标题失败', '团队任务查询失败'));
+      }
+      const teamList = Array.isArray(teamRes.data?.data?.list) ? teamRes.data.data.list : [];
+      const teamFound = teamList.find((item) => Number(item.id) === taskId.value);
+      if (teamFound?.title) {
+        taskTitle.value = teamFound.title;
+        return;
+      }
+    }
+
     const response = await getTasksApi(1, 1000, 'default');
     if (response.data?.code !== 0) {
       throw new Error(getApiFailureMessage(response, '加载任务标题失败', '任务查询失败'));
