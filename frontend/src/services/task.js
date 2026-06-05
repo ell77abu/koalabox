@@ -64,3 +64,13 @@ export const getTaskDependenciesApi = (taskId) =>
  */
 export const getTaskDependencyGraphApi = (taskId) => 
   http.get(`/tasks/${taskId}/dependency-graph`);
+
+/**
+ * 获取任务操作日志
+ * @param {number} taskId - 任务 ID
+ * @param {number} page - 页码
+ * @param {number} size - 每页数量
+ * @returns {Promise}
+ */
+export const getTaskLogsApi = (taskId, page = 1, size = 10) =>
+  http.get(`/tasks/${taskId}/logs`, { params: { page, size } });

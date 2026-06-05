@@ -3,6 +3,7 @@ import { authStore } from '../stores/auth';
 import LoginView from '../views/LoginView.vue';
 import RegisterView from '../views/RegisterView.vue';
 import TaskView from '../views/TaskView.vue';
+import TaskLogView from '../views/TaskLogView.vue';
 import ProfileView from '../views/ProfileView.vue';
 import CreateTaskView from '../views/CreateTaskView.vue';
 import TaskDependencyView from '../views/TaskDependencyView.vue';
@@ -39,6 +40,12 @@ const routes = [
     path: '/tasks/create',
     name: 'create-task',
     component: CreateTaskView,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/tasks/:id',
+    name: 'task-log',
+    component: TaskLogView,
     meta: { requiresAuth: true },
   },
   {
