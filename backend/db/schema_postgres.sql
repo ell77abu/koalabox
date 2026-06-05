@@ -40,18 +40,28 @@ CREATE INDEX IF NOT EXISTS idx_tasks_user_status ON tasks (user_id, status);
 CREATE INDEX IF NOT EXISTS idx_tasks_user_deadline ON tasks (user_id, deadline);
 CREATE INDEX IF NOT EXISTS idx_tasks_user_priority ON tasks (user_id, priority);
 
-CREATE TABLE IF NOT EXISTS task_audit_logs (
+CREATE TABLE IF NOT EXISTS activity_logs (
   id BIGSERIAL PRIMARY KEY,
-  task_id BIGINT NOT NULL REFERENCES tasks(id),
-  user_id BIGINT NOT NULL REFERENCES users(id),
-  action VARCHAR(20) NOT NULL,
-  before_data JSONB NULL,
-  after_data JSONB NULL,
+  actor_id BIGINT NOT NULL,
+  actor_name VARCHAR(20) NOT NULL,
+  action_type VARCHAR(50) NOT NULL,
+  target_type VARCHAR(20) NOT NULL,
+  target_id BIGINT NOT NULL,
+  scope VARCHAR(20) NOT NULL,
+  team_id BIGINT NULL,
+  content TEXT NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT chk_task_audit_action CHECK (action IN ('CREATE', 'UPDATE', 'DELETE', 'STATUS_CHANGE'))
+  CONSTRAINT chk_activity_action_type CHECK (
+    action_type IN (
+      'CREATE_TASK',
+      'UPDATE_TASK_INFO',
+      'DELETE_TASK',
+      'TASK_ASSIGNEE_CHANGED_BY_MEMBER_LEAVE'
+    )
+  ),
+  CONSTRAINT chk_activity_target_type CHECK (target_type IN ('TASK')),
+  CONSTRAINT chk_activity_scope CHECK (scope IN ('PERSONAL', 'TEAM'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_task_audit_task_created
-  ON task_audit_logs (task_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_task_audit_user_created
-  ON task_audit_logs (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_target_created
+  ON activity_logs (target_type, target_id, created_at DESC);

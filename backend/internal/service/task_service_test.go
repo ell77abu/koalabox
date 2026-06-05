@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -12,6 +13,7 @@ import (
 )
 
 type taskRepoMock struct {
+	createFn                       func(ctx context.Context, task *model.Task) error
 	listByTeamIDFn                 func(ctx context.Context, teamID uint64, page, size int) ([]model.Task, int64, error)
 	listPersonalAndAssignedTeamFn  func(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error)
 	getByIDFn                      func(ctx context.Context, id uint64) (*model.Task, error)
@@ -20,13 +22,17 @@ type taskRepoMock struct {
 	updateByIDForScopeFn           func(ctx context.Context, task *model.Task, userID uint64) error
 	updateStatusByScopeFn          func(ctx context.Context, taskID, userID uint64, status model.TaskStatus) error
 	deleteByIDForScopeFn           func(ctx context.Context, id, userID uint64) error
+	deleteByIDFn                   func(ctx context.Context, id uint64) error
 	listIncompletePredecessorIDsFn func(ctx context.Context, taskID uint64) ([]uint64, error)
 	listIncompletePredecessorsFn   func(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error)
 	listDoneSuccessorsFn           func(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, error)
 }
 
 func (m *taskRepoMock) Create(ctx context.Context, task *model.Task) error {
-	panic("unexpected call to Create")
+	if m.createFn == nil {
+		panic("unexpected call to Create")
+	}
+	return m.createFn(ctx, task)
 }
 func (m *taskRepoMock) ListPersonalAndAssignedTeam(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error) {
 	if m.listPersonalAndAssignedTeamFn == nil {
@@ -64,6 +70,12 @@ func (m *taskRepoMock) GetByID(ctx context.Context, id uint64) (*model.Task, err
 	}
 	return m.getByIDFn(ctx, id)
 }
+func (m *taskRepoMock) GetByIDIncludingDeleted(ctx context.Context, id uint64) (*model.Task, error) {
+	if m.getByIDFn == nil {
+		panic("unexpected call to GetByIDIncludingDeleted")
+	}
+	return m.getByIDFn(ctx, id)
+}
 func (m *taskRepoMock) UpdateByIDAndUserID(ctx context.Context, task *model.Task) error {
 	panic("unexpected call to UpdateByIDAndUserID")
 }
@@ -98,7 +110,10 @@ func (m *taskRepoMock) DeleteByIDForOwnerOrTeamManagerScope(ctx context.Context,
 	panic("unexpected call to DeleteByIDForOwnerOrTeamManagerScope")
 }
 func (m *taskRepoMock) DeleteByID(ctx context.Context, id uint64) error {
-	panic("unexpected call to DeleteByID")
+	if m.deleteByIDFn == nil {
+		panic("unexpected call to DeleteByID")
+	}
+	return m.deleteByIDFn(ctx, id)
 }
 func (m *taskRepoMock) ListByUserIDWithOrder(ctx context.Context, userID uint64, page, size int, orderBy string) ([]model.Task, int64, error) {
 	panic("unexpected call to ListByUserIDWithOrder")
@@ -280,6 +295,25 @@ func (s *taskAssignRepoStub) AcceptPendingForAssigneeScope(ctx context.Context, 
 }
 func (s *taskAssignRepoStub) DeclinePendingByTaskID(ctx context.Context, taskID uint64) error {
 	panic("unexpected call")
+}
+
+type activityLogRepoMock struct {
+	createFn       func(ctx context.Context, log *model.ActivityLog) error
+	listByTaskIDFn func(ctx context.Context, taskID uint64, page, size int) ([]model.ActivityLogListItem, int64, error)
+}
+
+func (m *activityLogRepoMock) Create(ctx context.Context, log *model.ActivityLog) error {
+	if m.createFn == nil {
+		panic("unexpected call to ActivityLog.Create")
+	}
+	return m.createFn(ctx, log)
+}
+
+func (m *activityLogRepoMock) ListByTaskID(ctx context.Context, taskID uint64, page, size int) ([]model.ActivityLogListItem, int64, error) {
+	if m.listByTaskIDFn == nil {
+		panic("unexpected call to ActivityLog.ListByTaskID")
+	}
+	return m.listByTaskIDFn(ctx, taskID, page, size)
 }
 
 func TestTaskServiceListRejectsNonMemberTeamView(t *testing.T) {
@@ -469,6 +503,249 @@ func TestTaskServiceUpdateRejectsRollbackWhenDoneSuccessorsExist(t *testing.T) {
 	var rollbackErr *DoneSuccessorsError
 	assert.ErrorAs(t, err, &rollbackErr)
 	assert.Equal(t, []uint64{101}, rollbackErr.IDs)
+}
+
+func TestTaskServiceCreateWritesActivityLog(t *testing.T) {
+	var createdLog *model.ActivityLog
+	svc := NewTaskService(
+		&taskRepoMock{
+			createFn: func(ctx context.Context, task *model.Task) error {
+				task.ID = 101
+				return nil
+			},
+		},
+		&teamRepoForTaskMock{},
+		&userRepoMock{
+			getByIDFn: func(ctx context.Context, id uint64) (*model.User, error) {
+				assert.Equal(t, uint64(9), id)
+				return &model.User{ID: id, Username: "alice"}, nil
+			},
+		},
+		&taskAssignRepoStub{},
+		&activityLogRepoMock{
+			createFn: func(ctx context.Context, log *model.ActivityLog) error {
+				createdLog = log
+				return nil
+			},
+		},
+	)
+
+	task, err := svc.Create(context.Background(), 9, CreateTaskRequest{Title: " 实现登录 "})
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	require.NotNil(t, createdLog)
+	assert.Equal(t, model.ActivityActionCreateTask, createdLog.ActionType)
+	assert.Equal(t, model.ActivityTargetTask, createdLog.TargetType)
+	assert.Equal(t, model.ActivityScopePersonal, createdLog.Scope)
+	assert.Equal(t, uint64(101), createdLog.TargetID)
+	assert.Equal(t, uint64(9), createdLog.ActorID)
+	assert.Equal(t, "alice", createdLog.ActorName)
+	assert.Equal(t, "创建了任务「实现登录」", createdLog.Content)
+}
+
+func TestTaskServiceUpdateWritesActivityLogForActualChanges(t *testing.T) {
+	stored := model.Task{
+		ID:       77,
+		UserID:   9,
+		Title:    "旧标题",
+		Status:   model.TaskStatusTODO,
+		Priority: model.PriorityLow,
+	}
+	var createdLog *model.ActivityLog
+	svc := NewTaskService(
+		&taskRepoMock{
+			getByIDForUserScopeFn: func(ctx context.Context, id, userID uint64) (*model.Task, error) {
+				assert.Equal(t, uint64(77), id)
+				assert.Equal(t, uint64(9), userID)
+				cloned := cloneTask(&stored)
+				return &cloned, nil
+			},
+			updateByIDForScopeFn: func(ctx context.Context, task *model.Task, userID uint64) error {
+				assert.Equal(t, uint64(9), userID)
+				stored = cloneTask(task)
+				return nil
+			},
+		},
+		&teamRepoForTaskMock{},
+		&userRepoMock{
+			getByIDFn: func(ctx context.Context, id uint64) (*model.User, error) {
+				return &model.User{ID: id, Username: "alice"}, nil
+			},
+		},
+		&taskAssignRepoStub{},
+		&activityLogRepoMock{
+			createFn: func(ctx context.Context, log *model.ActivityLog) error {
+				createdLog = log
+				return nil
+			},
+		},
+	)
+
+	newTitle := "新标题"
+	newPriority := 3
+	updated, err := svc.Update(context.Background(), 9, 77, UpdateTaskRequest{
+		Title:    &newTitle,
+		Priority: &newPriority,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	require.NotNil(t, createdLog)
+	assert.Equal(t, model.ActivityActionUpdateTaskInfo, createdLog.ActionType)
+	assert.Equal(t, uint64(77), createdLog.TargetID)
+	assert.Contains(t, createdLog.Content, "将标题从「旧标题」修改为「新标题」")
+	assert.Contains(t, createdLog.Content, "将优先级从 1 修改为 3")
+}
+
+func TestTaskServiceUpdateSkipsActivityLogWhenUnchanged(t *testing.T) {
+	stored := model.Task{
+		ID:       78,
+		UserID:   9,
+		Title:    "标题",
+		Status:   model.TaskStatusTODO,
+		Priority: model.PriorityMedium,
+	}
+	logCreated := false
+	svc := NewTaskService(
+		&taskRepoMock{
+			getByIDForUserScopeFn: func(ctx context.Context, id, userID uint64) (*model.Task, error) {
+				cloned := cloneTask(&stored)
+				return &cloned, nil
+			},
+			updateByIDForScopeFn: func(ctx context.Context, task *model.Task, userID uint64) error {
+				stored = cloneTask(task)
+				return nil
+			},
+		},
+		&teamRepoForTaskMock{},
+		&userRepoMock{},
+		&taskAssignRepoStub{},
+		&activityLogRepoMock{
+			createFn: func(ctx context.Context, log *model.ActivityLog) error {
+				logCreated = true
+				return nil
+			},
+		},
+	)
+
+	sameTitle := "标题"
+	_, err := svc.Update(context.Background(), 9, 78, UpdateTaskRequest{Title: &sameTitle})
+	require.NoError(t, err)
+	assert.False(t, logCreated)
+}
+
+func TestTaskServiceDeleteWritesActivityLog(t *testing.T) {
+	task := &model.Task{ID: 88, UserID: 9, Title: "修复 bug", Status: model.TaskStatusTODO}
+	deleteCalled := false
+	var createdLog *model.ActivityLog
+	svc := NewTaskService(
+		&taskRepoMock{
+			getByIDForUserScopeFn: func(ctx context.Context, id, userID uint64) (*model.Task, error) {
+				assert.Equal(t, task.ID, id)
+				assert.Equal(t, task.UserID, userID)
+				return task, nil
+			},
+			deleteByIDForScopeFn: func(ctx context.Context, id, userID uint64) error {
+				deleteCalled = true
+				assert.Equal(t, task.ID, id)
+				assert.Equal(t, task.UserID, userID)
+				return nil
+			},
+		},
+		&teamRepoForTaskMock{},
+		&userRepoMock{
+			getByIDFn: func(ctx context.Context, id uint64) (*model.User, error) {
+				return &model.User{ID: id, Username: "alice"}, nil
+			},
+		},
+		&taskAssignRepoStub{},
+		&activityLogRepoMock{
+			createFn: func(ctx context.Context, log *model.ActivityLog) error {
+				createdLog = log
+				return nil
+			},
+		},
+	)
+
+	err := svc.Delete(context.Background(), 9, 0, 88)
+	require.NoError(t, err)
+	assert.True(t, deleteCalled)
+	require.NotNil(t, createdLog)
+	assert.Equal(t, model.ActivityActionDeleteTask, createdLog.ActionType)
+	assert.Equal(t, "删除了任务「修复 bug」", createdLog.Content)
+}
+
+func TestTaskServiceListActivityLogsReturnsPagedItems(t *testing.T) {
+	createdAt := time.Date(2026, 6, 1, 12, 0, 0, 0, time.Local)
+	svc := NewTaskService(
+		&taskRepoMock{
+			getByIDFn: func(ctx context.Context, id uint64) (*model.Task, error) {
+				return &model.Task{ID: id, UserID: 9, Title: "任务"}, nil
+			},
+		},
+		&teamRepoForTaskMock{},
+		&userRepoMock{},
+		&taskAssignRepoStub{},
+		&activityLogRepoMock{
+			listByTaskIDFn: func(ctx context.Context, taskID uint64, page, size int) ([]model.ActivityLogListItem, int64, error) {
+				assert.Equal(t, uint64(88), taskID)
+				assert.Equal(t, 1, page)
+				assert.Equal(t, 10, size)
+				return []model.ActivityLogListItem{
+					{
+						ID:         1,
+						ActorName:  "alice",
+						ActionType: model.ActivityActionCreateTask,
+						Content:    "创建了任务「任务」",
+						CreatedAt:  createdAt,
+					},
+				}, 1, nil
+			},
+		},
+	)
+
+	list, total, page, size, err := svc.ListActivityLogs(context.Background(), 9, 88, 1, 10)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.EqualValues(t, 1, total)
+	assert.Equal(t, 1, page)
+	assert.Equal(t, 10, size)
+	assert.Equal(t, "2026-06-01 12:00:00", list[0].CreatedAt)
+}
+
+func TestTaskServiceListActivityLogsRejectsForbiddenPersonalTask(t *testing.T) {
+	svc := NewTaskService(
+		&taskRepoMock{
+			getByIDFn: func(ctx context.Context, id uint64) (*model.Task, error) {
+				return &model.Task{ID: id, UserID: 99, Title: "任务"}, nil
+			},
+		},
+		&teamRepoForTaskMock{},
+		&userRepoMock{},
+		&taskAssignRepoStub{},
+		&activityLogRepoMock{},
+	)
+
+	_, _, _, _, err := svc.ListActivityLogs(context.Background(), 9, 88, 1, 10)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, repository.ErrForbidden)
+}
+
+func TestTaskServiceListActivityLogsReturnsNotFoundForMissingTask(t *testing.T) {
+	svc := NewTaskService(
+		&taskRepoMock{
+			getByIDFn: func(ctx context.Context, id uint64) (*model.Task, error) {
+				return nil, repository.ErrNotFound
+			},
+		},
+		&teamRepoForTaskMock{},
+		&userRepoMock{},
+		&taskAssignRepoStub{},
+		&activityLogRepoMock{},
+	)
+
+	_, _, _, _, err := svc.ListActivityLogs(context.Background(), 9, 404, 1, 10)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, repository.ErrNotFound)
 }
 
 func uint64Ptr(v uint64) *uint64 {

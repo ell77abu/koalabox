@@ -92,6 +92,14 @@ type TaskDependencyGraph struct {
 	Links []model.TaskDependencyLink `json:"links"`
 }
 
+type TaskActivityLogItem struct {
+	ID         uint64                   `json:"id"`
+	ActorName  string                   `json:"actor_name"`
+	ActionType model.ActivityActionType `json:"action_type"`
+	Content    string                   `json:"content"`
+	CreatedAt  string                   `json:"created_at"`
+}
+
 type UnresolvedDependenciesError struct {
 	IDs          []uint64
 	Predecessors []model.TaskDependencyNode
@@ -130,17 +138,29 @@ type TaskService interface {
 	RemoveDependency(ctx context.Context, userID, taskID, predecessorID uint64) error
 	GetDependencies(ctx context.Context, userID, taskID uint64) (*TaskDependencies, error)
 	GetDependencyGraph(ctx context.Context, userID, taskID uint64) (*TaskDependencyGraph, error)
+	ListActivityLogs(ctx context.Context, userID, taskID uint64, page, size int) ([]TaskActivityLogItem, int64, int, int, error)
 }
 
 type taskService struct {
-	taskRepo   repository.TaskRepository
-	teamRepo   repository.TeamRepository
-	userRepo   repository.UserRepository
-	assignRepo repository.TaskAssignmentRepository
+	taskRepo        repository.TaskRepository
+	teamRepo        repository.TeamRepository
+	userRepo        repository.UserRepository
+	assignRepo      repository.TaskAssignmentRepository
+	activityLogRepo repository.ActivityLogRepository
 }
 
-func NewTaskService(taskRepo repository.TaskRepository, teamRepo repository.TeamRepository, userRepo repository.UserRepository, assignRepo repository.TaskAssignmentRepository) TaskService {
-	return &taskService{taskRepo: taskRepo, teamRepo: teamRepo, userRepo: userRepo, assignRepo: assignRepo}
+func NewTaskService(taskRepo repository.TaskRepository, teamRepo repository.TeamRepository, userRepo repository.UserRepository, assignRepo repository.TaskAssignmentRepository, activityLogRepo ...repository.ActivityLogRepository) TaskService {
+	var logRepo repository.ActivityLogRepository
+	if len(activityLogRepo) > 0 {
+		logRepo = activityLogRepo[0]
+	}
+	return &taskService{
+		taskRepo:        taskRepo,
+		teamRepo:        teamRepo,
+		userRepo:        userRepo,
+		assignRepo:      assignRepo,
+		activityLogRepo: logRepo,
+	}
 }
 
 func (s *taskService) List(ctx context.Context, userID uint64, userLevel uint8, page, size int, teamID *uint64) ([]model.Task, int64, int, int, error) {
@@ -247,6 +267,9 @@ func (s *taskService) Create(ctx context.Context, userID uint64, req CreateTaskR
 	if err := s.createAssignmentNotification(ctx, task, userID, nil, nil); err != nil {
 		return nil, err
 	}
+	if err := s.writeTaskActivityLog(ctx, userID, model.ActivityActionCreateTask, task, fmt.Sprintf("创建了任务「%s」", task.Title)); err != nil {
+		return nil, err
+	}
 	return task, nil
 }
 
@@ -292,6 +315,7 @@ func (s *taskService) Update(ctx context.Context, userID uint64, taskID uint64, 
 	if task.Status == status {
 		return task, nil
 	}
+	originalTask := cloneTask(task)
 	if status == model.TaskStatusDONE {
 		if err := s.ensureDependenciesCompleted(ctx, task.ID); err != nil {
 			return nil, err
@@ -307,12 +331,29 @@ func (s *taskService) Update(ctx context.Context, userID uint64, taskID uint64, 
 	if err := s.taskRepo.UpdateStatusByIDForAssignedMemberScope(ctx, task.ID, userID, status); err != nil {
 		return nil, err
 	}
-	return s.taskRepo.GetByIDForUserScope(ctx, taskID, userID)
+	updatedTask, err := s.taskRepo.GetByIDForUserScope(ctx, taskID, userID)
+	if err != nil {
+		return nil, err
+	}
+	content := s.buildTaskUpdateContent(ctx, &originalTask, updatedTask)
+	if content != "" {
+		if err := s.writeTaskActivityLog(ctx, userID, model.ActivityActionUpdateTaskInfo, updatedTask, content); err != nil {
+			return nil, err
+		}
+	}
+	return updatedTask, nil
 }
 
 func (s *taskService) Delete(ctx context.Context, userID uint64, userLevel uint8, taskID uint64) error {
 	if userLevel == 1 {
-		return s.taskRepo.DeleteByID(ctx, taskID)
+		task, err := s.taskRepo.GetByID(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		if err := s.taskRepo.DeleteByID(ctx, taskID); err != nil {
+			return err
+		}
+		return s.writeTaskActivityLog(ctx, userID, model.ActivityActionDeleteTask, task, fmt.Sprintf("删除了任务「%s」", task.Title))
 	}
 
 	task, err := s.taskRepo.GetByIDForUserScope(ctx, taskID, userID)
@@ -324,17 +365,24 @@ func (s *taskService) Delete(ctx context.Context, userID uint64, userLevel uint8
 		if task.UserID != userID {
 			return repository.ErrForbidden
 		}
-		return s.taskRepo.DeleteByIDForOwnerOrTeamManagerScope(ctx, taskID, userID)
+		if err := s.taskRepo.DeleteByIDForOwnerOrTeamManagerScope(ctx, taskID, userID); err != nil {
+			return err
+		}
+		return s.writeTaskActivityLog(ctx, userID, model.ActivityActionDeleteTask, task, fmt.Sprintf("删除了任务「%s」", task.Title))
 	}
 
 	if err := s.requireTeamManager(ctx, *task.TeamID, userID); err != nil {
 		return err
 	}
 
-	return s.taskRepo.DeleteByIDForOwnerOrTeamManagerScope(ctx, taskID, userID)
+	if err := s.taskRepo.DeleteByIDForOwnerOrTeamManagerScope(ctx, taskID, userID); err != nil {
+		return err
+	}
+	return s.writeTaskActivityLog(ctx, userID, model.ActivityActionDeleteTask, task, fmt.Sprintf("删除了任务「%s」", task.Title))
 }
 
 func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.Task, req UpdateTaskRequest, operatorID uint64) (*model.Task, error) {
+	originalTask := cloneTask(task)
 	originalAssigneeID := task.AssigneeID
 	originalTeamID := task.TeamID
 	if req.Title != nil {
@@ -418,6 +466,12 @@ func (s *taskService) applyTaskUpdatesAndSave(ctx context.Context, task *model.T
 	}
 	if err := s.createAssignmentNotification(ctx, updatedTask, operatorID, originalAssigneeID, originalTeamID); err != nil {
 		return nil, err
+	}
+	content := s.buildTaskUpdateContent(ctx, &originalTask, updatedTask)
+	if content != "" {
+		if err := s.writeTaskActivityLog(ctx, operatorID, model.ActivityActionUpdateTaskInfo, updatedTask, content); err != nil {
+			return nil, err
+		}
 	}
 	return updatedTask, nil
 }
@@ -592,6 +646,45 @@ func (s *taskService) GetDependencyGraph(ctx context.Context, userID, taskID uin
 	}, nil
 }
 
+func (s *taskService) ListActivityLogs(ctx context.Context, userID, taskID uint64, page, size int) ([]TaskActivityLogItem, int64, int, int, error) {
+	if s.activityLogRepo == nil {
+		return nil, 0, 0, 0, errors.New("activity log repository is not configured")
+	}
+	if page <= 0 {
+		page = 1
+	}
+	if size <= 0 {
+		size = 10
+	}
+	if size > 100 {
+		size = 100
+	}
+
+	task, err := s.taskRepo.GetByIDIncludingDeleted(ctx, taskID)
+	if err != nil {
+		return nil, 0, 0, 0, err
+	}
+	if err := s.requireTaskReadAccess(ctx, task, userID); err != nil {
+		return nil, 0, 0, 0, err
+	}
+
+	logs, total, err := s.activityLogRepo.ListByTaskID(ctx, taskID, page, size)
+	if err != nil {
+		return nil, 0, 0, 0, err
+	}
+	items := make([]TaskActivityLogItem, 0, len(logs))
+	for _, log := range logs {
+		items = append(items, TaskActivityLogItem{
+			ID:         log.ID,
+			ActorName:  log.ActorName,
+			ActionType: log.ActionType,
+			Content:    log.Content,
+			CreatedAt:  formatActivityTime(log.CreatedAt),
+		})
+	}
+	return items, total, page, size, nil
+}
+
 func (s *taskService) createAssignmentNotification(ctx context.Context, task *model.Task, requesterID uint64, originalAssigneeID, originalTeamID *uint64) error {
 	if task.TeamID == nil || task.AssigneeID == nil {
 		return nil
@@ -628,6 +721,106 @@ func (s *taskService) createAssignmentNotification(ctx context.Context, task *mo
 		return err
 	}
 	return nil
+}
+
+func (s *taskService) writeTaskActivityLog(ctx context.Context, actorID uint64, action model.ActivityActionType, task *model.Task, content string) error {
+	if s.activityLogRepo == nil {
+		return nil
+	}
+	actor, err := s.userRepo.GetByID(ctx, actorID)
+	if err != nil {
+		return err
+	}
+	scope := model.ActivityScopePersonal
+	if task.TeamID != nil {
+		scope = model.ActivityScopeTeam
+	}
+	return s.activityLogRepo.Create(ctx, &model.ActivityLog{
+		ActorID:    actorID,
+		ActorName:  actor.Username,
+		ActionType: action,
+		TargetType: model.ActivityTargetTask,
+		TargetID:   task.ID,
+		Scope:      scope,
+		TeamID:     cloneUint64Ptr(task.TeamID),
+		Content:    content,
+	})
+}
+
+func (s *taskService) buildTaskUpdateContent(ctx context.Context, before, after *model.Task) string {
+	changes := make([]string, 0)
+	if before.Title != after.Title {
+		changes = append(changes, fmt.Sprintf("将标题从「%s」修改为「%s」", before.Title, after.Title))
+	}
+	if before.Description != after.Description {
+		changes = append(changes, fmt.Sprintf("将描述从「%s」修改为「%s」", before.Description, after.Description))
+	}
+	if before.Status != after.Status {
+		changes = append(changes, fmt.Sprintf("将状态从 %s 修改为 %s", before.Status, after.Status))
+	}
+	if before.Priority != after.Priority {
+		changes = append(changes, fmt.Sprintf("将优先级从 %d 修改为 %d", before.Priority, after.Priority))
+	}
+	if !isSameTimePtr(before.Deadline, after.Deadline) {
+		changes = append(changes, fmt.Sprintf("将截止时间从 %s 修改为 %s", formatDeadline(before.Deadline), formatDeadline(after.Deadline)))
+	}
+	if !isSameUint64Ptr(before.AssigneeID, after.AssigneeID) {
+		changes = append(changes, fmt.Sprintf("将执行者从 %s 修改为 %s", s.formatAssignee(ctx, before.AssigneeID), s.formatAssignee(ctx, after.AssigneeID)))
+	}
+	return strings.Join(changes, "；")
+}
+
+func (s *taskService) formatAssignee(ctx context.Context, userID *uint64) string {
+	if userID == nil {
+		return "未分配"
+	}
+	user, err := s.userRepo.GetByID(ctx, *userID)
+	if err == nil && strings.TrimSpace(user.Username) != "" {
+		return user.Username
+	}
+	return fmt.Sprintf("用户ID %d", *userID)
+}
+
+func formatDeadline(deadline *time.Time) string {
+	if deadline == nil {
+		return "空"
+	}
+	return deadline.Local().Format("2006-01-02 15:04:05")
+}
+
+func formatActivityTime(t time.Time) string {
+	return t.Local().Format("2006-01-02 15:04:05")
+}
+
+func cloneTask(task *model.Task) model.Task {
+	cloned := *task
+	cloned.TeamID = cloneUint64Ptr(task.TeamID)
+	cloned.AssigneeID = cloneUint64Ptr(task.AssigneeID)
+	cloned.Deadline = cloneTimePtr(task.Deadline)
+	return cloned
+}
+
+func cloneUint64Ptr(value *uint64) *uint64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func cloneTimePtr(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func isSameTimePtr(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.Equal(*right)
 }
 
 func (s *taskService) ensureDependenciesCompleted(ctx context.Context, taskID uint64) error {
