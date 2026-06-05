@@ -63,7 +63,7 @@
                 :key="task.id"
                 class="task-node-row"
                 :class="{ unfinished: task.status !== 'DONE' }"
-                :to="`/tasks/${task.id}/dependencies`"
+                :to="buildDependencyRoute(task.id)"
               >
                 <span class="node-title">{{ task.title }}</span>
                 <span class="status-badge" :class="statusClass(task.status)">
@@ -84,7 +84,7 @@
                 v-for="task in successors"
                 :key="task.id"
                 class="task-node-row"
-                :to="`/tasks/${task.id}/dependencies`"
+                :to="buildDependencyRoute(task.id)"
               >
                 <span class="node-title">{{ task.title }}</span>
                 <span class="status-badge" :class="statusClass(task.status)">
@@ -149,7 +149,7 @@
                   class="graph-node"
                   :class="{ current: node.id === taskId, done: node.status === 'DONE' }"
                   :style="{ left: `${node.x}px`, top: `${node.y}px` }"
-                  :to="`/tasks/${node.id}/dependencies`"
+                  :to="buildDependencyRoute(node.id)"
                 >
                   <span class="graph-node-title">{{ node.title }}</span>
                   <span class="status-badge" :class="statusClass(node.status)">
@@ -170,6 +170,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { taskStore } from '../stores/task';
 import { getTasksApi, getTaskDependenciesApi, getTaskDependencyGraphApi } from '../services/task';
+import { getTeamTasksApi } from '../services/team';
 import { getApiErrorMessage, getApiFailureMessage } from '../utils/apiError';
 
 const route = useRoute();
@@ -185,6 +186,12 @@ const graphLinks = ref([]);
 const showGraph = ref(false);
 
 const taskId = computed(() => Number(route.params.id));
+const teamIdFromQuery = computed(() => {
+  const raw = route.query.team_id;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+});
 
 const currentTask = computed(() =>
   graphNodes.value.find((node) => Number(node.id) === taskId.value) || null
@@ -198,7 +205,9 @@ const isPersonalTask = (item) => {
 };
 
 const scopeLabel = computed(() => {
-  if (!task.value) return '-';
+  if (!task.value) {
+    return teamIdFromQuery.value ? '团队任务' : '-';
+  }
   return isPersonalTask(task.value) ? '个人任务' : '团队任务';
 });
 
@@ -233,6 +242,20 @@ const loadTaskInfo = async () => {
     return;
   }
 
+  const teamId = teamIdFromQuery.value;
+  if (teamId) {
+    const teamRes = await getTeamTasksApi(teamId);
+    if (teamRes.data?.code !== 0) {
+      throw new Error(getApiFailureMessage(teamRes, '加载任务失败', '团队任务查询失败'));
+    }
+    const teamList = Array.isArray(teamRes.data?.data?.list) ? teamRes.data.data.list : [];
+    const teamFound = teamList.find((item) => Number(item.id) === taskId.value);
+    if (teamFound) {
+      task.value = teamFound;
+      return;
+    }
+  }
+
   const response = await getTasksApi(1, 1000, 'default');
   if (response.data?.code !== 0) {
     throw new Error(getApiFailureMessage(response, '加载任务失败', '任务查询失败'));
@@ -244,6 +267,12 @@ const loadTaskInfo = async () => {
     throw new Error('任务不存在或已被删除');
   }
   task.value = found;
+};
+
+const buildDependencyRoute = (id) => {
+  const teamId = teamIdFromQuery.value;
+  const path = `/tasks/${id}/dependencies`;
+  return teamId ? { path, query: { team_id: teamId } } : path;
 };
 
 const loadDependencyData = async () => {

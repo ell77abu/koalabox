@@ -123,9 +123,15 @@
               <div class="task-actions">
                 <RouterLink
                   class="btn btn-small btn-dependency"
-                  :to="`/tasks/${task.id}/dependencies`"
+                  :to="{ path: `/tasks/${task.id}`, query: { team_id: teamId } }"
                 >
-                  依赖详情
+                  日志
+                </RouterLink>
+                <RouterLink
+                  class="btn btn-small btn-dependency"
+                  :to="{ path: `/tasks/${task.id}/dependencies`, query: { team_id: teamId } }"
+                >
+                  详情
                 </RouterLink>
                 <button v-if="canEditTask(task)" class="btn btn-small btn-edit" @click="startEdit(task)">编辑</button>
                 <button 
