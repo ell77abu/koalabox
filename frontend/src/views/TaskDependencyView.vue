@@ -234,6 +234,27 @@ const normalizeTaskNode = (node) => ({
   status: node.status || 'TODO',
 });
 
+const resolveTeamId = () => {
+  if (teamIdFromQuery.value) return teamIdFromQuery.value;
+  if (task.value && !isPersonalTask(task.value)) {
+    const parsed = Number(task.value.team_id);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
+};
+
+const fallbackTaskFromGraph = (teamId) => {
+  const graphNode = graphNodes.value.find((node) => Number(node.id) === taskId.value);
+  if (!graphNode) return null;
+  return {
+    id: taskId.value,
+    title: graphNode.title,
+    status: graphNode.status,
+    team_id: teamId,
+    description: '',
+  };
+};
+
 const loadTaskInfo = async () => {
   task.value = null;
   const cached = taskStore.tasks.value.find((item) => Number(item.id) === taskId.value);
@@ -242,7 +263,7 @@ const loadTaskInfo = async () => {
     return;
   }
 
-  const teamId = teamIdFromQuery.value;
+  const teamId = resolveTeamId();
   if (teamId) {
     const teamRes = await getTeamTasksApi(teamId);
     if (teamRes.data?.code !== 0) {
@@ -263,14 +284,29 @@ const loadTaskInfo = async () => {
 
   const list = Array.isArray(response.data?.data?.list) ? response.data.data.list : [];
   const found = list.find((item) => Number(item.id) === taskId.value);
-  if (!found) {
-    throw new Error('任务不存在或已被删除');
+  if (found) {
+    task.value = found;
+    return;
   }
-  task.value = found;
+
+  // 依赖接口已按团队成员权限返回数据；列表接口可能不含「分配给别人的」团队任务
+  const fallback = fallbackTaskFromGraph(teamId);
+  if (fallback) {
+    task.value = fallback;
+    return;
+  }
+
+  task.value = {
+    id: taskId.value,
+    title: `任务 #${taskId.value}`,
+    status: 'TODO',
+    team_id: teamId,
+    description: '',
+  };
 };
 
 const buildDependencyRoute = (id) => {
-  const teamId = teamIdFromQuery.value;
+  const teamId = resolveTeamId();
   const path = `/tasks/${id}/dependencies`;
   return teamId ? { path, query: { team_id: teamId } } : path;
 };
