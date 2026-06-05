@@ -372,11 +372,54 @@ func (s *teamService) cleanupDepartingMember(ctx context.Context, tx *gorm.DB, t
 	}
 
 	// 成员离队后，回收该成员在团队内的相关分配请求，避免残留可见性与状态歧义。
+	// task_assignment_requests 有 (task_id, assignee_id, status) 唯一约束：
+	// 同一成员反复加入/退出时可能已有 DECLINED 历史，直接批量更新会撞唯一键。
+	activeStatuses := []model.InvitationStatus{
+		model.InvitationStatusPending,
+		model.InvitationStatusAccepted,
+	}
+
+	if err := tx.WithContext(ctx).
+		Where("team_id = ?", teamID).
+		Where("assignee_id = ?", userID).
+		Where("status IN ?", activeStatuses).
+		Where(`EXISTS (
+			SELECT 1
+			FROM task_assignment_requests declined
+			WHERE declined.task_id = task_assignment_requests.task_id
+				AND declined.assignee_id = task_assignment_requests.assignee_id
+				AND declined.team_id = ?
+				AND declined.assignee_id = ?
+				AND declined.status = ?
+		)`, teamID, userID, model.InvitationStatusDeclined).
+		Delete(&model.TaskAssignmentRequest{}).Error; err != nil {
+		return err
+	}
+
+	if err := tx.WithContext(ctx).
+		Where("team_id = ?", teamID).
+		Where("assignee_id = ?", userID).
+		Where("status IN ?", activeStatuses).
+		Where(`id NOT IN (
+			SELECT keep_id
+			FROM (
+				SELECT MAX(id) AS keep_id
+				FROM task_assignment_requests
+				WHERE team_id = ?
+					AND assignee_id = ?
+					AND status IN ?
+				GROUP BY task_id, assignee_id
+			) kept
+		)`, teamID, userID, activeStatuses).
+		Delete(&model.TaskAssignmentRequest{}).Error; err != nil {
+		return err
+	}
+
 	return tx.WithContext(ctx).
 		Model(&model.TaskAssignmentRequest{}).
 		Where("team_id = ?", teamID).
 		Where("assignee_id = ?", userID).
-		Where("status IN ?", []model.InvitationStatus{model.InvitationStatusPending, model.InvitationStatusAccepted}).
+		Where("status IN ?", activeStatuses).
 		Updates(map[string]interface{}{
 			"status": model.InvitationStatusDeclined,
 		}).Error
