@@ -223,9 +223,15 @@
                   </button>
                   <RouterLink
                     class="btn btn-small btn-dependency"
+                    :to="`/tasks/${task.id}`"
+                  >
+                    日志
+                  </RouterLink>
+                  <RouterLink
+                    class="btn btn-small btn-dependency"
                     :to="`/tasks/${task.id}/dependencies`"
                   >
-                    依赖详情
+                    详情
                   </RouterLink>
                   <button
                     v-if="canUpdateTaskStatus(task)"
@@ -332,9 +338,15 @@
                     <div class="task-actions">
                       <RouterLink
                         class="btn btn-small btn-dependency"
+                        :to="`/tasks/${task.id}`"
+                      >
+                        日志
+                      </RouterLink>
+                      <RouterLink
+                        class="btn btn-small btn-dependency"
                         :to="`/tasks/${task.id}/dependencies`"
                       >
-                        依赖详情
+                        详情
                       </RouterLink>
                       <button
                         class="btn btn-small btn-edit"
