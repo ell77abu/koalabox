@@ -223,13 +223,13 @@
                   </button>
                   <RouterLink
                     class="btn btn-small btn-dependency"
-                    :to="`/tasks/${task.id}`"
+                    :to="buildTaskRoute(task)"
                   >
                     日志
                   </RouterLink>
                   <RouterLink
                     class="btn btn-small btn-dependency"
-                    :to="`/tasks/${task.id}/dependencies`"
+                    :to="buildTaskRoute(task, '/dependencies')"
                   >
                     详情
                   </RouterLink>
@@ -490,6 +490,13 @@ const isSystemAdmin = computed(() => Number(authStore.level.value) === 1);
 const isPersonalTask = (task) => {
   const teamId = task?.team_id;
   return teamId === null || teamId === undefined || teamId === '' || teamId === 0 || teamId === '0';
+};
+
+/** 团队任务详情/日志需带 team_id，便于 Admin/Owner 查看同团队其他成员的任务 */
+const buildTaskRoute = (task, suffix = '') => {
+  const path = `/tasks/${task.id}${suffix}`;
+  if (isPersonalTask(task)) return path;
+  return { path, query: { team_id: task.team_id } };
 };
 
 // === Lab2 权限控制逻辑 ===
