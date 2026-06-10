@@ -127,6 +127,13 @@
               >
                 依赖详情
               </RouterLink>
+              <button
+                class="btn btn-small btn-log"
+                type="button"
+                @click="openTaskLogs(task)"
+              >
+                操作日志
+              </button>
               <button v-if="canEditTask(task)" class="btn btn-small btn-edit" @click="startEdit(task)">编辑</button>
               <button 
                 v-if="canDeleteTeamTask(task)" 
@@ -361,6 +368,11 @@
       </div>
     </div>
 
+    <TaskLogModal
+      v-model="showTaskLogModal"
+      :task="selectedLogTask"
+    />
+
   </div>
 </template>
 
@@ -369,6 +381,7 @@ import { ref, computed, onMounted, watch } from 'vue'; // 新增导入 watch
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { authStore } from '../stores/auth'; 
 import { teamStore } from '../stores/team';
+import TaskLogModal from '../components/TaskLogModal.vue';
 import {
   getTeamsApi, getTeamMembersApi, addTeamMemberApi, deleteTeamMemberApi, updateTeamMemberRoleApi,
   getTeamTasksApi, updateTeamApi, dissolveTeamApi,
@@ -403,6 +416,8 @@ const taskLoadError = ref('');
 const searchQuery = ref('');
 const showCreateTaskModal = ref(false);
 const showEditTaskModal = ref(false);
+const showTaskLogModal = ref(false);
+const selectedLogTask = ref(null);
 const submittingTask = ref(false);
 
 const newTask = ref({ title: '', description: '', priority: '2', deadline: '', assignee_id: null, predecessor_ids: [] });
@@ -711,6 +726,11 @@ const handleDeleteTask = async (task) => {
   } catch (error) { alert(getApiErrorMessage(error, '删除团队任务失败')); }
 };
 
+const openTaskLogs = (task) => {
+  selectedLogTask.value = task;
+  showTaskLogModal.value = true;
+};
+
 /* ================== 团队管理生命周期操作 ================== */
 
 const handleLeaveTeam = async () => {
@@ -950,6 +970,8 @@ onMounted(() => {
   line-height: 1;
 }
 .btn-dependency:hover { background: #eff6ff; border-color: #60a5fa; color: #1d4ed8; }
+.btn-log { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.btn-log:hover { background: #d1fae5; border-color: #6ee7b7; color: #065f46; }
 .btn-edit { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
 .btn-edit:hover:not(:disabled) { background: #bfdbfe; }
 .btn-danger { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
