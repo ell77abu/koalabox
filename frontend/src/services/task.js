@@ -32,6 +32,15 @@ export const updateTaskApi = (id, payload) => http.put(`/tasks/${id}`, payload);
 export const deleteTaskApi = (id) => http.delete(`/tasks/${id}`);
 
 /**
+ * 获取任务操作日志
+ * @param {number} id - 任务 ID
+ * @param {Object} params - 分页参数
+ * @returns {Promise}
+ */
+export const getTaskLogsApi = (id, params = { page: 1, size: 10 }) =>
+  http.get(`/tasks/${id}/logs`, { params });
+
+/**
  * 为任务添加前置依赖
  * @param {number} taskId - 当前任务 ID
  * @param {number} predecessorId - 前置任务 ID
