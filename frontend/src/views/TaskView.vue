@@ -228,6 +228,13 @@
                     依赖详情
                   </RouterLink>
                   <button
+                    class="btn btn-small btn-log"
+                    type="button"
+                    @click="openTaskLogs(task)"
+                  >
+                    操作日志
+                  </button>
+                  <button
                     v-if="canUpdateTaskStatus(task)"
                     class="btn btn-small btn-edit"
                     @click="startEdit(task)"
@@ -337,6 +344,13 @@
                         依赖详情
                       </RouterLink>
                       <button
+                        class="btn btn-small btn-log"
+                        type="button"
+                        @click="openTaskLogs(task)"
+                      >
+                        操作日志
+                      </button>
+                      <button
                         class="btn btn-small btn-edit"
                         @click="startEdit(task)"
                         :disabled="updatingId === task.id"
@@ -444,6 +458,11 @@
           </form>
         </div>
       </div>
+
+      <TaskLogModal
+        v-model="showTaskLogModal"
+        :task="selectedLogTask"
+      />
     </section>
   </div>
 </template>
@@ -453,6 +472,7 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter, RouterLink } from 'vue-router';
 import { authStore } from '../stores/auth';
 import { taskStore } from '../stores/task';
+import TaskLogModal from '../components/TaskLogModal.vue';
 import {
   getTasksApi,
   createTaskApi,
@@ -565,6 +585,8 @@ const teamLoadError = ref('');
 const creatingTask = ref(false);
 const updatingId = ref(null);
 const deletingId = ref(null);
+const showTaskLogModal = ref(false);
+const selectedLogTask = ref(null);
 const createError = ref('');
 const updateError = ref('');
 const searchQuery = ref('');
@@ -963,6 +985,11 @@ const onDeleteTask = async (task) => {
   } finally {
     deletingId.value = null;
   }
+};
+
+const openTaskLogs = (task) => {
+  selectedLogTask.value = task;
+  showTaskLogModal.value = true;
 };
 
 // 开始编辑任务
@@ -1778,6 +1805,18 @@ onBeforeUnmount(() => {
   background: #eff6ff;
   border-color: #60a5fa;
   color: #1d4ed8;
+}
+
+.btn-log {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.btn-log:hover {
+  background: #d1fae5;
+  border-color: #6ee7b7;
+  color: #065f46;
 }
 
 .btn-danger {
