@@ -1,69 +1,56 @@
 <template>
-  <BaseModal v-model="visible" :title="modalTitle" @close="reset">
-    <div class="log-panel">
-      <div v-if="loading" class="log-state">日志加载中...</div>
-
-      <div v-else-if="error" class="log-state log-error">
-        {{ error }}
+  <section class="log-panel">
+    <div class="panel-heading">
+      <div>
+        <h2>操作日志</h2>
+        <span>最近 {{ logs.length }} 条记录</span>
       </div>
-
-      <div v-else-if="logs.length === 0" class="log-state">
-        暂无操作记录
-      </div>
-
-      <ol v-else class="log-list">
-        <li v-for="log in logs" :key="log.id" class="log-item">
-          <div class="log-dot" aria-hidden="true"></div>
-          <div class="log-content">
-            <p>
-              <strong>{{ log.actor_name || '未知用户' }}</strong>
-              在 {{ formatLogTime(log.created_at) }}
-              {{ log.content || actionLabel(log.action_type) }}
-            </p>
-            <span>{{ actionLabel(log.action_type) }}</span>
-          </div>
-        </li>
-      </ol>
+      <button class="refresh-btn" type="button" :disabled="loading" @click="loadLogs">
+        {{ loading ? '加载中...' : '刷新' }}
+      </button>
     </div>
 
-    <template #footer>
-      <button type="button" class="log-close-btn" @click="visible = false">关闭</button>
-    </template>
-  </BaseModal>
+    <div v-if="loading" class="log-state">日志加载中...</div>
+
+    <div v-else-if="error" class="log-state log-error">
+      {{ error }}
+    </div>
+
+    <div v-else-if="logs.length === 0" class="log-state">
+      暂无操作记录
+    </div>
+
+    <ol v-else class="log-list">
+      <li v-for="log in logs" :key="log.id" class="log-item">
+        <div class="log-dot" aria-hidden="true"></div>
+        <div class="log-content">
+          <p>
+            <strong>{{ log.actor_name || '未知用户' }}</strong>
+            在 {{ formatLogTime(log.created_at) }}
+            {{ log.content || actionLabel(log.action_type) }}
+          </p>
+          <span>{{ actionLabel(log.action_type) }}</span>
+        </div>
+      </li>
+    </ol>
+  </section>
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue';
-import BaseModal from './BaseModal.vue';
+import { onMounted, ref, watch } from 'vue';
 import { getTaskLogsApi } from '../services/task';
 import { getApiErrorMessage, getApiFailureMessage } from '../utils/apiError';
 
 const props = defineProps({
-  modelValue: {
-    type: Boolean,
+  taskId: {
+    type: Number,
     required: true,
   },
-  task: {
-    type: Object,
-    default: null,
-  },
-});
-
-const emit = defineEmits(['update:modelValue']);
-
-const visible = computed({
-  get: () => props.modelValue,
-  set: (value) => emit('update:modelValue', value),
 });
 
 const logs = ref([]);
 const loading = ref(false);
 const error = ref('');
-
-const modalTitle = computed(() => {
-  const title = props.task?.title ? `「${props.task.title}」` : '任务';
-  return `${title}操作日志`;
-});
 
 const actionLabel = (type) => {
   const labels = {
@@ -88,42 +75,83 @@ const formatLogTime = (value) => {
 };
 
 const loadLogs = async () => {
-  if (!props.task?.id) return;
+  if (!Number.isFinite(props.taskId) || props.taskId <= 0) return;
 
   loading.value = true;
   error.value = '';
-  logs.value = [];
   try {
-    const res = await getTaskLogsApi(props.task.id, { page: 1, size: 10 });
+    const res = await getTaskLogsApi(props.taskId, { page: 1, size: 10 });
     if (res.data.code === 0) {
       logs.value = res.data.data?.list || [];
     } else {
+      logs.value = [];
       error.value = getApiFailureMessage(res, '获取任务日志失败');
     }
   } catch (err) {
+    logs.value = [];
     error.value = getApiErrorMessage(err, '获取任务日志失败');
   } finally {
     loading.value = false;
   }
 };
 
-const reset = () => {
-  logs.value = [];
-  error.value = '';
-  loading.value = false;
-};
-
-watch(
-  () => [props.modelValue, props.task?.id],
-  ([isOpen]) => {
-    if (isOpen) loadLogs();
-  }
-);
+onMounted(loadLogs);
+watch(() => props.taskId, loadLogs);
 </script>
 
 <style scoped>
 .log-panel {
-  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  min-height: 180px;
+  padding: 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.9rem;
+}
+
+.panel-heading h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 1rem;
+}
+
+.panel-heading span {
+  display: inline-block;
+  margin-top: 0.35rem;
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.refresh-btn {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #93c5fd;
+  border-radius: 8px;
+  background: #fff;
+  color: #1d4ed8;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.refresh-btn:hover:not(:disabled) {
+  background: #eff6ff;
+  border-color: #60a5fa;
+}
+
+.refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .log-state {
@@ -187,31 +215,19 @@ watch(
   font-size: 0.76rem;
 }
 
-.log-close-btn {
-  min-width: 96px;
-  padding: 0.65rem 1rem;
-  border: none;
-  border-radius: 8px;
-  background: #2563eb;
-  color: #fff;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.log-close-btn:hover {
-  background: #1d4ed8;
-}
-
-:global([data-theme="dark"]) .log-state,
-:global([data-theme="dark"]) .log-content {
+:global([data-theme="dark"]) .log-panel,
+:global([data-theme="dark"]) .log-content,
+:global([data-theme="dark"]) .log-state {
   background: #0f172a;
   border-color: #334155;
 }
 
+:global([data-theme="dark"]) .panel-heading h2,
 :global([data-theme="dark"]) .log-content p {
   color: #f8fafc;
 }
 
+:global([data-theme="dark"]) .panel-heading span,
 :global([data-theme="dark"]) .log-content span,
 :global([data-theme="dark"]) .log-state {
   color: #94a3b8;
