@@ -160,6 +160,8 @@
             </div>
           </template>
         </section>
+
+        <TaskActivityLog :task-id="taskId" />
       </template>
     </section>
   </div>
@@ -168,6 +170,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
+import TaskActivityLog from '../components/TaskActivityLog.vue';
 import { taskStore } from '../stores/task';
 import { getTasksApi, getTaskDependenciesApi, getTaskDependencyGraphApi } from '../services/task';
 import { getTeamTasksApi } from '../services/team';
