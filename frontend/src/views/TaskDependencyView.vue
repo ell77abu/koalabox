@@ -17,10 +17,12 @@
             >
               优先级 {{ priorityLabel(task?.priority) }}
             </span>
-            <span class="task-id">#{{ taskId }}</span>
           </div>
         </div>
-        <RouterLink class="task-list-btn" to="/tasks">任务列表</RouterLink>
+        <div class="header-side">
+          <RouterLink class="task-list-btn" to="/tasks">任务列表</RouterLink>
+          <span class="task-id">#{{ taskId }}</span>
+        </div>
       </header>
 
       <div v-if="loading" class="state-panel">依赖数据加载中...</div>
@@ -519,8 +521,10 @@ watch(() => route.params.id, loadDependencyData);
 }
 
 .task-id {
-  color: #64748b;
-  font-size: 0.85rem;
+  color: #1d4ed8;
+  font-size: 1.35rem;
+  font-weight: 800;
+  line-height: 1;
 }
 
 
@@ -559,6 +563,14 @@ watch(() => route.params.id, loadDependencyData);
   align-items: center;
   justify-content: center;
   transition: all 0.25s ease;
+}
+
+.header-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.7rem;
+  flex-shrink: 0;
 }
 
 .task-list-btn:hover {
@@ -896,6 +908,10 @@ watch(() => route.params.id, loadDependencyData);
   .dependency-header {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .header-side {
+    align-items: flex-start;
   }
 
   .detail-grid,
