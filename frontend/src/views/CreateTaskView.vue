@@ -88,12 +88,19 @@
         </button>
       </div>
     </form>
+
+    <MessageModal
+      v-model="messageOpen"
+      :title="messageTitle"
+      :message="messageText"
+    />
   </section>
 </template>
 
 <script setup>
 import { onBeforeUnmount, onMounted, reactive, ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
+import MessageModal from '../components/MessageModal.vue';
 // 引入依赖管理相关的 API 与 Store
 import { createTaskApi, addTaskDependencyApi, getTasksApi } from '../services/task';
 import { taskStore } from '../stores/task';
@@ -102,6 +109,9 @@ import { getApiErrorMessage, getApiFailureMessage } from '../utils/apiError';
 const router = useRouter();
 const submitting = ref(false);
 const dependencyLoadError = ref('');
+const messageOpen = ref(false);
+const messageTitle = ref('提示');
+const messageText = ref('');
 
 const newTask = reactive({
   title: '',
@@ -159,6 +169,12 @@ const togglePriorityMenu = () => {
 const selectPriority = (value) => {
   newTask.priority = value;
   priorityOpen.value = false;
+};
+
+const showMessage = (message, title = '提示') => {
+  messageTitle.value = title;
+  messageText.value = message;
+  messageOpen.value = true;
 };
 
 const handleOutsideClick = (event) => {
@@ -228,7 +244,7 @@ const onCreateTask = async () => {
     // 1. 先调用 API 创建任务
     const res = await createTaskApi(payload);
     if (res.data?.code !== 0) {
-      alert(getApiFailureMessage(res, '创建任务失败', '创建任务失败'));
+      showMessage(getApiFailureMessage(res, '创建任务失败', '创建任务失败'), '操作失败');
       return;
     }
     
@@ -247,11 +263,11 @@ const onCreateTask = async () => {
     }
 
     if (dependencyErrors.length > 0) {
-      alert(`任务已创建，但部分前置依赖设置失败：${dependencyErrors.join('；')}`);
+      showMessage(`任务已创建，但部分前置依赖设置失败：${dependencyErrors.join('；')}`, '提示');
     }
     router.push('/tasks');
   } catch (error) {
-    alert(getApiErrorMessage(error, '创建任务失败'));
+    showMessage(getApiErrorMessage(error, '创建任务失败'), '操作失败');
   } finally {
     submitting.value = false;
   }

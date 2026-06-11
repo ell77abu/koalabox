@@ -125,15 +125,8 @@
                 class="btn btn-small btn-dependency"
                 :to="`/tasks/${task.id}/dependencies`"
               >
-                依赖详情
+                任务详情
               </RouterLink>
-              <button
-                class="btn btn-small btn-log"
-                type="button"
-                @click="openTaskLogs(task)"
-              >
-                操作日志
-              </button>
               <button v-if="canEditTask(task)" class="btn btn-small btn-edit" @click="startEdit(task)">编辑</button>
               <button 
                 v-if="canDeleteTeamTask(task)" 
@@ -368,9 +361,10 @@
       </div>
     </div>
 
-    <TaskLogModal
-      v-model="showTaskLogModal"
-      :task="selectedLogTask"
+    <MessageModal
+      v-model="messageOpen"
+      :title="messageTitle"
+      :message="messageText"
     />
 
   </div>
@@ -381,7 +375,7 @@ import { ref, computed, onMounted, watch } from 'vue'; // 新增导入 watch
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { authStore } from '../stores/auth'; 
 import { teamStore } from '../stores/team';
-import TaskLogModal from '../components/TaskLogModal.vue';
+import MessageModal from '../components/MessageModal.vue';
 import {
   getTeamsApi, getTeamMembersApi, addTeamMemberApi, deleteTeamMemberApi, updateTeamMemberRoleApi,
   getTeamTasksApi, updateTeamApi, dissolveTeamApi,
@@ -416,9 +410,10 @@ const taskLoadError = ref('');
 const searchQuery = ref('');
 const showCreateTaskModal = ref(false);
 const showEditTaskModal = ref(false);
-const showTaskLogModal = ref(false);
-const selectedLogTask = ref(null);
 const submittingTask = ref(false);
+const messageOpen = ref(false);
+const messageTitle = ref('提示');
+const messageText = ref('');
 
 const newTask = ref({ title: '', description: '', priority: '2', deadline: '', assignee_id: null, predecessor_ids: [] });
 const editingTask = ref({ id: null, title: '', description: '', status: 'TODO', priority: '2', deadline: '', assignee_id: null, predecessor_ids: [] });
@@ -477,6 +472,12 @@ const findTaskTitleById = (id) => {
 };
 
 const isSearching = computed(() => searchQuery.value.trim().length > 0);
+
+const showMessage = (message, title = '提示') => {
+  messageTitle.value = title;
+  messageText.value = message;
+  messageOpen.value = true;
+};
 
 // ================== 分页逻辑与过滤 ==================
 const displayedTeamTasks = computed(() => {
@@ -592,7 +593,7 @@ const loadTeamMembers = async () => {
 const handleCreateTask = async () => {
   if (submittingTask.value) return;
   if (!canManageTeamTasks.value) {
-    alert('无权限发布团队任务');
+    showMessage('无权限发布团队任务', '操作失败');
     return;
   }
 
@@ -622,16 +623,16 @@ const handleCreateTask = async () => {
       newTask.value = { title: '', description: '', priority: '2', deadline: '', assignee_id: null, predecessor_ids: [] }; 
       await loadTeamTasks();
       if (dependencyErrors.length > 0) {
-        alert(`任务已创建，但部分依赖设置失败：${dependencyErrors.join('；')}`);
+        showMessage(`任务已创建，但部分依赖设置失败：${dependencyErrors.join('；')}`, '提示');
       }
-    } else alert(getApiFailureMessage(res, '发布团队任务失败', '发布失败'));
-  } catch (error) { alert(getApiErrorMessage(error, '发布团队任务失败')); } 
+    } else showMessage(getApiFailureMessage(res, '发布团队任务失败', '发布失败'), '操作失败');
+  } catch (error) { showMessage(getApiErrorMessage(error, '发布团队任务失败'), '操作失败'); }
   finally { submittingTask.value = false; }
 };
 
 const startEdit = async (task) => {
   if (!canEditTask(task)) {
-    alert('无权限编辑该团队任务');
+    showMessage('无权限编辑该团队任务', '操作失败');
     return;
   }
 
@@ -647,10 +648,10 @@ const startEdit = async (task) => {
       editingDependencies.value = (res.data.data.predecessors || []).map(p => p.id);
       editingTask.value.predecessor_ids = [...editingDependencies.value];
     } else {
-      alert(getApiFailureMessage(res, '获取任务依赖失败'));
+      showMessage(getApiFailureMessage(res, '获取任务依赖失败'), '操作失败');
     }
   } catch (err) {
-    alert(getApiErrorMessage(err, '获取任务依赖失败'));
+    showMessage(getApiErrorMessage(err, '获取任务依赖失败'), '操作失败');
     console.error(getApiErrorMessage(err, '获取任务依赖失败'), err);
   }
   showEditTaskModal.value = true;
@@ -659,7 +660,7 @@ const startEdit = async (task) => {
 const handleUpdateTask = async () => {
   if (submittingTask.value) return;
   if (!canEditTask(editingTask.value)) {
-    alert('无权限更新该团队任务');
+    showMessage('无权限更新该团队任务', '操作失败');
     return;
   }
 
@@ -695,25 +696,25 @@ const handleUpdateTask = async () => {
           }
         }
         if (dependencyErrors.length > 0) {
-          alert(dependencyErrors.join('；'));
+          showMessage(dependencyErrors.join('；'), '操作失败');
           return;
         }
       }
       showEditTaskModal.value = false;
       await loadTeamTasks();
-    } else alert(getApiFailureMessage(res, '更新团队任务失败', '更新失败'));
+    } else showMessage(getApiFailureMessage(res, '更新团队任务失败', '更新失败'), '操作失败');
   } catch (error) {
     if (error.response?.status === 409) {
-      alert(getUnresolvedDependenciesMessage(error, findTaskTitleById, '更新团队任务失败'));
+      showMessage(getUnresolvedDependenciesMessage(error, findTaskTitleById, '更新团队任务失败'), '操作失败');
     } else {
-      alert(getApiErrorMessage(error, '更新团队任务失败'));
+      showMessage(getApiErrorMessage(error, '更新团队任务失败'), '操作失败');
     }
   } finally { submittingTask.value = false; }
 };
 
 const handleDeleteTask = async (task) => {
   if (!canDeleteTeamTask(task)) {
-    alert('无权限删除该团队任务');
+    showMessage('无权限删除该团队任务', '操作失败');
     return;
   }
 
@@ -722,20 +723,15 @@ const handleDeleteTask = async (task) => {
   try {
     const res = await deleteTaskApi(taskId);
     if (res.data.code === 0) await loadTeamTasks();
-    else alert(getApiFailureMessage(res, '删除团队任务失败', '删除失败'));
-  } catch (error) { alert(getApiErrorMessage(error, '删除团队任务失败')); }
-};
-
-const openTaskLogs = (task) => {
-  selectedLogTask.value = task;
-  showTaskLogModal.value = true;
+    else showMessage(getApiFailureMessage(res, '删除团队任务失败', '删除失败'), '操作失败');
+  } catch (error) { showMessage(getApiErrorMessage(error, '删除团队任务失败'), '操作失败'); }
 };
 
 /* ================== 团队管理生命周期操作 ================== */
 
 const handleLeaveTeam = async () => {
   if (!canLeaveCurrentTeam.value) {
-    alert('Owner 不能直接退出团队，请先转让团队');
+    showMessage('Owner 不能直接退出团队，请先转让团队', '操作失败');
     return;
   }
 
@@ -743,18 +739,18 @@ const handleLeaveTeam = async () => {
   try {
     const res = await leaveTeamApi(teamId);
     if (res.data.code === 0) {
-      alert('已成功退出团队');
+      showMessage('已成功退出团队');
       await loadTeams();
       router.push('/teams');
-    } else alert(getApiFailureMessage(res, '退出团队失败', '退出失败'));
+    } else showMessage(getApiFailureMessage(res, '退出团队失败', '退出失败'), '操作失败');
   } catch (error) {
-    alert(getApiErrorMessage(error, '退出团队失败'));
+    showMessage(getApiErrorMessage(error, '退出团队失败'), '操作失败');
   }
 };
 
 const handleTransferTeam = async () => {
   if (!isTeamOwner.value) {
-    alert('无权限转让团队');
+    showMessage('无权限转让团队', '操作失败');
     return;
   }
 
@@ -764,14 +760,14 @@ const handleTransferTeam = async () => {
   try {
     const res = await transferTeamApi(teamId, { new_owner_id: newOwnerId.value });
     if (res.data.code === 0) {
-      alert('团队转让成功！');
+      showMessage('团队转让成功！');
       newOwnerId.value = null;
       await loadTeams(); 
       await loadTeamMembers();
       activeTab.value = 'tasks'; 
-    } else alert(getApiFailureMessage(res, '转让团队失败', '转让失败'));
+    } else showMessage(getApiFailureMessage(res, '转让团队失败', '转让失败'), '操作失败');
   } catch (error) {
-    alert(getApiErrorMessage(error, '转让团队失败'));
+    showMessage(getApiErrorMessage(error, '转让团队失败'), '操作失败');
   } finally {
     transferringTeam.value = false;
   }
@@ -779,7 +775,7 @@ const handleTransferTeam = async () => {
 
 const handleRenameTeam = async () => {
   if (!isTeamOwner.value) {
-    alert('无权限修改团队名称');
+    showMessage('无权限修改团队名称', '操作失败');
     return;
   }
 
@@ -788,17 +784,17 @@ const handleRenameTeam = async () => {
   try {
     const res = await updateTeamApi(teamId, { name: newTeamName.value });
     if (res.data.code === 0) {
-      alert('团队名称修改成功');
+      showMessage('团队名称修改成功');
       newTeamName.value = '';
       await loadTeams();
-    } else alert(getApiFailureMessage(res, '修改团队名称失败', '修改失败'));
-  } catch (error) { alert(getApiErrorMessage(error, '修改团队名称失败')); } 
+    } else showMessage(getApiFailureMessage(res, '修改团队名称失败', '修改失败'), '操作失败');
+  } catch (error) { showMessage(getApiErrorMessage(error, '修改团队名称失败'), '操作失败'); }
   finally { renamingTeam.value = false; }
 };
 
 const handleDissolveTeam = async () => {
   if (!isTeamOwner.value) {
-    alert('无权限解散团队');
+    showMessage('无权限解散团队', '操作失败');
     return;
   }
 
@@ -807,18 +803,18 @@ const handleDissolveTeam = async () => {
   try {
     const res = await dissolveTeamApi(teamId);
     if (res.data.code === 0) {
-      alert('团队已解散');
+      showMessage('团队已解散');
       await loadTeams();
       router.push('/teams');
-    } else alert(getApiFailureMessage(res, '解散团队失败', '解散失败'));
-  } catch (error) { alert(getApiErrorMessage(error, '解散团队失败')); } 
+    } else showMessage(getApiFailureMessage(res, '解散团队失败', '解散失败'), '操作失败');
+  } catch (error) { showMessage(getApiErrorMessage(error, '解散团队失败'), '操作失败'); }
   finally { dissolvingTeam.value = false; }
 };
 
 /* ================== 成员邀请与移除操作 ================== */
 const handleAddMember = async () => {
   if (!isTeamOwner.value) {
-    alert('无权限邀请成员');
+    showMessage('无权限邀请成员', '操作失败');
     return;
   }
 
@@ -830,16 +826,16 @@ const handleAddMember = async () => {
       showAddMemberModal.value = false;
       newMemberName.value = ''; 
       await loadTeamMembers();
-      alert('邀请已发送！');
-    } else alert(getApiFailureMessage(res, '邀请成员失败', '邀请失败'));
-  } catch (error) { alert(getApiErrorMessage(error, '邀请成员失败', '用户不存在或已在团队中')); } 
+      showMessage('邀请已发送！');
+    } else showMessage(getApiFailureMessage(res, '邀请成员失败', '邀请失败'), '操作失败');
+  } catch (error) { showMessage(getApiErrorMessage(error, '邀请成员失败', '用户不存在或已在团队中'), '操作失败'); }
   finally { submittingMember.value = false; }
 };
 
 const removeMember = async (userId) => {
   const member = members.value.find(item => Number(item.user_id) === Number(userId));
   if (!member || !canRemoveMember(member)) {
-    alert('无权限移除该成员');
+    showMessage('无权限移除该成员', '操作失败');
     return;
   }
 
@@ -847,13 +843,13 @@ const removeMember = async (userId) => {
   try {
     const res = await deleteTeamMemberApi(teamId, userId);
     if (res.data.code === 0) await loadTeamMembers();
-    else alert(getApiFailureMessage(res, '移除成员失败', '移除失败'));
-  } catch (error) { alert(getApiErrorMessage(error, '移除成员失败')); }
+    else showMessage(getApiFailureMessage(res, '移除成员失败', '移除失败'), '操作失败');
+  } catch (error) { showMessage(getApiErrorMessage(error, '移除成员失败'), '操作失败'); }
 };
 
 const toggleAdminRole = async (member) => {
   if (!isTeamOwner.value || member.role === 'Owner') {
-    alert('无权限修改该成员权限');
+    showMessage('无权限修改该成员权限', '操作失败');
     return;
   }
 
@@ -861,8 +857,8 @@ const toggleAdminRole = async (member) => {
   try {
     const res = await updateTeamMemberRoleApi(teamId, member.user_id, { role: newRole });
     if (res.data.code === 0) await loadTeamMembers();
-    else alert(getApiFailureMessage(res, '修改成员权限失败', '权限修改失败'));
-  } catch (error) { alert(getApiErrorMessage(error, '修改成员权限失败')); }
+    else showMessage(getApiFailureMessage(res, '修改成员权限失败', '权限修改失败'), '操作失败');
+  } catch (error) { showMessage(getApiErrorMessage(error, '修改成员权限失败'), '操作失败'); }
 };
 
 onMounted(() => {
@@ -970,8 +966,6 @@ onMounted(() => {
   line-height: 1;
 }
 .btn-dependency:hover { background: #eff6ff; border-color: #60a5fa; color: #1d4ed8; }
-.btn-log { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
-.btn-log:hover { background: #d1fae5; border-color: #6ee7b7; color: #065f46; }
 .btn-edit { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
 .btn-edit:hover:not(:disabled) { background: #bfdbfe; }
 .btn-danger { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }

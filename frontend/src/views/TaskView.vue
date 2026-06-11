@@ -225,15 +225,8 @@
                     class="btn btn-small btn-dependency"
                     :to="`/tasks/${task.id}/dependencies`"
                   >
-                    依赖详情
+                    任务详情
                   </RouterLink>
-                  <button
-                    class="btn btn-small btn-log"
-                    type="button"
-                    @click="openTaskLogs(task)"
-                  >
-                    操作日志
-                  </button>
                   <button
                     v-if="canUpdateTaskStatus(task)"
                     class="btn btn-small btn-edit"
@@ -341,15 +334,8 @@
                         class="btn btn-small btn-dependency"
                         :to="`/tasks/${task.id}/dependencies`"
                       >
-                        依赖详情
+                        任务详情
                       </RouterLink>
-                      <button
-                        class="btn btn-small btn-log"
-                        type="button"
-                        @click="openTaskLogs(task)"
-                      >
-                        操作日志
-                      </button>
                       <button
                         class="btn btn-small btn-edit"
                         @click="startEdit(task)"
@@ -459,9 +445,10 @@
         </div>
       </div>
 
-      <TaskLogModal
-        v-model="showTaskLogModal"
-        :task="selectedLogTask"
+      <MessageModal
+        v-model="messageOpen"
+        :title="messageTitle"
+        :message="messageText"
       />
     </section>
   </div>
@@ -472,7 +459,7 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter, RouterLink } from 'vue-router';
 import { authStore } from '../stores/auth';
 import { taskStore } from '../stores/task';
-import TaskLogModal from '../components/TaskLogModal.vue';
+import MessageModal from '../components/MessageModal.vue';
 import {
   getTasksApi,
   createTaskApi,
@@ -585,10 +572,11 @@ const teamLoadError = ref('');
 const creatingTask = ref(false);
 const updatingId = ref(null);
 const deletingId = ref(null);
-const showTaskLogModal = ref(false);
-const selectedLogTask = ref(null);
 const createError = ref('');
 const updateError = ref('');
+const messageOpen = ref(false);
+const messageTitle = ref('提示');
+const messageText = ref('');
 const searchQuery = ref('');
 const sortOption = ref('default');
 const sortOpen = ref(false);
@@ -647,6 +635,12 @@ const toggleSortMenu = () => {
 const selectSortOption = (value) => {
   sortOption.value = value;
   sortOpen.value = false;
+};
+
+const showMessage = (message, title = '提示') => {
+  messageTitle.value = title;
+  messageText.value = message;
+  messageOpen.value = true;
 };
 
 // 兼容两个下拉菜单的外部点击关闭事件
@@ -905,7 +899,7 @@ const markTaskDone = async (task) => {
     return;
   }
   if (!canUpdateTaskStatus(task)) {
-    alert('无权限更新该任务');
+    showMessage('无权限更新该任务', '操作失败');
     return;
   }
 
@@ -946,14 +940,14 @@ const markTaskDone = async (task) => {
         }, 850);
       }, 950);
     } else {
-      alert(getApiFailureMessage(response, '完成任务失败', '更新失败'));
+      showMessage(getApiFailureMessage(response, '完成任务失败', '更新失败'), '操作失败');
     }
   } catch (error) {
     // 新增：拦截 409 状态码，提示前置任务未完成
     if (error.response?.status === 409) {
-      alert(getUnresolvedDependenciesMessage(error, findTaskTitleById, '完成任务失败'));
+      showMessage(getUnresolvedDependenciesMessage(error, findTaskTitleById, '完成任务失败'), '操作失败');
     } else {
-      alert(getApiErrorMessage(error, '完成任务失败'));
+      showMessage(getApiErrorMessage(error, '完成任务失败'), '操作失败');
     }
   } finally {
     updatingId.value = null;
@@ -963,7 +957,7 @@ const markTaskDone = async (task) => {
 // 删除任务
 const onDeleteTask = async (task) => {
   if (!canDeleteTask(task)) {
-    alert('无权限删除该任务');
+    showMessage('无权限删除该任务', '操作失败');
     return;
   }
 
@@ -978,18 +972,13 @@ const onDeleteTask = async (task) => {
     if (response.data.code === 0) {
       await loadTasks();
     } else {
-      alert(getApiFailureMessage(response, '删除任务失败', '删除失败'));
+      showMessage(getApiFailureMessage(response, '删除任务失败', '删除失败'), '操作失败');
     }
   } catch (error) {
-    alert(getApiErrorMessage(error, '删除任务失败'));
+    showMessage(getApiErrorMessage(error, '删除任务失败'), '操作失败');
   } finally {
     deletingId.value = null;
   }
-};
-
-const openTaskLogs = (task) => {
-  selectedLogTask.value = task;
-  showTaskLogModal.value = true;
 };
 
 // 开始编辑任务
@@ -1805,18 +1794,6 @@ onBeforeUnmount(() => {
   background: #eff6ff;
   border-color: #60a5fa;
   color: #1d4ed8;
-}
-
-.btn-log {
-  background: #ecfdf5;
-  color: #047857;
-  border: 1px solid #a7f3d0;
-}
-
-.btn-log:hover {
-  background: #d1fae5;
-  border-color: #6ee7b7;
-  color: #065f46;
 }
 
 .btn-danger {
