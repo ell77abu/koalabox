@@ -48,6 +48,7 @@ const MESSAGE_TRANSLATIONS = [
   [/invalid task title/i, '任务标题不合法'],
   [/invalid task status/i, '任务状态不合法'],
   [/invalid task priority/i, '任务优先级不合法'],
+  [/invalid team name/i, '团队名称不能为空且不能超过 100 个字符'],
   [/invalid team id/i, '团队不存在或团队 ID 不合法'],
   [/invalid user id/i, '用户不存在或用户 ID 不合法'],
   [/invalid assignee id/i, '执行者不存在或执行者 ID 不合法'],

@@ -123,7 +123,7 @@
             <div class="task-actions">
               <RouterLink
                 class="btn btn-small btn-dependency"
-                :to="`/tasks/${task.id}/dependencies`"
+                :to="{ path: `/tasks/${task.id}/dependencies`, query: { team_id: teamId } }"
               >
                 任务详情
               </RouterLink>
@@ -366,6 +366,12 @@
       :title="messageTitle"
       :message="messageText"
     />
+    <ConfirmModal
+      v-model="confirmOpen"
+      :title="confirmTitle"
+      :message="confirmText"
+      @confirm="runConfirmAction"
+    />
 
   </div>
 </template>
@@ -375,6 +381,7 @@ import { ref, computed, onMounted, watch } from 'vue'; // 新增导入 watch
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { authStore } from '../stores/auth'; 
 import { teamStore } from '../stores/team';
+import ConfirmModal from '../components/ConfirmModal.vue';
 import MessageModal from '../components/MessageModal.vue';
 import {
   getTeamsApi, getTeamMembersApi, addTeamMemberApi, deleteTeamMemberApi, updateTeamMemberRoleApi,
@@ -414,6 +421,10 @@ const submittingTask = ref(false);
 const messageOpen = ref(false);
 const messageTitle = ref('提示');
 const messageText = ref('');
+const confirmOpen = ref(false);
+const confirmTitle = ref('确认操作');
+const confirmText = ref('');
+let confirmAction = null;
 
 const newTask = ref({ title: '', description: '', priority: '2', deadline: '', assignee_id: null, predecessor_ids: [] });
 const editingTask = ref({ id: null, title: '', description: '', status: 'TODO', priority: '2', deadline: '', assignee_id: null, predecessor_ids: [] });
@@ -477,6 +488,21 @@ const showMessage = (message, title = '提示') => {
   messageTitle.value = title;
   messageText.value = message;
   messageOpen.value = true;
+};
+
+const showConfirm = (message, action, title = '确认操作') => {
+  confirmTitle.value = title;
+  confirmText.value = message;
+  confirmAction = action;
+  confirmOpen.value = true;
+};
+
+const runConfirmAction = async () => {
+  const action = confirmAction;
+  confirmAction = null;
+  if (typeof action === 'function') {
+    await action();
+  }
 };
 
 // ================== 分页逻辑与过滤 ==================
@@ -718,13 +744,14 @@ const handleDeleteTask = async (task) => {
     return;
   }
 
-  const taskId = task.id;
-  if (!confirm('确定要删除这个团队任务吗？此操作不可撤销。')) return;
-  try {
-    const res = await deleteTaskApi(taskId);
-    if (res.data.code === 0) await loadTeamTasks();
-    else showMessage(getApiFailureMessage(res, '删除团队任务失败', '删除失败'), '操作失败');
-  } catch (error) { showMessage(getApiErrorMessage(error, '删除团队任务失败'), '操作失败'); }
+  showConfirm('确定要删除这个团队任务吗？此操作不可撤销。', async () => {
+    const taskId = task.id;
+    try {
+      const res = await deleteTaskApi(taskId);
+      if (res.data.code === 0) await loadTeamTasks();
+      else showMessage(getApiFailureMessage(res, '删除团队任务失败', '删除失败'), '操作失败');
+    } catch (error) { showMessage(getApiErrorMessage(error, '删除团队任务失败'), '操作失败'); }
+  });
 };
 
 /* ================== 团队管理生命周期操作 ================== */
@@ -735,17 +762,18 @@ const handleLeaveTeam = async () => {
     return;
   }
 
-  if (!confirm('确定要退出该团队吗？退出后您负责的未完成任务将退回团队池。')) return;
-  try {
-    const res = await leaveTeamApi(teamId);
-    if (res.data.code === 0) {
-      showMessage('已成功退出团队');
-      await loadTeams();
-      router.push('/teams');
-    } else showMessage(getApiFailureMessage(res, '退出团队失败', '退出失败'), '操作失败');
-  } catch (error) {
-    showMessage(getApiErrorMessage(error, '退出团队失败'), '操作失败');
-  }
+  showConfirm('确定要退出该团队吗？退出后您负责的未完成任务将退回团队池。', async () => {
+    try {
+      const res = await leaveTeamApi(teamId);
+      if (res.data.code === 0) {
+        showMessage('已成功退出团队');
+        await loadTeams();
+        router.push('/teams');
+      } else showMessage(getApiFailureMessage(res, '退出团队失败', '退出失败'), '操作失败');
+    } catch (error) {
+      showMessage(getApiErrorMessage(error, '退出团队失败'), '操作失败');
+    }
+  });
 };
 
 const handleTransferTeam = async () => {
@@ -755,22 +783,23 @@ const handleTransferTeam = async () => {
   }
 
   if (!newOwnerId.value) return;
-  if (!confirm('确定要将团队转让给该成员吗？转让后您将失去 Owner 权限。')) return;
-  transferringTeam.value = true;
-  try {
-    const res = await transferTeamApi(teamId, { new_owner_id: newOwnerId.value });
-    if (res.data.code === 0) {
-      showMessage('团队转让成功！');
-      newOwnerId.value = null;
-      await loadTeams(); 
-      await loadTeamMembers();
-      activeTab.value = 'tasks'; 
-    } else showMessage(getApiFailureMessage(res, '转让团队失败', '转让失败'), '操作失败');
-  } catch (error) {
-    showMessage(getApiErrorMessage(error, '转让团队失败'), '操作失败');
-  } finally {
-    transferringTeam.value = false;
-  }
+  showConfirm('确定要将团队转让给该成员吗？转让后您将失去 Owner 权限。', async () => {
+    transferringTeam.value = true;
+    try {
+      const res = await transferTeamApi(teamId, { new_owner_id: newOwnerId.value });
+      if (res.data.code === 0) {
+        showMessage('团队转让成功！');
+        newOwnerId.value = null;
+        await loadTeams();
+        await loadTeamMembers();
+        activeTab.value = 'tasks';
+      } else showMessage(getApiFailureMessage(res, '转让团队失败', '转让失败'), '操作失败');
+    } catch (error) {
+      showMessage(getApiErrorMessage(error, '转让团队失败'), '操作失败');
+    } finally {
+      transferringTeam.value = false;
+    }
+  });
 };
 
 const handleRenameTeam = async () => {
@@ -798,17 +827,18 @@ const handleDissolveTeam = async () => {
     return;
   }
 
-  if (!confirm('确定要解散该团队吗？此操作将删除所有相关任务数据且不可撤销！')) return;
-  dissolvingTeam.value = true;
-  try {
-    const res = await dissolveTeamApi(teamId);
-    if (res.data.code === 0) {
-      showMessage('团队已解散');
-      await loadTeams();
-      router.push('/teams');
-    } else showMessage(getApiFailureMessage(res, '解散团队失败', '解散失败'), '操作失败');
-  } catch (error) { showMessage(getApiErrorMessage(error, '解散团队失败'), '操作失败'); }
-  finally { dissolvingTeam.value = false; }
+  showConfirm('确定要解散该团队吗？此操作将删除所有相关任务数据且不可撤销！', async () => {
+    dissolvingTeam.value = true;
+    try {
+      const res = await dissolveTeamApi(teamId);
+      if (res.data.code === 0) {
+        showMessage('团队已解散');
+        await loadTeams();
+        router.push('/teams');
+      } else showMessage(getApiFailureMessage(res, '解散团队失败', '解散失败'), '操作失败');
+    } catch (error) { showMessage(getApiErrorMessage(error, '解散团队失败'), '操作失败'); }
+    finally { dissolvingTeam.value = false; }
+  });
 };
 
 /* ================== 成员邀请与移除操作 ================== */
@@ -839,12 +869,13 @@ const removeMember = async (userId) => {
     return;
   }
 
-  if (!confirm('确定要将该成员移出团队吗？其未完成的任务将被退回团队池。')) return;
-  try {
-    const res = await deleteTeamMemberApi(teamId, userId);
-    if (res.data.code === 0) await loadTeamMembers();
-    else showMessage(getApiFailureMessage(res, '移除成员失败', '移除失败'), '操作失败');
-  } catch (error) { showMessage(getApiErrorMessage(error, '移除成员失败'), '操作失败'); }
+  showConfirm('确定要将该成员移出团队吗？其未完成的任务将被退回团队池。', async () => {
+    try {
+      const res = await deleteTeamMemberApi(teamId, userId);
+      if (res.data.code === 0) await loadTeamMembers();
+      else showMessage(getApiFailureMessage(res, '移除成员失败', '移除失败'), '操作失败');
+    } catch (error) { showMessage(getApiErrorMessage(error, '移除成员失败'), '操作失败'); }
+  });
 };
 
 const toggleAdminRole = async (member) => {

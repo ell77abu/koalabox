@@ -450,6 +450,12 @@
         :title="messageTitle"
         :message="messageText"
       />
+      <ConfirmModal
+        v-model="confirmOpen"
+        :title="confirmTitle"
+        :message="confirmText"
+        @confirm="runConfirmAction"
+      />
     </section>
   </div>
 </template>
@@ -459,6 +465,7 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter, RouterLink } from 'vue-router';
 import { authStore } from '../stores/auth';
 import { taskStore } from '../stores/task';
+import ConfirmModal from '../components/ConfirmModal.vue';
 import MessageModal from '../components/MessageModal.vue';
 import {
   getTasksApi,
@@ -577,6 +584,10 @@ const updateError = ref('');
 const messageOpen = ref(false);
 const messageTitle = ref('提示');
 const messageText = ref('');
+const confirmOpen = ref(false);
+const confirmTitle = ref('确认操作');
+const confirmText = ref('');
+let confirmAction = null;
 const searchQuery = ref('');
 const sortOption = ref('default');
 const sortOpen = ref(false);
@@ -641,6 +652,21 @@ const showMessage = (message, title = '提示') => {
   messageTitle.value = title;
   messageText.value = message;
   messageOpen.value = true;
+};
+
+const showConfirm = (message, action, title = '确认操作') => {
+  confirmTitle.value = title;
+  confirmText.value = message;
+  confirmAction = action;
+  confirmOpen.value = true;
+};
+
+const runConfirmAction = async () => {
+  const action = confirmAction;
+  confirmAction = null;
+  if (typeof action === 'function') {
+    await action();
+  }
 };
 
 // 兼容两个下拉菜单的外部点击关闭事件
@@ -961,24 +987,22 @@ const onDeleteTask = async (task) => {
     return;
   }
 
-  const id = task.id;
-  if (!window.confirm('确定要删除这个任务吗？')) {
-    return;
-  }
-
-  deletingId.value = id;
-  try {
-    const response = await deleteTaskApi(id);
-    if (response.data.code === 0) {
-      await loadTasks();
-    } else {
-      showMessage(getApiFailureMessage(response, '删除任务失败', '删除失败'), '操作失败');
+  showConfirm('确定要删除这个任务吗？', async () => {
+    const id = task.id;
+    deletingId.value = id;
+    try {
+      const response = await deleteTaskApi(id);
+      if (response.data.code === 0) {
+        await loadTasks();
+      } else {
+        showMessage(getApiFailureMessage(response, '删除任务失败', '删除失败'), '操作失败');
+      }
+    } catch (error) {
+      showMessage(getApiErrorMessage(error, '删除任务失败'), '操作失败');
+    } finally {
+      deletingId.value = null;
     }
-  } catch (error) {
-    showMessage(getApiErrorMessage(error, '删除任务失败'), '操作失败');
-  } finally {
-    deletingId.value = null;
-  }
+  });
 };
 
 // 开始编辑任务

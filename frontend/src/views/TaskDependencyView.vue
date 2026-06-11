@@ -5,10 +5,17 @@
         <button class="back-btn" @click="router.back()">← 返回</button>
         <div class="header-main">
           <p class="eyebrow">任务依赖详情</p>
-          <h1>{{ currentTaskTitle }}</h1>
+          <h1>{{ taskTitle }}</h1>
           <div class="header-meta">
-            <span class="status-badge" :class="statusClass(currentTask?.status)">
-              {{ statusLabel(currentTask?.status) }}
+            <span class="status-badge" :class="statusClass(task?.status || currentTask?.status)">
+              {{ statusLabel(task?.status || currentTask?.status) }}
+            </span>
+            <span
+              v-if="task?.priority"
+              class="priority-badge"
+              :class="`priority-${task?.priority}`"
+            >
+              优先级 {{ priorityLabel(task?.priority) }}
             </span>
             <span class="task-id">#{{ taskId }}</span>
           </div>
@@ -24,28 +31,23 @@
       </div>
 
       <template v-else>
-        <section class="summary-grid">
-          <div class="summary-item">
-            <span class="summary-label">前置任务</span>
-            <strong>{{ predecessors.length }}</strong>
+        <section class="detail-grid">
+          <div class="detail-item">
+            <span class="detail-label">任务描述</span>
+            <p class="detail-value">{{ task?.description || '暂无描述' }}</p>
           </div>
-          <div class="summary-item" :class="{ warning: incompletePredecessors.length > 0 }">
-            <span class="summary-label">未完成前置</span>
-            <strong>{{ incompletePredecessors.length }}</strong>
+          <div class="detail-item">
+            <span class="detail-label">任务范围</span>
+            <p class="detail-value">{{ scopeLabel }}</p>
           </div>
-          <div class="summary-item">
-            <span class="summary-label">后继任务</span>
-            <strong>{{ successors.length }}</strong>
+          <div class="detail-item">
+            <span class="detail-label">截止时间</span>
+            <p class="detail-value">{{ formatDate(task?.deadline) }}</p>
           </div>
-          <div class="summary-item">
-            <span class="summary-label">依赖图节点</span>
-            <strong>{{ graphNodes.length }}</strong>
+          <div class="detail-item">
+            <span class="detail-label">创建时间</span>
+            <p class="detail-value">{{ formatDate(task?.created_at) }}</p>
           </div>
-        </section>
-
-        <section class="dependency-status" :class="{ blocked: incompletePredecessors.length > 0 }">
-          <strong>{{ dependencyStatusTitle }}</strong>
-          <span>{{ dependencyStatusText }}</span>
         </section>
 
         <section class="dependency-columns">
@@ -61,7 +63,7 @@
                 :key="task.id"
                 class="task-node-row"
                 :class="{ unfinished: task.status !== 'DONE' }"
-                :to="`/tasks/${task.id}/dependencies`"
+                :to="buildDependencyRoute(task.id)"
               >
                 <span class="node-title">{{ task.title }}</span>
                 <span class="status-badge" :class="statusClass(task.status)">
@@ -82,7 +84,7 @@
                 v-for="task in successors"
                 :key="task.id"
                 class="task-node-row"
-                :to="`/tasks/${task.id}/dependencies`"
+                :to="buildDependencyRoute(task.id)"
               >
                 <span class="node-title">{{ task.title }}</span>
                 <span class="status-badge" :class="statusClass(task.status)">
@@ -147,7 +149,7 @@
                   class="graph-node"
                   :class="{ current: node.id === taskId, done: node.status === 'DONE' }"
                   :style="{ left: `${node.x}px`, top: `${node.y}px` }"
-                  :to="`/tasks/${node.id}/dependencies`"
+                  :to="buildDependencyRoute(node.id)"
                 >
                   <span class="graph-node-title">{{ node.title }}</span>
                   <span class="status-badge" :class="statusClass(node.status)">
@@ -169,7 +171,9 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import TaskActivityLog from '../components/TaskActivityLog.vue';
-import { getTaskDependenciesApi, getTaskDependencyGraphApi } from '../services/task';
+import { taskStore } from '../stores/task';
+import { getTasksApi, getTaskDependenciesApi, getTaskDependencyGraphApi } from '../services/task';
+import { getTeamTasksApi } from '../services/team';
 import { getApiErrorMessage, getApiFailureMessage } from '../utils/apiError';
 
 const route = useRoute();
@@ -177,6 +181,7 @@ const router = useRouter();
 
 const loading = ref(false);
 const error = ref('');
+const task = ref(null);
 const predecessors = ref([]);
 const successors = ref([]);
 const graphNodes = ref([]);
@@ -184,34 +189,130 @@ const graphLinks = ref([]);
 const showGraph = ref(false);
 
 const taskId = computed(() => Number(route.params.id));
+const teamIdFromQuery = computed(() => {
+  const raw = route.query.team_id;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+});
 
 const currentTask = computed(() =>
   graphNodes.value.find((node) => Number(node.id) === taskId.value) || null
 );
 
-const currentTaskTitle = computed(() =>
-  currentTask.value?.title || `任务 #${taskId.value}`
-);
+const taskTitle = computed(() => task.value?.title || currentTask.value?.title || `任务 #${taskId.value}`);
 
-const incompletePredecessors = computed(() =>
-  predecessors.value.filter((task) => task.status !== 'DONE')
-);
+const isPersonalTask = (item) => {
+  const teamId = item?.team_id;
+  return teamId === null || teamId === undefined || teamId === '' || teamId === 0 || teamId === '0';
+};
 
-const dependencyStatusTitle = computed(() =>
-  incompletePredecessors.value.length > 0 ? '当前任务仍被前置任务阻塞' : '当前任务前置依赖已就绪'
-);
-
-const dependencyStatusText = computed(() => {
-  if (predecessors.value.length === 0) return '没有前置任务限制，可以直接推进。';
-  if (incompletePredecessors.value.length === 0) return '所有直接前置任务都已完成。';
-  return `还有 ${incompletePredecessors.value.length} 个直接前置任务未完成。`;
+const scopeLabel = computed(() => {
+  if (!task.value) {
+    return teamIdFromQuery.value ? '团队任务' : '-';
+  }
+  return isPersonalTask(task.value) ? '个人任务' : '团队任务';
 });
+
+const priorityLabel = (priority) => {
+  const map = { 1: '低', 2: '中', 3: '高' };
+  return map[priority] || priority || '-';
+};
+
+const formatDate = (dateStr) => {
+  if (!dateStr) return '-';
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return String(dateStr);
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const hour = String(date.getUTCHours()).padStart(2, '0');
+  const minute = String(date.getUTCMinutes()).padStart(2, '0');
+  return `${year}年${month}月${day}日 ${hour}:${minute}`;
+};
 
 const normalizeTaskNode = (node) => ({
   id: Number(node.id),
   title: node.title || `任务 #${node.id}`,
   status: node.status || 'TODO',
 });
+
+const resolveTeamId = () => {
+  if (teamIdFromQuery.value) return teamIdFromQuery.value;
+  if (task.value && !isPersonalTask(task.value)) {
+    const parsed = Number(task.value.team_id);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
+};
+
+const fallbackTaskFromGraph = (teamId) => {
+  const graphNode = graphNodes.value.find((node) => Number(node.id) === taskId.value);
+  if (!graphNode) return null;
+  return {
+    id: taskId.value,
+    title: graphNode.title,
+    status: graphNode.status,
+    team_id: teamId,
+    description: '',
+  };
+};
+
+const loadTaskInfo = async () => {
+  task.value = null;
+  const cached = taskStore.tasks.value.find((item) => Number(item.id) === taskId.value);
+  if (cached) {
+    task.value = cached;
+    return;
+  }
+
+  const teamId = resolveTeamId();
+  if (teamId) {
+    const teamRes = await getTeamTasksApi(teamId);
+    if (teamRes.data?.code !== 0) {
+      throw new Error(getApiFailureMessage(teamRes, '加载任务失败', '团队任务查询失败'));
+    }
+    const teamList = Array.isArray(teamRes.data?.data?.list) ? teamRes.data.data.list : [];
+    const teamFound = teamList.find((item) => Number(item.id) === taskId.value);
+    if (teamFound) {
+      task.value = teamFound;
+      return;
+    }
+  }
+
+  const response = await getTasksApi(1, 1000, 'default');
+  if (response.data?.code !== 0) {
+    throw new Error(getApiFailureMessage(response, '加载任务失败', '任务查询失败'));
+  }
+
+  const list = Array.isArray(response.data?.data?.list) ? response.data.data.list : [];
+  const found = list.find((item) => Number(item.id) === taskId.value);
+  if (found) {
+    task.value = found;
+    return;
+  }
+
+  // 依赖接口已按团队成员权限返回数据；列表接口可能不含「分配给别人的」团队任务
+  const fallback = fallbackTaskFromGraph(teamId);
+  if (fallback) {
+    task.value = fallback;
+    return;
+  }
+
+  task.value = {
+    id: taskId.value,
+    title: `任务 #${taskId.value}`,
+    status: 'TODO',
+    team_id: teamId,
+    description: '',
+  };
+};
+
+const buildDependencyRoute = (id) => {
+  const teamId = resolveTeamId();
+  const path = `/tasks/${id}/dependencies`;
+  return teamId ? { path, query: { team_id: teamId } } : path;
+};
 
 const loadDependencyData = async () => {
   if (!Number.isFinite(taskId.value) || taskId.value <= 0) {
@@ -259,6 +360,8 @@ const loadDependencyData = async () => {
         { id: taskId.value, title: `任务 #${taskId.value}`, status: 'TODO' },
       ];
     }
+
+    await loadTaskInfo();
   } catch (err) {
     error.value = getApiErrorMessage(err, '加载依赖详情失败', '依赖数据查询失败');
   } finally {
@@ -495,58 +598,35 @@ watch(() => route.params.id, loadDependencyData);
   color: #991b1b;
 }
 
-.summary-grid {
+.detail-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  grid-auto-rows: 96px;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
-}
-
-.summary-item {
-  min-height: 96px;
-  padding: 1rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  background: #ffffff;
-}
-
-.summary-item.warning {
-  border-color: #fed7aa;
-  background: #fff7ed;
-}
-
-.summary-label {
-  display: block;
-  margin-bottom: 0.45rem;
-  color: #64748b;
-  font-size: 0.82rem;
-}
-
-.summary-item strong {
-  color: #0f172a;
-  font-size: 1.6rem;
-}
-
-.dependency-status {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 1rem;
-  min-height: 64px;
-  padding: 0.9rem 1rem;
   margin-bottom: 1rem;
-  border: 1px solid #bbf7d0;
-  border-radius: 10px;
-  background: #f0fdf4;
-  color: #166534;
 }
 
-.dependency-status.blocked {
-  border-color: #fed7aa;
-  background: #fff7ed;
-  color: #9a3412;
+.detail-item {
+  padding: 1rem;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
 }
+
+.detail-label {
+  display: block;
+  font-size: 0.8rem;
+  color: #64748b;
+  margin-bottom: 0.35rem;
+  font-weight: 600;
+}
+
+.detail-value {
+  margin: 0;
+  color: #0f172a;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
 
 .dependency-columns {
   display: grid;
@@ -689,6 +769,14 @@ watch(() => route.params.id, loadDependencyData);
   font-weight: 700;
 }
 
+.priority-badge {
+  flex-shrink: 0;
+  padding: 0.22rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
 .status-todo {
   background: #dbeafe;
   color: #1e40af;
@@ -707,6 +795,21 @@ watch(() => route.params.id, loadDependencyData);
 .status-error {
   background: #fee2e2;
   color: #991b1b;
+}
+
+.priority-1 {
+  background: #e0e7ff;
+  color: #4338ca;
+}
+
+.priority-2 {
+  background: #fce7f3;
+  color: #be456f;
+}
+
+.priority-3 {
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .graph-scroll {
@@ -772,13 +875,11 @@ watch(() => route.params.id, loadDependencyData);
 }
 
 @media (max-width: 860px) {
-  .dependency-header,
-  .dependency-status {
+  .dependency-header {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .summary-grid,
   .dependency-columns {
     grid-template-columns: 1fr;
   }

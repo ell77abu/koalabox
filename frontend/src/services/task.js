@@ -34,11 +34,16 @@ export const deleteTaskApi = (id) => http.delete(`/tasks/${id}`);
 /**
  * 获取任务操作日志
  * @param {number} id - 任务 ID
- * @param {Object} params - 分页参数
+ * @param {Object|number} paramsOrPage - 分页参数或页码
+ * @param {number} size - 每页数量
  * @returns {Promise}
  */
-export const getTaskLogsApi = (id, params = { page: 1, size: 10 }) =>
-  http.get(`/tasks/${id}/logs`, { params });
+export const getTaskLogsApi = (id, paramsOrPage = { page: 1, size: 10 }, size = 10) => {
+  const params = typeof paramsOrPage === 'number'
+    ? { page: paramsOrPage, size }
+    : paramsOrPage;
+  return http.get(`/tasks/${id}/logs`, { params });
+};
 
 /**
  * 为任务添加前置依赖
