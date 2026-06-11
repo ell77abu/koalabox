@@ -4,7 +4,7 @@
       <header class="dependency-header">
         <button class="back-btn" @click="router.back()">← 返回</button>
         <div class="header-main">
-          <p class="eyebrow">任务依赖详情</p>
+          <p class="eyebrow">任务详情</p>
           <h1>{{ taskTitle }}</h1>
           <div class="header-meta">
             <span class="status-badge" :class="statusClass(task?.status || currentTask?.status)">
@@ -17,10 +17,12 @@
             >
               优先级 {{ priorityLabel(task?.priority) }}
             </span>
-            <span class="task-id">#{{ taskId }}</span>
           </div>
         </div>
-        <RouterLink class="task-list-btn" to="/tasks">任务列表</RouterLink>
+        <div class="header-side">
+          <RouterLink class="task-list-btn" to="/tasks">任务列表</RouterLink>
+          <span class="task-id">#{{ taskId }}</span>
+        </div>
       </header>
 
       <div v-if="loading" class="state-panel">依赖数据加载中...</div>
@@ -32,12 +34,12 @@
 
       <template v-else>
         <section class="detail-grid">
-          <div class="detail-item">
+          <div class="detail-item detail-description">
             <span class="detail-label">任务描述</span>
             <p class="detail-value">{{ task?.description || '暂无描述' }}</p>
           </div>
           <div class="detail-item">
-            <span class="detail-label">任务范围</span>
+            <span class="detail-label">任务类型</span>
             <p class="detail-value">{{ scopeLabel }}</p>
           </div>
           <div class="detail-item">
@@ -519,8 +521,10 @@ watch(() => route.params.id, loadDependencyData);
 }
 
 .task-id {
-  color: #64748b;
-  font-size: 0.85rem;
+  color: #1d4ed8;
+  font-size: 1.35rem;
+  font-weight: 800;
+  line-height: 1;
 }
 
 
@@ -559,6 +563,14 @@ watch(() => route.params.id, loadDependencyData);
   align-items: center;
   justify-content: center;
   transition: all 0.25s ease;
+}
+
+.header-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.7rem;
+  flex-shrink: 0;
 }
 
 .task-list-btn:hover {
@@ -600,31 +612,49 @@ watch(() => route.params.id, loadDependencyData);
 
 .detail-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 1rem;
-  margin-bottom: 1rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.1rem;
+  margin-bottom: 1.25rem;
+  padding: 1.35rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 16px 34px rgba(37, 99, 235, 0.1);
 }
 
 .detail-item {
-  padding: 1rem;
+  min-height: 96px;
+  padding: 1.05rem;
   border-radius: 10px;
   border: 1px solid #e2e8f0;
   background: #f8fafc;
 }
 
+.detail-description {
+  grid-column: 1 / -1;
+  min-height: 132px;
+  padding: 1.25rem 1.35rem;
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
 .detail-label {
   display: block;
-  font-size: 0.8rem;
-  color: #64748b;
-  margin-bottom: 0.35rem;
-  font-weight: 600;
+  font-size: 0.82rem;
+  color: #475569;
+  margin-bottom: 0.55rem;
+  font-weight: 700;
 }
 
 .detail-value {
   margin: 0;
   color: #0f172a;
-  font-size: 0.92rem;
-  line-height: 1.4;
+  font-size: 1rem;
+  line-height: 1.55;
+}
+
+.detail-description .detail-value {
+  font-size: 1.08rem;
 }
 
 
@@ -880,6 +910,11 @@ watch(() => route.params.id, loadDependencyData);
     align-items: stretch;
   }
 
+  .header-side {
+    align-items: flex-start;
+  }
+
+  .detail-grid,
   .dependency-columns {
     grid-template-columns: 1fr;
   }
