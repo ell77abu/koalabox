@@ -475,6 +475,69 @@ func TestTeamServiceAcceptInvitationRejectsWrongInvitee(t *testing.T) {
 	assert.ErrorIs(t, err, repository.ErrNotFound)
 }
 
+func TestTeamServiceRemoveMemberRejectsSelfRemoval(t *testing.T) {
+	svc := NewTeamServiceWithTaskRepo(
+		&teamRepoMock{
+			getMemberRoleFn: func(ctx context.Context, teamID, userID uint64) (model.TeamRole, error) {
+				assert.Equal(t, uint64(3), teamID)
+				assert.Equal(t, uint64(9), userID)
+				return model.TeamRoleOwner, nil
+			},
+		},
+		&userRepoMock{},
+		&inviteRepoMock{},
+		nil,
+	)
+
+	err := svc.RemoveMember(context.Background(), 9, 3, 9)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrCannotRemoveSelf)
+}
+
+func TestTeamServiceRemoveMemberRejectsNonOwner(t *testing.T) {
+	svc := NewTeamServiceWithTaskRepo(
+		&teamRepoMock{
+			getMemberRoleFn: func(ctx context.Context, teamID, userID uint64) (model.TeamRole, error) {
+				assert.Equal(t, uint64(3), teamID)
+				assert.Equal(t, uint64(8), userID)
+				return model.TeamRoleAdmin, nil
+			},
+		},
+		&userRepoMock{},
+		&inviteRepoMock{},
+		nil,
+	)
+
+	err := svc.RemoveMember(context.Background(), 8, 3, 9)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTeamOwnerOnly)
+}
+
+func TestTeamServiceRemoveMemberRejectsRemovingOwner(t *testing.T) {
+	svc := NewTeamServiceWithTaskRepo(
+		&teamRepoMock{
+			getMemberRoleFn: func(ctx context.Context, teamID, userID uint64) (model.TeamRole, error) {
+				assert.Equal(t, uint64(3), teamID)
+				switch userID {
+				case 8:
+					return model.TeamRoleOwner, nil
+				case 9:
+					return model.TeamRoleOwner, nil
+				default:
+					return "", repository.ErrNotFound
+				}
+			},
+		},
+		&userRepoMock{},
+		&inviteRepoMock{},
+		nil,
+	)
+
+	err := svc.RemoveMember(context.Background(), 8, 3, 9)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrCannotModifyOwner)
+}
+
 func TestTeamServiceLeaveRejectsOwner(t *testing.T) {
 	svc := NewTeamServiceWithTaskRepo(
 		&teamRepoMock{

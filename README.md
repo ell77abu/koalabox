@@ -80,6 +80,45 @@ npm run dev   # 启动本地开发服务器
   ```
 - 打开 Vite 输出的地址，一般是 `http://localhost:5173`。
 
+## Lab4 测试与验收
+Lab4 的测试用例表和截图证据清单见 `backend/docs/lab4-test-plan.md`。自动化测试分为后端单元/API handler 测试和真实 HTTP 接口验收脚本两部分。
+
+### 后端自动化测试
+在安装 Go 的环境中执行：
+```bash
+cd backend
+go test ./...
+```
+该命令覆盖业务层与 Handler 层测试，包括任务操作日志写入、日志查询权限、Lab1/Lab2/Lab3 回归场景。
+
+### Lab4 API 验收脚本
+先启动 PostgreSQL 和 Go 后端，确认 `http://127.0.0.1:8080/api/v1/ping` 可访问，然后在项目根目录执行：
+```bash
+bash scripts/lab4_prepare_api_data.sh
+bash scripts/lab4_run_api_tests.sh
+```
+脚本依赖 `curl` 和 `jq`，会自动创建隔离测试用户、团队和任务，并断言注册登录、个人任务 CRUD、团队权限、依赖规则、操作日志生成、日志倒序查询、删除后日志保留和无权限日志访问。通过标准是脚本末尾输出 `failed=0`。
+
+默认不带参数时会执行全部用例；需要定位单项问题时可以筛选：
+```bash
+bash scripts/lab4_run_api_tests.sh --list
+bash scripts/lab4_run_api_tests.sh --lab lab3
+bash scripts/lab4_run_api_tests.sh --case TC08
+bash scripts/lab4_run_api_tests.sh --case TC08,TC14
+```
+
+如果要重复跑完整验收，请先重新执行 `lab4_prepare_api_data.sh`，因为 `lab4_run_api_tests.sh` 会修改状态、删除任务并让成员离队。
+
+### 前端构建与截图
+在安装 Node.js 的环境中执行：
+```bash
+cd frontend
+npm install
+npm run build
+npm run dev
+```
+打开任务详情页，确认“操作日志”区域能展示最近记录、暂无记录提示和错误提示。实验报告至少保留 4 条测试证据截图，可优先选择个人任务 CRUD、依赖规则拦截、日志列表成功返回、无权限查询日志返回 `401/403`。
+
 ## 服务器部署
 - 示例服务器参数：Ubuntu Server 24.04 LTS 64bit
 > 不需要在服务器上安装 Node.js 或 Go 的编译环境，服务器只负责纯粹的运行，节省系统资源。

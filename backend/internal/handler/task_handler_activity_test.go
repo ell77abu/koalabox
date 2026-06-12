@@ -108,6 +108,52 @@ func TestTaskHandlerListActivityLogsSuccess(t *testing.T) {
 	assert.Equal(t, "query success", resp.Message)
 }
 
+func TestTaskHandlerListActivityLogsUsesDefaultPagination(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewTaskHandler(&taskLogServiceMock{
+		listActivityLogsFn: func(ctx context.Context, userID, taskID uint64, page, size int) ([]service.TaskActivityLogItem, int64, int, int, error) {
+			assert.Equal(t, uint64(7), userID)
+			assert.Equal(t, uint64(10), taskID)
+			assert.Equal(t, 1, page)
+			assert.Equal(t, 10, size)
+			return []service.TaskActivityLogItem{}, 0, 1, 10, nil
+		},
+	})
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Set(middleware.ContextUserIDKey, uint64(7))
+	c.Params = gin.Params{{Key: "id", Value: "10"}}
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/tasks/10/logs", nil)
+
+	handler.ListActivityLogs(c)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp response.Common
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, 0, resp.Code)
+	assert.Equal(t, "query success", resp.Message)
+}
+
+func TestTaskHandlerListActivityLogsInvalidTaskID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewTaskHandler(&taskLogServiceMock{})
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Set(middleware.ContextUserIDKey, uint64(7))
+	c.Params = gin.Params{{Key: "id", Value: "bad-id"}}
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/tasks/bad-id/logs", nil)
+
+	handler.ListActivityLogs(c)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	var resp response.Common
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, 400, resp.Code)
+	assert.Equal(t, "invalid task id", resp.Message)
+}
+
 func TestTaskHandlerListActivityLogsUnauthorized(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewTaskHandler(&taskLogServiceMock{})
