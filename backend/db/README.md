@@ -3,14 +3,14 @@
 本文档用于说明 `backend/db` 目录下 SQL 脚本的用途、执行顺序与推荐实践，覆盖：
 
 - 全新环境初始化（从 0 到当前版本）
-- 已有旧版本数据库的增量迁移（Lab1/Lab2 -> Lab3）
+- 已有旧版本数据库的增量迁移（Lab1/Lab2/Lab3 -> Lab4）
 
 ## 1. 目前脚本
 
 - `schema_postgres.sql`
-  - 当前项目的基础建库脚本（仅保留通用基础结构：`users`、`tasks`、`task_audit_logs` 及其索引）
+  - 当前项目的基础建库脚本（仅保留通用基础结构：`users`、`tasks`、`activity_logs` 及其索引）
   - 适合数据库初始化的第一步
-  - 不包含 Lab2 团队协作结构和 Lab3 任务依赖结构和任务后续 Lab 对数据库表和字段做的修改更新
+  - 不包含 Lab2 团队协作结构和 Lab3 任务依赖结构
 
 - `migrations/lab2_merge.sql`
   - 将 Lab2 能力增量加到 Lab1（团队体系、任务扩展字段、邀请/指派工作流）
@@ -19,6 +19,10 @@
 - `migrations/lab3_merge.sql`
   - Lab3 增量：新增 `task_dependencies`、索引、以及跨任务域校验触发器
   - 设计为可重复执行（`CREATE TABLE IF NOT EXISTS` + `DROP TRIGGER IF EXISTS` + `CREATE OR REPLACE FUNCTION`）
+
+- `migrations/lab4_activity_logs.sql`
+  - Lab4 增量：新增 `activity_logs` 操作日志表与查询索引
+  - 设计为可重复执行（`CREATE TABLE IF NOT EXISTS` + `CREATE INDEX IF NOT EXISTS`）
 
 ## 2. 脚本执行策略
 
@@ -36,21 +40,31 @@
    - `backend/db/migrations/lab2_merge.sql`
 4. 执行 Lab3 增量
    - `backend/db/migrations/lab3_merge.sql`
+5. 执行 Lab4 增量
+   - `backend/db/migrations/lab4_activity_logs.sql`
 
-按上述顺序执行后，数据库的基线架构和后续增量开发分离，同时每个脚本职责更清晰
+按上述顺序执行后，数据库的基线架构和后续增量开发分离，同时每个脚本职责更清晰。
 
-### 已有 Lab1 数据库，迁移升级到当前Lab3版本
+### 已有 Lab1 数据库，迁移升级到当前 Lab4 版本
 
 执行顺序：
 
 1. 执行 `backend/db/migrations/lab2_merge.sql`
 2. 执行 `backend/db/migrations/lab3_merge.sql`
+3. 执行 `backend/db/migrations/lab4_activity_logs.sql`
 
-### 已有 Lab2 数据库，迁移升级到Lab3
+### 已有 Lab2 数据库，迁移升级到 Lab4
 
 执行顺序：
 
-1. 仅执行 `backend/db/migrations/lab3_merge.sql`
+1. 执行 `backend/db/migrations/lab3_merge.sql`
+2. 执行 `backend/db/migrations/lab4_activity_logs.sql`
+
+### 已有 Lab3 数据库，迁移升级到 Lab4
+
+执行顺序：
+
+1. 仅执行 `backend/db/migrations/lab4_activity_logs.sql`
 
 ## 3. 执行示例（psql）
 
@@ -60,13 +74,15 @@
 psql "postgresql://<user>:<password>@<host>:<port>/<dbname>" -f backend/db/schema_postgres.sql
 psql "postgresql://<user>:<password>@<host>:<port>/<dbname>" -f backend/db/migrations/lab2_merge.sql
 psql "postgresql://<user>:<password>@<host>:<port>/<dbname>" -f backend/db/migrations/lab3_merge.sql
+psql "postgresql://<user>:<password>@<host>:<port>/<dbname>" -f backend/db/migrations/lab4_activity_logs.sql
 ```
 
-增量迁移（Lab1 -> Lab3）：
+增量迁移（Lab1 -> Lab4）：
 
 ```bash
 psql "postgresql://<user>:<password>@<host>:<port>/<dbname>" -f backend/db/migrations/lab2_merge.sql
 psql "postgresql://<user>:<password>@<host>:<port>/<dbname>" -f backend/db/migrations/lab3_merge.sql
+psql "postgresql://<user>:<password>@<host>:<port>/<dbname>" -f backend/db/migrations/lab4_activity_logs.sql
 ```
 或先连接 PostgreSQL，再在目标数据库执行对应 SQL 脚本。
 
@@ -78,14 +94,14 @@ psql "postgresql://<user>:<password>@<host>:<port>/<dbname>" -f backend/db/migra
 -- Lab3 核心表是否存在
 SELECT to_regclass('public.task_dependencies') AS task_dependencies_table;
 
--- Lab2/Lab3 核心表数量检查
+-- Lab2/Lab3/Lab4 核心表数量检查
 SELECT table_name
 FROM information_schema.tables
 WHERE table_schema = 'public'
   AND table_name IN (
     'users','tasks','teams','team_members',
     'team_invitations','task_assignment_requests',
-    'task_audit_logs','task_dependencies'
+    'task_dependencies','activity_logs'
   )
 ORDER BY table_name;
 

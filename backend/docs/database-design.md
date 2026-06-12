@@ -10,7 +10,7 @@
 ## 2. Core Tables
 - users
 - tasks
-- task_audit_logs (optional but recommended)
+- activity_logs
 
 See SQL file: `db/schema_postgres.sql`.
 
@@ -31,9 +31,11 @@ See SQL file: `db/schema_postgres.sql`.
 - deadline: nullable datetime
 - created_at / updated_at / deleted_at
 
-### task_audit_logs (optional)
-- task_id / user_id / action
-- before_data / after_data JSON snapshot
+### activity_logs
+- actor_id / actor_name / action_type
+- target_type / target_id
+- scope / team_id
+- content
 - created_at
 
 ## 4. Ownership Enforcement

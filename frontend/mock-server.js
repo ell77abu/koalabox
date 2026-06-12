@@ -13,6 +13,8 @@ const teams = new Map();
 const teamMembers = [];  
 const invitations = [];  
 const assignmentRequests = []; // 任务分配通知表
+const activityLogs = [];
+const deletedTaskScopes = new Map();
 
 // 👇 Lab3 新增：任务依赖关联表 (二元边表)
 const taskDependencies = [];
@@ -22,6 +24,7 @@ let teamIdCounter = 1;
 let inviteIdCounter = 1;
 let assignReqIdCounter = 1;
 let depIdCounter = 1;
+let logIdCounter = 1;
 
 app.use(cors());
 app.use(express.json());
@@ -103,6 +106,62 @@ const createAssignmentNotification = (task, reqUser) => {
   }
 };
 
+const getTaskScope = (task) => ({
+  scope: task.team_id ? 'TEAM' : 'PERSONAL',
+  team_id: task.team_id || null,
+});
+
+const createTaskLog = (task, actorName, actionType, content) => {
+  const scope = getTaskScope(task);
+  activityLogs.push({
+    id: logIdCounter++,
+    actor_id: actorName,
+    actor_name: actorName,
+    action_type: actionType,
+    target_type: 'TASK',
+    target_id: task.id,
+    scope: scope.scope,
+    team_id: scope.team_id,
+    content,
+    created_at: new Date().toISOString(),
+  });
+};
+
+const priorityText = (value) => ({ 1: '低', 2: '中', 3: '高' }[Number(value)] || value || '未设置');
+
+const formatValue = (value) => {
+  if (value === null || value === undefined || value === '') return '空';
+  return value;
+};
+
+const buildUpdateSummary = (beforeTask, patch) => {
+  const changes = [];
+  if (Object.prototype.hasOwnProperty.call(patch, 'title') && patch.title !== beforeTask.title) {
+    changes.push(`标题从「${formatValue(beforeTask.title)}」改为「${formatValue(patch.title)}」`);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'description') && patch.description !== beforeTask.description) {
+    changes.push('修改了任务描述');
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'priority') && Number(patch.priority) !== Number(beforeTask.priority)) {
+    changes.push(`优先级从「${priorityText(beforeTask.priority)}」改为「${priorityText(patch.priority)}」`);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'deadline') && patch.deadline !== beforeTask.deadline) {
+    changes.push(`截止时间从「${formatValue(beforeTask.deadline)}」改为「${formatValue(patch.deadline)}」`);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'status') && patch.status !== beforeTask.status) {
+    changes.push(`状态从「${formatValue(beforeTask.status)}」改为「${formatValue(patch.status)}」`);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'assignee_id') && patch.assignee_id !== beforeTask.assignee_id) {
+    changes.push(`执行者从「${formatValue(beforeTask.assignee_id)}」改为「${formatValue(patch.assignee_id)}」`);
+  }
+  return changes.length > 0 ? changes.join('；') : '保存了任务信息';
+};
+
+const canViewTaskLogs = (task, username) => {
+  if (!task.team_id) return task.user_id === username;
+  return Boolean(getUserRole(task.team_id, username));
+};
+
 app.get('/api/v1/tasks', verifyToken, (req, res) => {
   const { username } = req.user;
   const teamId = req.query.team_id ? parseInt(req.query.team_id) : null;
@@ -126,6 +185,7 @@ app.post('/api/v1/tasks', verifyToken, (req, res) => {
   };
   tasks.unshift(newTask); 
   createAssignmentNotification(newTask, req.user.username);
+  createTaskLog(newTask, req.user.username, 'CREATE_TASK', `创建了任务「${newTask.title}」`);
   return res.status(201).json({ code: 0, message: '任务创建成功', data: newTask });
 });
 
@@ -133,6 +193,7 @@ app.put('/api/v1/tasks/:id', verifyToken, (req, res) => {
   const taskId = parseInt(req.params.id);
   const task = tasks.find(t => t.id === taskId);
   if (!task) return res.status(404).json({ code: 1, message: '任务不存在' });
+  const beforeTask = { ...task };
 
   // 👇 Lab3：状态变更 409 拦截检查
   if (req.body.status === 'DONE' && task.status !== 'DONE') {
@@ -152,6 +213,7 @@ app.put('/api/v1/tasks/:id', verifyToken, (req, res) => {
 
   Object.assign(task, req.body);
   createAssignmentNotification(task, req.user.username);
+  createTaskLog(task, req.user.username, 'UPDATE_TASK_INFO', buildUpdateSummary(beforeTask, req.body));
   return res.status(200).json({ code: 0, message: '任务更新成功' });
 });
 
@@ -159,6 +221,12 @@ app.delete('/api/v1/tasks/:id', verifyToken, (req, res) => {
   const taskId = parseInt(req.params.id);
   const index = tasks.findIndex(t => t.id === taskId);
   if (index > -1) {
+    const task = tasks[index];
+    deletedTaskScopes.set(taskId, {
+      user_id: task.user_id,
+      team_id: task.team_id || null,
+    });
+    createTaskLog(task, req.user.username, 'DELETE_TASK', `删除了任务「${task.title}」`);
     tasks.splice(index, 1);
     // 👇 Lab3：级联删除相关的依赖关系 (模拟 ON DELETE CASCADE)
     for (let i = taskDependencies.length - 1; i >= 0; i--) {
@@ -168,6 +236,44 @@ app.delete('/api/v1/tasks/:id', verifyToken, (req, res) => {
     }
   }
   return res.status(200).json({ code: 0, message: '任务删除成功' });
+});
+
+app.get('/api/v1/tasks/:id/logs', verifyToken, (req, res) => {
+  const taskId = parseInt(req.params.id);
+  const task = tasks.find(t => t.id === taskId);
+  const deletedScope = deletedTaskScopes.get(taskId);
+
+  if (!task && !deletedScope) {
+    return res.status(404).json({ code: 404, message: '任务不存在' });
+  }
+
+  const authTask = task || {
+    id: taskId,
+    user_id: deletedScope.user_id,
+    team_id: deletedScope.team_id,
+  };
+
+  if (!canViewTaskLogs(authTask, req.user.username)) {
+    return res.status(403).json({ code: 403, message: '无权限访问该任务日志' });
+  }
+
+  const page = parseInt(req.query.page) || 1;
+  const size = parseInt(req.query.size) || 10;
+  const list = activityLogs
+    .filter(log => log.target_id === taskId)
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  const start = (page - 1) * size;
+
+  return res.status(200).json({
+    code: 0,
+    message: 'query success',
+    data: {
+      list: list.slice(start, start + size),
+      page,
+      size,
+      total: list.length,
+    },
+  });
 });
 
 // ================== Lab3 任务依赖管理模块 ==================
@@ -313,7 +419,10 @@ app.delete('/api/v1/teams/:id/members/:userId', verifyToken, (req, res) => {
   const index = teamMembers.findIndex(tm => tm.team_id === teamId && tm.user_id === userId);
   if (index > -1) {
     teamMembers.splice(index, 1);
-    tasks.filter(t => t.team_id === teamId && t.assignee_id === userId && t.status !== 'DONE').forEach(t => t.assignee_id = null);
+    tasks.filter(t => t.team_id === teamId && t.assignee_id === userId && t.status !== 'DONE').forEach(t => {
+      t.assignee_id = null;
+      createTaskLog(t, req.user.username, 'TASK_ASSIGNEE_CHANGED_BY_MEMBER_LEAVE', `成员 ${userId} 离开团队，任务执行者已置空`);
+    });
   }
   res.status(200).json({ code: 0, message: '移除成功' });
 });
@@ -328,7 +437,10 @@ app.post('/api/v1/teams/:id/leave', verifyToken, (req, res) => {
   const index = teamMembers.findIndex(tm => tm.team_id === teamId && tm.user_id === userId);
   if (index > -1) {
     teamMembers.splice(index, 1);
-    tasks.filter(t => t.team_id === teamId && t.assignee_id === userId && t.status !== 'DONE').forEach(t => t.assignee_id = null);
+    tasks.filter(t => t.team_id === teamId && t.assignee_id === userId && t.status !== 'DONE').forEach(t => {
+      t.assignee_id = null;
+      createTaskLog(t, userId, 'TASK_ASSIGNEE_CHANGED_BY_MEMBER_LEAVE', `成员 ${userId} 离开团队，任务执行者已置空`);
+    });
     return res.status(200).json({ code: 0, message: '已成功离开团队' });
   }
   res.status(400).json({ code: 1, message: '您不在该团队中' });

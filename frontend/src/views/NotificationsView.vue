@@ -60,12 +60,19 @@
           </div>
         </div>
       </div>
+
+      <MessageModal
+        v-model="messageOpen"
+        :title="messageTitle"
+        :message="messageText"
+      />
     </section>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue';
+import MessageModal from '../components/MessageModal.vue';
 import { 
   getInvitationsApi, 
   acceptInvitationApi, 
@@ -79,6 +86,15 @@ const notifications = ref([]);
 const loading = ref(false);
 const loadError = ref('');
 const processingId = ref(null);
+const messageOpen = ref(false);
+const messageTitle = ref('提示');
+const messageText = ref('');
+
+const showMessage = (message, title = '提示') => {
+  messageTitle.value = title;
+  messageText.value = message;
+  messageOpen.value = true;
+};
 
 const formatDate = (dateString) => {
   if (!dateString) return '';
@@ -149,7 +165,7 @@ const canProcessInvitation = (item) => {
 
 const handleAccept = async (item) => {
   if (!canProcessInvitation(item)) {
-    alert('该邀请当前不可处理');
+    showMessage('该邀请当前不可处理', '操作失败');
     return;
   }
 
@@ -161,10 +177,10 @@ const handleAccept = async (item) => {
     if (res.status === 200 && (res.data?.code === undefined || res.data.code === 0)) {
       await loadNotifications();
     } else {
-      alert(getApiFailureMessage(res, '同意团队邀请失败', '操作失败，请重试'));
+      showMessage(getApiFailureMessage(res, '同意团队邀请失败', '操作失败，请重试'), '操作失败');
     }
   } catch (error) {
-    alert(getApiErrorMessage(error, '同意团队邀请失败'));
+    showMessage(getApiErrorMessage(error, '同意团队邀请失败'), '操作失败');
   } finally {
     processingId.value = null;
   }
@@ -172,7 +188,7 @@ const handleAccept = async (item) => {
 
 const handleDecline = async (item) => {
   if (!canProcessInvitation(item)) {
-    alert('该邀请当前不可处理');
+    showMessage('该邀请当前不可处理', '操作失败');
     return;
   }
 
@@ -184,10 +200,10 @@ const handleDecline = async (item) => {
     if (res.status === 200 && (res.data?.code === undefined || res.data.code === 0)) {
       await loadNotifications();
     } else {
-      alert(getApiFailureMessage(res, '拒绝团队邀请失败', '操作失败，请重试'));
+      showMessage(getApiFailureMessage(res, '拒绝团队邀请失败', '操作失败，请重试'), '操作失败');
     }
   } catch (error) {
-    alert(getApiErrorMessage(error, '拒绝团队邀请失败'));
+    showMessage(getApiErrorMessage(error, '拒绝团队邀请失败'), '操作失败');
   } finally {
     processingId.value = null;
   }

@@ -225,7 +225,7 @@
                     class="btn btn-small btn-dependency"
                     :to="`/tasks/${task.id}/dependencies`"
                   >
-                    依赖详情
+                    任务详情
                   </RouterLink>
                   <button
                     v-if="canUpdateTaskStatus(task)"
@@ -334,7 +334,7 @@
                         class="btn btn-small btn-dependency"
                         :to="`/tasks/${task.id}/dependencies`"
                       >
-                        依赖详情
+                        任务详情
                       </RouterLink>
                       <button
                         class="btn btn-small btn-edit"
@@ -444,6 +444,18 @@
           </form>
         </div>
       </div>
+
+      <MessageModal
+        v-model="messageOpen"
+        :title="messageTitle"
+        :message="messageText"
+      />
+      <ConfirmModal
+        v-model="confirmOpen"
+        :title="confirmTitle"
+        :message="confirmText"
+        @confirm="runConfirmAction"
+      />
     </section>
   </div>
 </template>
@@ -453,6 +465,8 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter, RouterLink } from 'vue-router';
 import { authStore } from '../stores/auth';
 import { taskStore } from '../stores/task';
+import ConfirmModal from '../components/ConfirmModal.vue';
+import MessageModal from '../components/MessageModal.vue';
 import {
   getTasksApi,
   createTaskApi,
@@ -567,6 +581,13 @@ const updatingId = ref(null);
 const deletingId = ref(null);
 const createError = ref('');
 const updateError = ref('');
+const messageOpen = ref(false);
+const messageTitle = ref('提示');
+const messageText = ref('');
+const confirmOpen = ref(false);
+const confirmTitle = ref('确认操作');
+const confirmText = ref('');
+let confirmAction = null;
 const searchQuery = ref('');
 const sortOption = ref('default');
 const sortOpen = ref(false);
@@ -625,6 +646,27 @@ const toggleSortMenu = () => {
 const selectSortOption = (value) => {
   sortOption.value = value;
   sortOpen.value = false;
+};
+
+const showMessage = (message, title = '提示') => {
+  messageTitle.value = title;
+  messageText.value = message;
+  messageOpen.value = true;
+};
+
+const showConfirm = (message, action, title = '确认操作') => {
+  confirmTitle.value = title;
+  confirmText.value = message;
+  confirmAction = action;
+  confirmOpen.value = true;
+};
+
+const runConfirmAction = async () => {
+  const action = confirmAction;
+  confirmAction = null;
+  if (typeof action === 'function') {
+    await action();
+  }
 };
 
 // 兼容两个下拉菜单的外部点击关闭事件
@@ -883,7 +925,7 @@ const markTaskDone = async (task) => {
     return;
   }
   if (!canUpdateTaskStatus(task)) {
-    alert('无权限更新该任务');
+    showMessage('无权限更新该任务', '操作失败');
     return;
   }
 
@@ -924,14 +966,14 @@ const markTaskDone = async (task) => {
         }, 850);
       }, 950);
     } else {
-      alert(getApiFailureMessage(response, '完成任务失败', '更新失败'));
+      showMessage(getApiFailureMessage(response, '完成任务失败', '更新失败'), '操作失败');
     }
   } catch (error) {
     // 新增：拦截 409 状态码，提示前置任务未完成
     if (error.response?.status === 409) {
-      alert(getUnresolvedDependenciesMessage(error, findTaskTitleById, '完成任务失败'));
+      showMessage(getUnresolvedDependenciesMessage(error, findTaskTitleById, '完成任务失败'), '操作失败');
     } else {
-      alert(getApiErrorMessage(error, '完成任务失败'));
+      showMessage(getApiErrorMessage(error, '完成任务失败'), '操作失败');
     }
   } finally {
     updatingId.value = null;
@@ -941,28 +983,26 @@ const markTaskDone = async (task) => {
 // 删除任务
 const onDeleteTask = async (task) => {
   if (!canDeleteTask(task)) {
-    alert('无权限删除该任务');
+    showMessage('无权限删除该任务', '操作失败');
     return;
   }
 
-  const id = task.id;
-  if (!window.confirm('确定要删除这个任务吗？')) {
-    return;
-  }
-
-  deletingId.value = id;
-  try {
-    const response = await deleteTaskApi(id);
-    if (response.data.code === 0) {
-      await loadTasks();
-    } else {
-      alert(getApiFailureMessage(response, '删除任务失败', '删除失败'));
+  showConfirm('确定要删除这个任务吗？', async () => {
+    const id = task.id;
+    deletingId.value = id;
+    try {
+      const response = await deleteTaskApi(id);
+      if (response.data.code === 0) {
+        await loadTasks();
+      } else {
+        showMessage(getApiFailureMessage(response, '删除任务失败', '删除失败'), '操作失败');
+      }
+    } catch (error) {
+      showMessage(getApiErrorMessage(error, '删除任务失败'), '操作失败');
+    } finally {
+      deletingId.value = null;
     }
-  } catch (error) {
-    alert(getApiErrorMessage(error, '删除任务失败'));
-  } finally {
-    deletingId.value = null;
-  }
+  });
 };
 
 // 开始编辑任务

@@ -35,17 +35,26 @@
     <div class="profile-bottom-actions">
       <button class="btn logout-btn" @click="onLogout">退出登录</button>
     </div>
+
+    <ConfirmModal
+      v-model="confirmOpen"
+      title="确认操作"
+      message="确定要退出登录吗？"
+      @confirm="logout"
+    />
   </section>
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
+import ConfirmModal from '../components/ConfirmModal.vue';
 import { logoutApi } from '../services/auth';
 import { authStore } from '../stores/auth';
 import { getApiErrorMessage } from '../utils/apiError';
 
 const router = useRouter();
+const confirmOpen = ref(false);
 
 const avatarUrl = computed(
   () => `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(authStore.username.value || 'user')}`
@@ -54,16 +63,18 @@ const avatarUrl = computed(
 const levelLabel = computed(() => (Number(authStore.level.value) === 1 ? '管理员' : '普通用户'));
 
 const onLogout = async () => {
-  if (confirm('确定要退出登录吗？')) {
-    try {
-      await logoutApi();
-    } catch (error) {
-      // Ignore API logout errors and clear local state anyway.
-      console.warn(getApiErrorMessage(error, '退出登录接口失败，本地登录状态已清除'));
-    }
-    authStore.clearAuth();
-    router.replace('/login');
+  confirmOpen.value = true;
+};
+
+const logout = async () => {
+  try {
+    await logoutApi();
+  } catch (error) {
+    // Ignore API logout errors and clear local state anyway.
+    console.warn(getApiErrorMessage(error, '退出登录接口失败，本地登录状态已清除'));
   }
+  authStore.clearAuth();
+  router.replace('/login');
 };
 </script>
 
