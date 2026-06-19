@@ -30,6 +30,8 @@ export const declineInvitationApi = (invitationId) => http.post(`/teams/invitati
 export const getAssignmentRequestsApi = () => http.get('/assignment-requests', { params: { assignee_id: 'me' } });
 // 供 静默已读 API
 export const acceptAssignmentApi = (requestId) => http.post(`/assignment-requests/${requestId}/accept`);
+export const declineAssignmentApi = (requestId) => http.post(`/assignment-requests/${requestId}/decline`);
+export const dismissAssignmentApi = (requestId) => http.post(`/assignment-requests/${requestId}/dismiss`);
 
 // ==================== Lab3团队生命周期演化 ====================
 export const leaveTeamApi = (teamId) => http.post(`/teams/${teamId}/leave`);
