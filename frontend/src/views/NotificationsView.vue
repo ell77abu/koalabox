@@ -83,7 +83,8 @@ import {
   acceptInvitationApi, 
   declineInvitationApi, 
   getAssignmentRequestsApi, 
-  acceptAssignmentApi 
+  acceptAssignmentApi,
+  dismissAssignmentApi,
 } from '../services/team';
 import { getApiErrorMessage, getApiFailureMessage } from '../utils/apiError';
 
@@ -170,9 +171,24 @@ const canProcessInvitation = (item) => {
 
 const handleDeleteAssignment = async (item) => {
   if (item?.type !== 'ASSIGNMENT') return;
-  notifications.value = notifications.value.filter(
-    (entry) => !(entry.type === 'ASSIGNMENT' && entry.id === item.id)
-  );
+
+  const id = item.id;
+  if (processingId.value === id) return;
+  processingId.value = id;
+  try {
+    const res = await dismissAssignmentApi(id);
+    if (res.status === 200 && (res.data?.code === undefined || res.data.code === 0)) {
+      notifications.value = notifications.value.filter(
+        (entry) => !(entry.type === 'ASSIGNMENT' && entry.id === id)
+      );
+    } else {
+      showMessage(getApiFailureMessage(res, '删除任务分配消息失败', '操作失败，请重试'), '操作失败');
+    }
+  } catch (error) {
+    showMessage(getApiErrorMessage(error, '删除任务分配消息失败'), '操作失败');
+  } finally {
+    processingId.value = null;
+  }
 };
 
 const handleAccept = async (item) => {
