@@ -57,6 +57,11 @@
                 拒绝
               </button>
             </div>
+            <div class="task-actions" v-else-if="item.type === 'ASSIGNMENT'">
+              <button class="btn btn-small btn-danger" @click="handleDeleteAssignment(item)" :disabled="processingId === item.id">
+                删除
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -129,8 +134,8 @@ const loadNotifications = async () => {
       const resData = assignRes.value.data;
       assignList = Array.isArray(resData) ? resData : (resData?.data || []);
       assignList = assignList.map(item => ({ ...item, type: 'ASSIGNMENT' }));
-      
-      // 无感静默已读
+
+      // 恢复静默已读：进入消息页后，将 PENDING 指派请求标记为 ACCEPTED
       const pendingAssignments = assignList.filter(a => a.status === 'PENDING');
       if (pendingAssignments.length > 0) {
         const readResults = await Promise.allSettled(pendingAssignments.map(a => acceptAssignmentApi(a.id)));
@@ -161,6 +166,13 @@ const loadNotifications = async () => {
 
 const canProcessInvitation = (item) => {
   return item?.type === 'INVITATION' && item.status === 'PENDING';
+};
+
+const handleDeleteAssignment = async (item) => {
+  if (item?.type !== 'ASSIGNMENT') return;
+  notifications.value = notifications.value.filter(
+    (entry) => !(entry.type === 'ASSIGNMENT' && entry.id === item.id)
+  );
 };
 
 const handleAccept = async (item) => {
