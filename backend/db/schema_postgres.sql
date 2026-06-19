@@ -65,3 +65,17 @@ CREATE TABLE IF NOT EXISTS activity_logs (
 
 CREATE INDEX IF NOT EXISTS idx_activity_logs_target_created
   ON activity_logs (target_type, target_id, created_at DESC);
+
+-- Lab4-v2 assignment notification dismiss support.
+-- This schema file is kept compatible with older base schemas where
+-- task_assignment_requests may be created by lab2_merge.sql instead.
+ALTER TABLE IF EXISTS task_assignment_requests
+  ADD COLUMN IF NOT EXISTS dismiss_at TIMESTAMP NULL;
+
+DO $$
+BEGIN
+  IF to_regclass('public.task_assignment_requests') IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS idx_task_assign_assignee_dismiss
+      ON task_assignment_requests (assignee_id, dismiss_at, created_at DESC);
+  END IF;
+END $$;
