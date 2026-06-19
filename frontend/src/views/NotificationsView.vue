@@ -58,7 +58,7 @@
               </button>
             </div>
             <div class="task-actions" v-else-if="item.type === 'ASSIGNMENT'">
-              <button class="btn btn-small btn-danger" @click="handleDismissAssignment(item)" :disabled="processingId === item.id">
+              <button class="btn btn-small btn-danger" @click="handleDeleteAssignment(item)" :disabled="processingId === item.id">
                 删除
               </button>
             </div>
@@ -83,8 +83,7 @@ import {
   acceptInvitationApi, 
   declineInvitationApi, 
   getAssignmentRequestsApi, 
-  dismissAssignmentApi,
-  declineAssignmentApi,
+  acceptAssignmentApi 
 } from '../services/team';
 import { getApiErrorMessage, getApiFailureMessage } from '../utils/apiError';
 
@@ -135,6 +134,19 @@ const loadNotifications = async () => {
       const resData = assignRes.value.data;
       assignList = Array.isArray(resData) ? resData : (resData?.data || []);
       assignList = assignList.map(item => ({ ...item, type: 'ASSIGNMENT' }));
+
+      // 恢复静默已读：进入消息页后，将 PENDING 指派请求标记为 ACCEPTED
+      const pendingAssignments = assignList.filter(a => a.status === 'PENDING');
+      if (pendingAssignments.length > 0) {
+        const readResults = await Promise.allSettled(pendingAssignments.map(a => acceptAssignmentApi(a.id)));
+        readResults.forEach((result, index) => {
+          if (result.status === 'rejected') {
+            const assignment = pendingAssignments[index];
+            requestErrors.push(getApiErrorMessage(result.reason, `确认任务指派 #${assignment.task_id || assignment.id} 已读失败`));
+          }
+        });
+        assignList.forEach(a => { if (a.status === 'PENDING') a.status = 'ACCEPTED'; });
+      }
     } else {
       requestErrors.push(getApiErrorMessage(assignRes.reason, '加载任务指派通知失败'));
     }
@@ -154,6 +166,13 @@ const loadNotifications = async () => {
 
 const canProcessInvitation = (item) => {
   return item?.type === 'INVITATION' && item.status === 'PENDING';
+};
+
+const handleDeleteAssignment = async (item) => {
+  if (item?.type !== 'ASSIGNMENT') return;
+  notifications.value = notifications.value.filter(
+    (entry) => !(entry.type === 'ASSIGNMENT' && entry.id === item.id)
+  );
 };
 
 const handleAccept = async (item) => {
@@ -197,45 +216,6 @@ const handleDecline = async (item) => {
     }
   } catch (error) {
     showMessage(getApiErrorMessage(error, '拒绝团队邀请失败'), '操作失败');
-  } finally {
-    processingId.value = null;
-  }
-};
-
-const handleDismissAssignment = async (item) => {
-  if (item?.type !== 'ASSIGNMENT') {
-    return;
-  }
-
-  const id = item.id;
-  if (processingId.value === id) return;
-  processingId.value = id;
-
-  try {
-    // 优先使用 Lab5 新增的 dismiss 接口；若后端尚未升级则回退到现有 decline 接口。
-    try {
-      const dismissRes = await dismissAssignmentApi(id);
-      if (!(dismissRes.status === 200 && (dismissRes.data?.code === undefined || dismissRes.data.code === 0))) {
-        throw new Error(getApiFailureMessage(dismissRes, '删除任务分配消息失败', '操作失败，请重试'));
-      }
-    } catch (dismissError) {
-      const status = dismissError?.response?.status;
-      const shouldFallback = status === 404 || status === 405 || status === 501;
-      if (!shouldFallback) {
-        throw dismissError;
-      }
-
-      const fallbackRes = await declineAssignmentApi(id);
-      if (!(fallbackRes.status === 200 && (fallbackRes.data?.code === undefined || fallbackRes.data.code === 0))) {
-        throw new Error(getApiFailureMessage(fallbackRes, '删除任务分配消息失败', '操作失败，请重试'));
-      }
-    }
-
-    notifications.value = notifications.value.filter(
-      (entry) => !(entry.type === 'ASSIGNMENT' && entry.id === id)
-    );
-  } catch (error) {
-    showMessage(getApiErrorMessage(error, '删除任务分配消息失败'), '操作失败');
   } finally {
     processingId.value = null;
   }
