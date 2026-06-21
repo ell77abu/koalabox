@@ -83,7 +83,6 @@ import {
   acceptInvitationApi, 
   declineInvitationApi, 
   getAssignmentRequestsApi, 
-  acceptAssignmentApi,
   dismissAssignmentApi,
 } from '../services/team';
 import { getApiErrorMessage, getApiFailureMessage } from '../utils/apiError';
@@ -135,19 +134,6 @@ const loadNotifications = async () => {
       const resData = assignRes.value.data;
       assignList = Array.isArray(resData) ? resData : (resData?.data || []);
       assignList = assignList.map(item => ({ ...item, type: 'ASSIGNMENT' }));
-
-      // 恢复静默已读：进入消息页后，将 PENDING 指派请求标记为 ACCEPTED
-      const pendingAssignments = assignList.filter(a => a.status === 'PENDING');
-      if (pendingAssignments.length > 0) {
-        const readResults = await Promise.allSettled(pendingAssignments.map(a => acceptAssignmentApi(a.id)));
-        readResults.forEach((result, index) => {
-          if (result.status === 'rejected') {
-            const assignment = pendingAssignments[index];
-            requestErrors.push(getApiErrorMessage(result.reason, `确认任务指派 #${assignment.task_id || assignment.id} 已读失败`));
-          }
-        });
-        assignList.forEach(a => { if (a.status === 'PENDING') a.status = 'ACCEPTED'; });
-      }
     } else {
       requestErrors.push(getApiErrorMessage(assignRes.reason, '加载任务指派通知失败'));
     }
