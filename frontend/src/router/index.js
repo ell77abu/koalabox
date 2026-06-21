@@ -11,6 +11,8 @@ import TeamsView from '../views/TeamsView.vue';
 import CreateTeamView from '../views/CreateTeamView.vue';
 import TeamDetailView from '../views/TeamDetailView.vue';
 import NotificationsView from '../views/NotificationsView.vue';
+import TaskTrashView from '../views/TaskTrashView.vue';
+import TaskLogView from '../views/TaskLogView.vue';
 
 const routes = [
   {
@@ -42,9 +44,21 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/tasks/trash',
+    name: 'task-trash',
+    component: TaskTrashView,
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/tasks/:id/dependencies',
     name: 'task-dependencies',
     component: TaskDependencyView,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/tasks/:id',
+    name: 'task-log',
+    component: TaskLogView,
     meta: { requiresAuth: true },
   },
   {
