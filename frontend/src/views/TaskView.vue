@@ -2,7 +2,7 @@
   <div class="page-shell">
     <section class="card card-wide task-card">
       <RouterLink to="/tasks/trash" class="btn btn-small btn-outline trash-corner-entry">
-        回收站
+        垃圾箱
       </RouterLink>
       <header class="task-header">
         <div class="task-title">

@@ -12,7 +12,7 @@
 
     <p v-if="loadError" class="error-banner">{{ loadError }}</p>
 
-    <div v-if="loading" class="loading-state">加载回收站中...</div>
+    <div v-if="loading" class="loading-state">加载垃圾箱中...</div>
 
     <div v-else-if="tasks.length === 0" class="empty-state">
       当前没有已删除任务
@@ -45,16 +45,6 @@
           <RouterLink class="btn btn-small btn-dependency" :to="buildLogRoute(task)">
             查看日志
           </RouterLink>
-          <button
-            v-if="canRestore"
-            class="btn btn-small btn-complete"
-            type="button"
-            :disabled="restoringId === task.id"
-            @click="confirmRestore(task)"
-          >
-            {{ restoringId === task.id ? '恢复中...' : '恢复' }}
-          </button>
-          <span v-else class="permission-note">仅团队管理员可恢复</span>
         </div>
       </article>
 
@@ -65,22 +55,13 @@
       </div>
     </div>
 
-    <MessageModal v-model="messageOpen" :title="messageTitle" :message="messageText" />
-    <ConfirmModal
-      v-model="confirmOpen"
-      :title="confirmTitle"
-      :message="confirmText"
-      @confirm="runConfirmAction"
-    />
   </section>
 </template>
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
-import ConfirmModal from './ConfirmModal.vue';
-import MessageModal from './MessageModal.vue';
-import { getTaskTrashApi, restoreTaskApi } from '../services/task';
+import { getTaskTrashApi } from '../services/task';
 import { getApiErrorMessage, getApiFailureMessage } from '../utils/apiError';
 
 const props = defineProps({
@@ -88,21 +69,15 @@ const props = defineProps({
     type: [Number, String],
     default: null,
   },
-  canRestore: {
-    type: Boolean,
-    default: true,
-  },
   title: {
     type: String,
-    default: '回收站',
+    default: '垃圾箱',
   },
   subtitle: {
     type: String,
-    default: '查看已软删除的任务，并在需要时恢复。',
+    default: '查看已软删除的任务和对应操作日志。',
   },
 });
-
-const emit = defineEmits(['restored']);
 
 const tasks = ref([]);
 const page = ref(1);
@@ -110,14 +85,6 @@ const size = ref(10);
 const total = ref(0);
 const loading = ref(false);
 const loadError = ref('');
-const restoringId = ref(null);
-const messageOpen = ref(false);
-const messageTitle = ref('提示');
-const messageText = ref('');
-const confirmOpen = ref(false);
-const confirmTitle = ref('确认恢复');
-const confirmText = ref('');
-let confirmAction = null;
 
 const normalizedTeamId = computed(() => {
   const parsed = Number(props.teamId);
@@ -140,27 +107,6 @@ const formatDate = (value) => {
     hour: '2-digit',
     minute: '2-digit',
   });
-};
-
-const showMessage = (message, title = '提示') => {
-  messageTitle.value = title;
-  messageText.value = message;
-  messageOpen.value = true;
-};
-
-const showConfirm = (message, action, title = '确认恢复') => {
-  confirmTitle.value = title;
-  confirmText.value = message;
-  confirmAction = action;
-  confirmOpen.value = true;
-};
-
-const runConfirmAction = async () => {
-  const action = confirmAction;
-  confirmAction = null;
-  if (typeof action === 'function') {
-    await action();
-  }
 };
 
 const buildLogRoute = (task) => {
@@ -189,35 +135,15 @@ const loadTrash = async () => {
     } else {
       tasks.value = [];
       total.value = 0;
-      loadError.value = getApiFailureMessage(res, '加载回收站失败');
+      loadError.value = getApiFailureMessage(res, '加载垃圾箱失败');
     }
   } catch (error) {
     tasks.value = [];
     total.value = 0;
-    loadError.value = getApiErrorMessage(error, '加载回收站失败');
+    loadError.value = getApiErrorMessage(error, '加载垃圾箱失败');
   } finally {
     loading.value = false;
   }
-};
-
-const confirmRestore = (task) => {
-  showConfirm(`确定要恢复任务「${task.title || `#${task.id}`}」吗？`, async () => {
-    restoringId.value = task.id;
-    try {
-      const res = await restoreTaskApi(task.id);
-      if (res.status === 200 && (res.data?.code === undefined || res.data.code === 0)) {
-        showMessage('任务已恢复');
-        await loadTrash();
-        emit('restored', task);
-      } else {
-        showMessage(getApiFailureMessage(res, '恢复任务失败', '恢复失败'), '操作失败');
-      }
-    } catch (error) {
-      showMessage(getApiErrorMessage(error, '恢复任务失败'), '操作失败');
-    } finally {
-      restoringId.value = null;
-    }
-  });
 };
 
 watch(page, loadTrash);

@@ -4,15 +4,14 @@
       <header class="trash-page-header">
         <button class="back-btn" type="button" @click="router.back()">← 返回</button>
         <div>
-          <h1>回收站</h1>
-          <p class="hint">查看个人已删除任务，并按需恢复。</p>
+          <h1>垃圾箱</h1>
+          <p class="hint">查看个人已删除任务和操作日志。</p>
         </div>
       </header>
 
       <TaskTrashPanel
-        title="个人任务回收站"
-        subtitle="这里展示你的个人已删除任务，恢复后会回到任务列表。"
-        :can-restore="true"
+        title="个人任务垃圾箱"
+        subtitle="这里展示你的个人已删除任务，可继续查看任务删除前后的操作记录。"
       />
     </section>
   </div>

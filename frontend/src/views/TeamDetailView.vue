@@ -45,7 +45,7 @@
           :class="{ active: activeTab === 'trash' }"
           @click="activeTab = 'trash'"
         >
-          回收站
+          垃圾箱
         </button>
         <button
           v-if="myRole === 'Owner'"
@@ -157,10 +157,8 @@
       <div v-if="activeTab === 'trash'" class="tab-content">
         <TaskTrashPanel
           :team-id="teamId"
-          :can-restore="canRestoreTeamTrash"
-          title="团队任务回收站"
-          subtitle="团队成员都可以查看已删除任务；只有 Owner 和 Admin 可以恢复。"
-          @restored="loadTeamTasks"
+          title="团队任务垃圾箱"
+          subtitle="团队成员都可以查看已删除任务，并查看对应操作日志。"
         />
       </div>
 
@@ -427,7 +425,6 @@ const currentTeam = computed(() => teamStore.teams.value.find(t => Number(t.team
 const myRole = computed(() => currentTeam.value ? currentTeam.value.role : 'Member');
 const isTeamOwner = computed(() => myRole.value === 'Owner');
 const canManageTeamTasks = computed(() => myRole.value === 'Owner' || myRole.value === 'Admin');
-const canRestoreTeamTrash = computed(() => canManageTeamTasks.value);
 const canLeaveCurrentTeam = computed(() => myRole.value === 'Member' || myRole.value === 'Admin');
 
 const tasks = ref([]);

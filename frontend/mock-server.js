@@ -280,30 +280,6 @@ app.delete('/api/v1/tasks/:id', verifyToken, (req, res) => {
   return res.status(200).json({ code: 0, message: '任务删除成功' });
 });
 
-app.post('/api/v1/tasks/:id/restore', verifyToken, (req, res) => {
-  const taskId = parseInt(req.params.id);
-  const index = deletedTasks.findIndex(t => t.id === taskId);
-  if (index === -1) return res.status(404).json({ code: 404, message: '任务不存在' });
-
-  const task = deletedTasks[index];
-  const role = task.team_id ? getUserRole(task.team_id, req.user.username) : null;
-  const canRestore = task.team_id
-    ? role === 'Owner' || role === 'Admin'
-    : task.user_id === req.user.username;
-
-  if (!canRestore) return res.status(403).json({ code: 403, message: 'forbidden' });
-
-  const restoredTask = { ...task };
-  delete restoredTask.deleted_at;
-  restoredTask.updated_at = new Date().toISOString();
-  deletedTasks.splice(index, 1);
-  deletedTaskScopes.delete(taskId);
-  tasks.unshift(restoredTask);
-  createTaskLog(restoredTask, req.user.username, 'UPDATE_TASK_INFO', `恢复了任务「${restoredTask.title}」`);
-
-  return res.status(200).json({ code: 0, message: '任务恢复成功', data: restoredTask });
-});
-
 app.get('/api/v1/tasks/:id/logs', verifyToken, (req, res) => {
   const taskId = parseInt(req.params.id);
   const task = tasks.find(t => t.id === taskId);
