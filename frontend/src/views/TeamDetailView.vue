@@ -427,7 +427,7 @@ const currentTeam = computed(() => teamStore.teams.value.find(t => Number(t.team
 const myRole = computed(() => currentTeam.value ? currentTeam.value.role : 'Member');
 const isTeamOwner = computed(() => myRole.value === 'Owner');
 const canManageTeamTasks = computed(() => myRole.value === 'Owner' || myRole.value === 'Admin');
-const canRestoreTeamTrash = computed(() => isSystemAdmin.value || canManageTeamTasks.value);
+const canRestoreTeamTrash = computed(() => canManageTeamTasks.value);
 const canLeaveCurrentTeam = computed(() => myRole.value === 'Member' || myRole.value === 'Admin');
 
 const tasks = ref([]);
