@@ -41,6 +41,13 @@
           👥 成员管理
         </button>
         <button
+          class="tab-btn"
+          :class="{ active: activeTab === 'trash' }"
+          @click="activeTab = 'trash'"
+        >
+          回收站
+        </button>
+        <button
           v-if="myRole === 'Owner'"
           class="tab-btn"
           :class="{ active: activeTab === 'manage' }"
@@ -145,6 +152,16 @@
             <button class="btn btn-outline btn-small" :disabled="currentPage === totalPages" @click="currentPage++">下一页</button>
           </div>
         </div>
+      </div>
+
+      <div v-if="activeTab === 'trash'" class="tab-content">
+        <TaskTrashPanel
+          :team-id="teamId"
+          :can-restore="canRestoreTeamTrash"
+          title="团队任务回收站"
+          subtitle="团队成员都可以查看已删除任务；只有 Owner 和 Admin 可以恢复。"
+          @restored="loadTeamTasks"
+        />
       </div>
 
       <div v-if="activeTab === 'members'" class="tab-content">
@@ -383,6 +400,7 @@ import { authStore } from '../stores/auth';
 import { teamStore } from '../stores/team';
 import ConfirmModal from '../components/ConfirmModal.vue';
 import MessageModal from '../components/MessageModal.vue';
+import TaskTrashPanel from '../components/TaskTrashPanel.vue';
 import {
   getTeamsApi, getTeamMembersApi, addTeamMemberApi, deleteTeamMemberApi, updateTeamMemberRoleApi,
   getTeamTasksApi, updateTeamApi, dissolveTeamApi,
@@ -409,6 +427,7 @@ const currentTeam = computed(() => teamStore.teams.value.find(t => Number(t.team
 const myRole = computed(() => currentTeam.value ? currentTeam.value.role : 'Member');
 const isTeamOwner = computed(() => myRole.value === 'Owner');
 const canManageTeamTasks = computed(() => myRole.value === 'Owner' || myRole.value === 'Admin');
+const canRestoreTeamTrash = computed(() => isSystemAdmin.value || canManageTeamTasks.value);
 const canLeaveCurrentTeam = computed(() => myRole.value === 'Member' || myRole.value === 'Admin');
 
 const tasks = ref([]);
