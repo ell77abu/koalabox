@@ -41,6 +41,13 @@
           👥 成员管理
         </button>
         <button
+          class="tab-btn"
+          :class="{ active: activeTab === 'trash' }"
+          @click="activeTab = 'trash'"
+        >
+          垃圾箱
+        </button>
+        <button
           v-if="myRole === 'Owner'"
           class="tab-btn"
           :class="{ active: activeTab === 'manage' }"
@@ -145,6 +152,14 @@
             <button class="btn btn-outline btn-small" :disabled="currentPage === totalPages" @click="currentPage++">下一页</button>
           </div>
         </div>
+      </div>
+
+      <div v-if="activeTab === 'trash'" class="tab-content">
+        <TaskTrashPanel
+          :team-id="teamId"
+          title="团队任务垃圾箱"
+          subtitle="团队成员都可以查看已删除任务，并查看对应操作日志。"
+        />
       </div>
 
       <div v-if="activeTab === 'members'" class="tab-content">
@@ -383,6 +398,7 @@ import { authStore } from '../stores/auth';
 import { teamStore } from '../stores/team';
 import ConfirmModal from '../components/ConfirmModal.vue';
 import MessageModal from '../components/MessageModal.vue';
+import TaskTrashPanel from '../components/TaskTrashPanel.vue';
 import {
   getTeamsApi, getTeamMembersApi, addTeamMemberApi, deleteTeamMemberApi, updateTeamMemberRoleApi,
   getTeamTasksApi, updateTeamApi, dissolveTeamApi,

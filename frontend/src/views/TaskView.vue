@@ -1,6 +1,9 @@
 <template>
   <div class="page-shell">
-    <section class="card card-wide">
+    <section class="card card-wide task-card">
+      <RouterLink to="/tasks/trash" class="btn btn-small btn-outline trash-corner-entry">
+        垃圾箱
+      </RouterLink>
       <header class="task-header">
         <div class="task-title">
           <h1>任务管理</h1>
@@ -1145,6 +1148,10 @@ onBeforeUnmount(() => {
 
 <style scoped>
 /* 头部 */
+.task-card {
+  position: relative;
+}
+
 .task-header {
   display: flex;
   flex-direction: column;
@@ -1165,6 +1172,20 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
   gap: 0.75rem;
   width: 100%;
+}
+
+.trash-corner-entry {
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 78px;
+  height: 38px;
+  text-decoration: none;
+  font-weight: 700;
+  z-index: 1;
 }
 
 .task-group-actions {
@@ -1900,6 +1921,12 @@ onBeforeUnmount(() => {
 
 /* 响应式设计 */
 @media (max-width: 768px) {
+  .trash-corner-entry {
+    position: static;
+    align-self: flex-end;
+    margin-bottom: 0.75rem;
+  }
+
   .header-actions {
     width: 100%;
     flex-wrap: wrap;
