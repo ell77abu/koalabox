@@ -7,6 +7,14 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+scripts/lab4_api_test_data.json
+lab4-service-test-result.txt
+lab4-backend-test-result.txt
+lab1.md
+lab2.md
+lab3.md
+lab4.md
+
 node_modules/
 dist/
 dist-ssr/
