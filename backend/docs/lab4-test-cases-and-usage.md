@@ -2,13 +2,14 @@
 
 本文档用于实验报告和现场验收，汇总当前自动化 API 验收脚本和后端 Go 单元/Handler 测试，并说明运行方式、参数和输出文件。
 
-## 新增功能识别
+## 验收范围
 
-本轮提交中除回收站功能外，还新增了任务分配通知隐藏能力：
+Lab4 自动化验收覆盖以下功能：
 
-- 任务回收站：后端新增 `GET /api/v1/tasks/trash`，前端新增个人/团队回收站入口，用于查询当前用户可见的已删除任务。
-- 分配通知隐藏：后端新增 `POST /api/v1/assignment-requests/:request_id/dismiss`，数据库新增 `task_assignment_requests.dismiss_at`，前端通知页可隐藏已处理或不想继续展示的任务分配通知。
-- 独立任务日志页：前端新增 `TaskLogView.vue`，复用既有 `GET /api/v1/tasks/:id/logs`，不属于新的后端业务接口。
+- 任务操作日志：后端提供 `GET /api/v1/tasks/:id/logs`，前端任务详情页和任务日志页展示操作记录。
+- 任务回收站：后端提供 `GET /api/v1/tasks/trash`，前端提供个人/团队回收站入口，用于查询当前用户可见的已删除任务。
+- 分配通知隐藏：后端提供 `POST /api/v1/assignment-requests/:request_id/dismiss`，前端通知页可隐藏已处理或不想继续展示的任务分配通知。
+- Lab1-Lab3 回归：注册登录、个人任务 CRUD、团队权限、任务依赖规则继续通过自动化用例验证。
 
 ## API 验收测试
 

@@ -2,7 +2,7 @@
 
 本文档用于实验报告和现场验收，覆盖 Lab1-Lab4 回归、权限、异常和操作日志场景。自动化接口验收脚本为 `scripts/prepare_api_data.sh` 与 `scripts/run_api_tests.sh`。完整 API 与单元测试用例清单、参数说明见 `backend/docs/lab4-test-cases-and-usage.md`。
 
-本轮新增功能识别：除任务回收站外，还新增了任务分配通知隐藏接口 `POST /api/v1/assignment-requests/:request_id/dismiss`；前端独立任务日志页复用既有日志接口，不新增后端业务 API。
+Lab4 验收范围包括任务操作日志、任务回收站、任务分配通知隐藏，以及 Lab1-Lab3 回归场景。任务日志页复用 `GET /api/v1/tasks/:id/logs` 接口。
 
 ## 测试用例表
 
