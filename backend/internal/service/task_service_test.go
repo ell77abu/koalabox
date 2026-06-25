@@ -286,6 +286,8 @@ func (s *taskUserRepoStub) UpdatePasswordByID(ctx context.Context, id uint64, pa
 }
 
 type taskAssignRepoStub struct {
+	listPendingByAssigneeFn   func(ctx context.Context, assigneeID uint64) ([]model.TaskAssignmentRequestDetail, error)
+	dismissForAssigneeScopeFn func(ctx context.Context, id, assigneeID uint64) (*time.Time, error)
 	declinePendingByTaskIDFn func(ctx context.Context, taskID uint64) error
 }
 
