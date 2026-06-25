@@ -813,7 +813,7 @@ func (s *taskService) buildTaskUpdateContent(ctx context.Context, before, after 
 	if before.Priority != after.Priority {
 		changes = append(changes, fmt.Sprintf("将优先级从 %d 修改为 %d", before.Priority, after.Priority))
 	}
-	if !isSameTimePtr(before.Deadline, after.Deadline) {
+	if !isSameDeadlinePtr(before.Deadline, after.Deadline) {
 		changes = append(changes, fmt.Sprintf("将截止时间从 %s 修改为 %s", formatDeadline(before.Deadline), formatDeadline(after.Deadline)))
 	}
 	if !isSameUint64Ptr(before.AssigneeID, after.AssigneeID) {
@@ -873,6 +873,13 @@ func isSameTimePtr(left, right *time.Time) bool {
 		return left == right
 	}
 	return left.Equal(*right)
+}
+
+func isSameDeadlinePtr(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return formatDeadline(left) == formatDeadline(right)
 }
 
 func (s *taskService) ensureDependenciesCompleted(ctx context.Context, taskID uint64) error {

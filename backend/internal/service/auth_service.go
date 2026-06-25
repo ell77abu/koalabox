@@ -21,6 +21,8 @@ var (
 	ErrInvalidOldPassword = errors.New("invalid old password")
 )
 
+var usernameRegexp = regexp.MustCompile(`^[A-Za-z0-9_]{4,20}$`)
+
 type RegisterRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -161,8 +163,7 @@ func (s *authService) ChangePassword(ctx context.Context, userID uint64, req Cha
 }
 
 func isValidUsername(username string) bool {
-	re := regexp.MustCompile(`^[A-Za-z0-9_]{4,20}$`)
-	return re.MatchString(username)
+	return usernameRegexp.MatchString(username)
 }
 
 func isValidPassword(password string) bool {

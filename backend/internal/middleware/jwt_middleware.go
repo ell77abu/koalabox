@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -24,11 +23,11 @@ func JWTAuth(secret string) gin.HandlerFunc {
 			tokenString = cookieToken
 		}
 
+		// 优化点 1: 更优雅、高效的 Bearer Token 解析方式
 		if tokenString == "" {
 			authHeader := c.GetHeader("Authorization")
-			parts := strings.SplitN(authHeader, " ", 2)
-			if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
-				tokenString = parts[1]
+			if strings.HasPrefix(authHeader, "Bearer ") || strings.HasPrefix(authHeader, "bearer ") {
+				tokenString = authHeader[7:] // 直接截取 "Bearer " 之后的字符
 			}
 		}
 
@@ -40,7 +39,8 @@ func JWTAuth(secret string) gin.HandlerFunc {
 
 		claims, err := jwtx.ParseToken(tokenString, secret)
 		if err != nil {
-			response.JSON(c, http.StatusUnauthorized, 401, "invalid or expired token", nil)
+			// 优化点 2: 统一使用封装好的 response.Unauthorized 保证全站错误规范一致
+			response.Unauthorized(c, "invalid or expired token")
 			c.Abort()
 			return
 		}
