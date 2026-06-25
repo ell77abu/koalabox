@@ -58,8 +58,20 @@ func Load() (*Config, error) {
 	if cfg.Database.DSN == "" {
 		return nil, fmt.Errorf("database.dsn is required")
 	}
+	if cfg.Database.MaxIdleConns < 0 {
+		return nil, fmt.Errorf("database.max_idle_conns must be non-negative")
+	}
+	if cfg.Database.MaxOpenConns <= 0 {
+		return nil, fmt.Errorf("database.max_open_conns must be greater than zero")
+	}
+	if cfg.Database.ConnMaxLifetimeMinutes < 0 {
+		return nil, fmt.Errorf("database.conn_max_lifetime_minutes must be non-negative")
+	}
 	if cfg.JWT.Secret == "" {
 		return nil, fmt.Errorf("jwt.secret is required")
+	}
+	if cfg.JWT.ExpireHour <= 0 {
+		return nil, fmt.Errorf("jwt.expire_hour must be greater than zero")
 	}
 
 	return &cfg, nil
