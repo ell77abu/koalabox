@@ -16,6 +16,8 @@ type taskRepoMock struct {
 	createFn                       func(ctx context.Context, task *model.Task) error
 	listByTeamIDFn                 func(ctx context.Context, teamID uint64, page, size int) ([]model.Task, int64, error)
 	listPersonalAndAssignedTeamFn  func(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error)
+	listPersonalTrashByUserIDFn    func(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error)
+	listTeamTrashByTeamIDFn        func(ctx context.Context, teamID uint64, page, size int) ([]model.Task, int64, error)
 	getByIDFn                      func(ctx context.Context, id uint64) (*model.Task, error)
 	getByIDForUserScopeFn          func(ctx context.Context, id, userID uint64) (*model.Task, error)
 	updateByIDFn                   func(ctx context.Context, task *model.Task) error
@@ -52,6 +54,18 @@ func (m *taskRepoMock) ListByUserID(ctx context.Context, userID uint64, page, si
 }
 func (m *taskRepoMock) ListAll(ctx context.Context, page, size int) ([]model.Task, int64, error) {
 	panic("unexpected call to ListAll")
+}
+func (m *taskRepoMock) ListPersonalTrashByUserID(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error) {
+	if m.listPersonalTrashByUserIDFn == nil {
+		panic("unexpected call to ListPersonalTrashByUserID")
+	}
+	return m.listPersonalTrashByUserIDFn(ctx, userID, page, size)
+}
+func (m *taskRepoMock) ListTeamTrashByTeamID(ctx context.Context, teamID uint64, page, size int) ([]model.Task, int64, error) {
+	if m.listTeamTrashByTeamIDFn == nil {
+		panic("unexpected call to ListTeamTrashByTeamID")
+	}
+	return m.listTeamTrashByTeamIDFn(ctx, teamID, page, size)
 }
 func (m *taskRepoMock) GetByIDAndUserID(ctx context.Context, id, userID uint64) (*model.Task, error) {
 	panic("unexpected call to GetByIDAndUserID")
@@ -288,6 +302,15 @@ func (s *taskAssignRepoStub) GetPendingByTaskAndAssignee(ctx context.Context, ta
 	panic("unexpected call")
 }
 func (s *taskAssignRepoStub) ListPendingByAssignee(ctx context.Context, assigneeID uint64) ([]model.TaskAssignmentRequestDetail, error) {
+	if s.listPendingByAssigneeFn != nil {
+		return s.listPendingByAssigneeFn(ctx, assigneeID)
+	}
+	panic("unexpected call")
+}
+func (s *taskAssignRepoStub) DismissForAssigneeScope(ctx context.Context, id, assigneeID uint64) (*time.Time, error) {
+	if s.dismissForAssigneeScopeFn != nil {
+		return s.dismissForAssigneeScopeFn(ctx, id, assigneeID)
+	}
 	panic("unexpected call")
 }
 func (s *taskAssignRepoStub) UpdateStatus(ctx context.Context, id uint64, status model.InvitationStatus) error {
@@ -378,6 +401,101 @@ func TestTaskServiceListUsesTeamIDFilterWhenProvided(t *testing.T) {
 	require.True(t, called)
 	require.Len(t, list, 1)
 	assert.EqualValues(t, 1, total)
+}
+
+func TestTaskServiceListTrashReturnsPersonalDeletedTasks(t *testing.T) {
+	deletedAt := time.Date(2026, 6, 3, 14, 0, 0, 0, time.UTC)
+	svc := NewTaskService(
+		&taskRepoMock{
+			listPersonalTrashByUserIDFn: func(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error) {
+				assert.Equal(t, uint64(9), userID)
+				assert.Equal(t, 1, page)
+				assert.Equal(t, 10, size)
+				return []model.Task{{ID: 88, UserID: userID, DeletedAt: &deletedAt}}, 1, nil
+			},
+		},
+		&teamRepoForTaskMock{},
+		&taskUserRepoStub{},
+		&taskAssignRepoStub{},
+	)
+
+	list, total, page, size, err := svc.ListTrash(context.Background(), 9, 0, 0, nil)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.EqualValues(t, 1, total)
+	assert.Equal(t, 1, page)
+	assert.Equal(t, 10, size)
+}
+
+func TestTaskServiceListTrashReturnsTeamDeletedTasksForMember(t *testing.T) {
+	const teamID = uint64(5)
+	deletedAt := time.Date(2026, 6, 4, 11, 30, 0, 0, time.UTC)
+	svc := NewTaskService(
+		&taskRepoMock{
+			listTeamTrashByTeamIDFn: func(ctx context.Context, gotTeamID uint64, page, size int) ([]model.Task, int64, error) {
+				assert.Equal(t, teamID, gotTeamID)
+				assert.Equal(t, 2, page)
+				assert.Equal(t, 20, size)
+				return []model.Task{{ID: 102, TeamID: uint64Ptr(teamID), DeletedAt: &deletedAt}}, 1, nil
+			},
+		},
+		&teamRepoForTaskMock{
+			getByIDForMemberScopeFn: func(ctx context.Context, gotTeamID, userID uint64) (*model.Team, error) {
+				assert.Equal(t, teamID, gotTeamID)
+				assert.Equal(t, uint64(7), userID)
+				return &model.Team{ID: gotTeamID}, nil
+			},
+		},
+		&taskUserRepoStub{},
+		&taskAssignRepoStub{},
+	)
+
+	list, total, page, size, err := svc.ListTrash(context.Background(), 7, 2, 20, uint64Ptr(teamID))
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.EqualValues(t, 1, total)
+	assert.Equal(t, 2, page)
+	assert.Equal(t, 20, size)
+}
+
+func TestTaskServiceListTrashRejectsNonMemberTeam(t *testing.T) {
+	const teamID = uint64(5)
+	svc := NewTaskService(
+		&taskRepoMock{},
+		&teamRepoForTaskMock{
+			getByIDForMemberScopeFn: func(ctx context.Context, gotTeamID, userID uint64) (*model.Team, error) {
+				return nil, repository.ErrNotFound
+			},
+		},
+		&taskUserRepoStub{},
+		&taskAssignRepoStub{},
+	)
+
+	_, _, _, _, err := svc.ListTrash(context.Background(), 7, 1, 10, uint64Ptr(teamID))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, repository.ErrForbidden)
+}
+
+func TestTaskServiceDismissAssignmentReturnsTimestamp(t *testing.T) {
+	dismissedAt := time.Date(2026, 6, 5, 12, 30, 0, 0, time.UTC)
+	svc := NewTaskService(
+		&taskRepoMock{},
+		&teamRepoForTaskMock{},
+		&taskUserRepoStub{},
+		&taskAssignRepoStub{
+			dismissForAssigneeScopeFn: func(ctx context.Context, id, assigneeID uint64) (*time.Time, error) {
+				assert.Equal(t, uint64(21), id)
+				assert.Equal(t, uint64(7), assigneeID)
+				return &dismissedAt, nil
+			},
+		},
+	)
+
+	result, err := svc.DismissAssignment(context.Background(), 7, 21)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, uint64(21), result.RequestID)
+	assert.True(t, result.DismissAt.Equal(dismissedAt))
 }
 
 func TestTaskServiceUpdateRejectsMemberEditingNonStatusFields(t *testing.T) {

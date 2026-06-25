@@ -57,6 +57,11 @@
                 拒绝
               </button>
             </div>
+            <div class="task-actions" v-else-if="item.type === 'ASSIGNMENT'">
+              <button class="btn btn-small btn-danger" @click="handleDeleteAssignment(item)" :disabled="processingId === item.id">
+                删除
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -78,7 +83,8 @@ import {
   acceptInvitationApi, 
   declineInvitationApi, 
   getAssignmentRequestsApi, 
-  acceptAssignmentApi 
+  acceptAssignmentApi,
+  dismissAssignmentApi,
 } from '../services/team';
 import { getApiErrorMessage, getApiFailureMessage } from '../utils/apiError';
 
@@ -129,8 +135,8 @@ const loadNotifications = async () => {
       const resData = assignRes.value.data;
       assignList = Array.isArray(resData) ? resData : (resData?.data || []);
       assignList = assignList.map(item => ({ ...item, type: 'ASSIGNMENT' }));
-      
-      // 无感静默已读
+
+      // 恢复静默已读：进入消息页后，将 PENDING 指派请求标记为 ACCEPTED
       const pendingAssignments = assignList.filter(a => a.status === 'PENDING');
       if (pendingAssignments.length > 0) {
         const readResults = await Promise.allSettled(pendingAssignments.map(a => acceptAssignmentApi(a.id)));
@@ -161,6 +167,28 @@ const loadNotifications = async () => {
 
 const canProcessInvitation = (item) => {
   return item?.type === 'INVITATION' && item.status === 'PENDING';
+};
+
+const handleDeleteAssignment = async (item) => {
+  if (item?.type !== 'ASSIGNMENT') return;
+
+  const id = item.id;
+  if (processingId.value === id) return;
+  processingId.value = id;
+  try {
+    const res = await dismissAssignmentApi(id);
+    if (res.status === 200 && (res.data?.code === undefined || res.data.code === 0)) {
+      notifications.value = notifications.value.filter(
+        (entry) => !(entry.type === 'ASSIGNMENT' && entry.id === id)
+      );
+    } else {
+      showMessage(getApiFailureMessage(res, '删除任务分配消息失败', '操作失败，请重试'), '操作失败');
+    }
+  } catch (error) {
+    showMessage(getApiErrorMessage(error, '删除任务分配消息失败'), '操作失败');
+  } finally {
+    processingId.value = null;
+  }
 };
 
 const handleAccept = async (item) => {

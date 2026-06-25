@@ -155,6 +155,7 @@ type TaskAssignmentRequest struct {
 	Status      InvitationStatus `json:"status" db:"status"`
 	CreatedAt   time.Time        `json:"created_at" db:"created_at"`
 	UpdatedAt   time.Time        `json:"updated_at" db:"updated_at"`
+	DismissAt   *time.Time       `json:"dismiss_at,omitempty" db:"dismiss_at"`
 }
 
 // TaskAssignmentRequestDetail 用于待确认分配列表。
@@ -166,8 +167,10 @@ type TaskAssignmentRequestDetail struct {
 	TeamName          string           `json:"team_name" db:"team_name"`
 	RequesterID       uint64           `json:"requester_id" db:"requester_id"`
 	RequesterUsername string           `json:"requester_username" db:"requester_username"`
+	AssigneeID        uint64           `json:"assignee_id" db:"assignee_id"`
 	Status            InvitationStatus `json:"status" db:"status"`
 	CreatedAt         time.Time        `json:"created_at" db:"created_at"`
+	DismissAt         *time.Time       `json:"dismiss_at,omitempty" db:"dismiss_at"`
 }
 
 // ActivityActionType 对应 Lab4 操作日志的任务操作类型。

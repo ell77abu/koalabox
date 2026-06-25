@@ -100,6 +100,11 @@ type TaskActivityLogItem struct {
 	CreatedAt  string                   `json:"created_at"`
 }
 
+type AssignmentDismissResult struct {
+	RequestID uint64    `json:"request_id"`
+	DismissAt time.Time `json:"dismiss_at"`
+}
+
 type UnresolvedDependenciesError struct {
 	IDs          []uint64
 	Predecessors []model.TaskDependencyNode
@@ -128,12 +133,14 @@ func (e *DoneSuccessorsError) Is(target error) bool {
 
 type TaskService interface {
 	List(ctx context.Context, userID uint64, userLevel uint8, page, size int, teamID *uint64) ([]model.Task, int64, int, int, error)
+	ListTrash(ctx context.Context, userID uint64, page, size int, teamID *uint64) ([]model.Task, int64, int, int, error)
 	Create(ctx context.Context, userID uint64, req CreateTaskRequest) (*model.Task, error)
 	Update(ctx context.Context, userID uint64, taskID uint64, req UpdateTaskRequest) (*model.Task, error)
 	Delete(ctx context.Context, userID uint64, userLevel uint8, taskID uint64) error
 	ListPendingAssignments(ctx context.Context, userID uint64) ([]model.TaskAssignmentRequestDetail, error)
 	AcceptAssignment(ctx context.Context, userID, requestID uint64) error
 	DeclineAssignment(ctx context.Context, userID, requestID uint64) error
+	DismissAssignment(ctx context.Context, userID, requestID uint64) (*AssignmentDismissResult, error)
 	AddDependency(ctx context.Context, userID, taskID, predecessorID uint64) (*model.TaskDependency, error)
 	RemoveDependency(ctx context.Context, userID, taskID, predecessorID uint64) error
 	GetDependencies(ctx context.Context, userID, taskID uint64) (*TaskDependencies, error)
@@ -193,6 +200,40 @@ func (s *taskService) List(ctx context.Context, userID uint64, userLevel uint8, 
 		list, total, err = s.taskRepo.ListByTeamID(ctx, *teamID, page, size)
 	} else {
 		list, total, err = s.taskRepo.ListPersonalAndAssignedTeam(ctx, userID, page, size)
+	}
+	if err != nil {
+		return nil, 0, 0, 0, err
+	}
+	if list == nil {
+		list = make([]model.Task, 0)
+	}
+	return list, total, page, size, nil
+}
+
+func (s *taskService) ListTrash(ctx context.Context, userID uint64, page, size int, teamID *uint64) ([]model.Task, int64, int, int, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if size <= 0 {
+		size = 10
+	}
+	if size > 100 {
+		size = 100
+	}
+
+	var (
+		list  []model.Task
+		total int64
+		err   error
+	)
+
+	if teamID != nil {
+		if err := s.requireExistingTeamMember(ctx, *teamID, userID); err != nil {
+			return nil, 0, 0, 0, err
+		}
+		list, total, err = s.taskRepo.ListTeamTrashByTeamID(ctx, *teamID, page, size)
+	} else {
+		list, total, err = s.taskRepo.ListPersonalTrashByUserID(ctx, userID, page, size)
 	}
 	if err != nil {
 		return nil, 0, 0, 0, err
@@ -502,6 +543,17 @@ func (s *taskService) DeclineAssignment(ctx context.Context, userID, requestID u
 	}
 
 	return s.assignRepo.UpdatePendingStatusForAssigneeScope(ctx, requestID, userID, model.InvitationStatusDeclined)
+}
+
+func (s *taskService) DismissAssignment(ctx context.Context, userID, requestID uint64) (*AssignmentDismissResult, error) {
+	dismissedAt, err := s.assignRepo.DismissForAssigneeScope(ctx, requestID, userID)
+	if err != nil {
+		return nil, err
+	}
+	return &AssignmentDismissResult{
+		RequestID: requestID,
+		DismissAt: *dismissedAt,
+	}, nil
 }
 
 func (s *taskService) AddDependency(ctx context.Context, userID, taskID, predecessorID uint64) (*model.TaskDependency, error) {
