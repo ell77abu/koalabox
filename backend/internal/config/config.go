@@ -63,6 +63,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.Database.MaxOpenConns <= 0 {
 		return nil, fmt.Errorf("database.max_open_conns must be greater than zero")
+	} 
+	if cfg.Database.MaxIdleConns > cfg.Database.MaxOpenConns {
+		return nil, fmt.Errorf("database.max_idle_conns cannot be greater than database.max_open_conns")
 	}
 	if cfg.Database.ConnMaxLifetimeMinutes < 0 {
 		return nil, fmt.Errorf("database.conn_max_lifetime_minutes must be non-negative")
