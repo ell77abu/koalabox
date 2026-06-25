@@ -13,8 +13,6 @@ import (
 	"task-backend/pkg/response"
 )
 
-const sessionCookieName = "task_session"
-
 type AuthHandler struct {
 	authService       service.AuthService
 	sessionExpireHour int
@@ -71,7 +69,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	maxAge := int((time.Duration(h.sessionExpireHour) * time.Hour).Seconds())
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(sessionCookieName, data.Token, maxAge, "/", "", false, true)
+	c.SetCookie(middleware.SessionCookieName, data.Token, maxAge, "/", "", false, true)
 
 	response.Success(c, "login success", gin.H{
 		"username": data.Username,
@@ -112,13 +110,13 @@ func (h *AuthHandler) Session(c *gin.Context) {
 // Logout 清理会话 Cookie。
 func (h *AuthHandler) Logout(c *gin.Context) {
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(sessionCookieName, "", -1, "/", "", false, true)
+	c.SetCookie(middleware.SessionCookieName, "", -1, "/", "", false, true)
 	response.Success(c, "logout success", nil)
 }
 
 // ChangePassword 允许已登录用户修改自己的密码。
 func (h *AuthHandler) ChangePassword(c *gin.Context) {
-	userIDValue, exists := c.Get("user_id")
+	userIDValue, exists := c.Get(middleware.ContextUserIDKey)
 	if !exists {
 		response.Unauthorized(c, "unauthorized")
 		return
