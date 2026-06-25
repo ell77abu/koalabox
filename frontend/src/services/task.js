@@ -10,6 +10,19 @@ export const getTasksApi = (page = 1, size = 10, sort = 'default') =>
   http.get('/tasks', { params: { page, size, sort } });
 
 /**
+ * 获取垃圾箱任务列表
+ * @param {Object} params - 分页与团队参数
+ * @returns {Promise}
+ */
+export const getTaskTrashApi = ({ page = 1, size = 10, team_id = null } = {}) => {
+  const params = { page, size };
+  if (team_id !== null && team_id !== undefined && team_id !== '') {
+    params.team_id = team_id;
+  }
+  return http.get('/tasks/trash', { params });
+};
+
+/**
  * 创建任务
  * @param {Object} payload - 任务数据
  * @returns {Promise}

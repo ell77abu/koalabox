@@ -1,6 +1,8 @@
 # Lab4 测试用例与验收说明
 
-本文档用于实验报告和现场验收，覆盖 Lab1-Lab4 回归、权限、异常和操作日志场景。自动化接口验收脚本为 `scripts/lab4_prepare_api_data.sh` 与 `scripts/lab4_run_api_tests.sh`。
+本文档用于实验报告和现场验收，覆盖 Lab1-Lab4 回归、权限、异常和操作日志场景。自动化接口验收脚本为 `scripts/prepare_api_data.sh` 与 `scripts/run_api_tests.sh`。完整 API 与单元测试用例清单、参数说明见 `backend/docs/lab4-test-cases-and-usage.md`。
+
+本轮新增功能识别：除任务回收站外，还新增了任务分配通知隐藏接口 `POST /api/v1/assignment-requests/:request_id/dismiss`；前端独立任务日志页复用既有日志接口，不新增后端业务 API。
 
 ## 测试用例表
 
@@ -20,6 +22,8 @@
 | TC12 | Lab4 | 无实际变更不写日志 | 已有个人任务及创建日志 | 查询日志数量，提交相同标题，再查询数量 | 操作成功但日志总数不增加 | 由脚本输出填写 | E7 |
 | TC13 | Lab4 | 删除任务后日志保留 | 已有个人任务 | 删除任务后查询该任务日志 | Owner 仍可查询，且包含 `DELETE_TASK` | 由脚本输出填写 | E8 |
 | TC14 | Lab4 | 日志接口权限异常 | 已有个人任务、团队任务和非成员用户 | 未登录、非所属用户、非团队成员分别查询日志 | 分别返回 `401/403/403` | 由脚本输出填写 | E4 |
+| TC15 | Lab4 | 任务回收站查询与权限 | 已有个人任务、团队和非成员用户 | 删除个人任务后查询 `/tasks/trash`；传非法 `team_id`；非成员查询团队回收站 | 删除任务出现在回收站；非法参数 `400`；非成员 `403` | 由脚本输出填写 | E9 |
+| TC16 | Lab4 | 任务分配通知隐藏 | 团队 Owner 给成员分配任务并生成通知 | 成员查询通知、隐藏通知、再次查询；非本人尝试隐藏 | 通知隐藏返回 `dismiss_at`；列表不再展示；非本人 `403` 或 `404` | 由脚本输出填写 | E10 |
 
 ## 自动化验证命令
 
@@ -35,10 +39,11 @@ go test ./...
 ```bash
 cd backend
 go test ./internal/service -v 2>&1 | tee ../lab4-service-test-result.txt
+go test ./internal/handler -v 2>&1 | tee ../lab4-handler-test-result.txt
 go test ./... -v 2>&1 | tee ../lab4-backend-test-result.txt
 ```
 
-报告正文建议填写命令、覆盖范围和结果摘要，例如 AuthService、TaskService、TeamService 的业务规则、权限、日志写入、日志查询均通过自动化断言验证；完整 verbose 输出可作为附录或截图证据补充。
+报告正文建议填写命令、覆盖范围和结果摘要，例如 AuthService、TaskService、TeamService 的业务规则、权限、日志写入、日志查询，以及 Handler 的参数解析和错误映射均通过自动化断言验证；完整 verbose 输出可作为附录或截图证据补充。
 
 ### 测试文件组织
 
@@ -48,20 +53,21 @@ Lab4 API 验收脚本：
 
 ```bash
 # 需要后端服务、PostgreSQL、curl、jq 已可用
-bash scripts/lab4_prepare_api_data.sh
-bash scripts/lab4_run_api_tests.sh
+bash scripts/prepare_api_data.sh
+bash scripts/run_api_tests.sh
 ```
 
 默认不带参数时会执行全部用例；也可以按 Lab 或用例编号筛选：
 
 ```bash
-bash scripts/lab4_run_api_tests.sh --list
-bash scripts/lab4_run_api_tests.sh --lab lab3
-bash scripts/lab4_run_api_tests.sh --case TC08
-bash scripts/lab4_run_api_tests.sh --case TC08,TC14
+bash scripts/run_api_tests.sh --list
+bash scripts/run_api_tests.sh --lab lab3
+bash scripts/run_api_tests.sh --case TC08
+bash scripts/run_api_tests.sh --case TC08,TC14
+bash scripts/run_api_tests.sh --case TC15,TC16
 ```
 
-脚本通过标准：末尾输出 `failed=0`。如果需要重复执行完整验收，应先重新运行 `lab4_prepare_api_data.sh`，因为 `lab4_run_api_tests.sh` 会删除任务、让成员离队并修改状态。
+脚本通过标准：末尾输出 `failed=0`。如果需要重复执行完整验收，应先重新运行 `prepare_api_data.sh`，因为 `run_api_tests.sh` 会删除任务、隐藏分配通知、让成员离队并修改状态。
 
 前端验证：
 
@@ -78,3 +84,5 @@ npm run dev
 - E5：依赖规则拦截结果，例如循环依赖或未完成前置任务。
 - E7：任务详情页“操作日志”列表，能看到操作人、时间、动作内容。
 - E4：无权限查询日志返回 `401` 或 `403` 的接口结果。
+- E9：任务回收站 `/tasks/trash` 返回已删除任务，或非法/无权限回收站查询结果。
+- E10：分配通知隐藏接口返回 `dismiss_at`，隐藏后通知列表不再包含该 request。

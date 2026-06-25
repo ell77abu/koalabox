@@ -67,6 +67,40 @@ func (h *TaskHandler) List(c *gin.Context) {
 	response.SuccessPage(c, "query success", list, fixedPage, fixedSize, total)
 }
 
+// ListTrash 查询当前用户可见的已删除任务。
+func (h *TaskHandler) ListTrash(c *gin.Context) {
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	size, _ := strconv.Atoi(c.DefaultQuery("size", "10"))
+
+	var teamID *uint64
+	teamIDRaw := c.Query("team_id")
+	if teamIDRaw != "" {
+		parsed, err := strconv.ParseUint(teamIDRaw, 10, 64)
+		if err != nil || parsed == 0 {
+			response.BadRequest(c, "invalid team_id")
+			return
+		}
+		teamID = &parsed
+	}
+
+	list, total, fixedPage, fixedSize, err := h.taskService.ListTrash(c.Request.Context(), userID, page, size, teamID)
+	if errors.Is(err, repository.ErrForbidden) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
+	if err != nil {
+		response.InternalError(c, "query trash tasks failed")
+		return
+	}
+
+	response.SuccessPage(c, "query success", list, fixedPage, fixedSize, total)
+}
+
 // Create 创建个人任务或团队任务，并在需要时生成任务分配通知。
 func (h *TaskHandler) Create(c *gin.Context) {
 	userID, ok := getUserIDFromContext(c)
@@ -318,6 +352,36 @@ func (h *TaskHandler) DeclineAssignment(c *gin.Context) {
 	}
 
 	response.Success(c, "assignment declined", nil)
+}
+
+// DismissAssignment 从当前用户的消息中心隐藏一个任务分配通知。
+func (h *TaskHandler) DismissAssignment(c *gin.Context) {
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
+
+	requestID, err := strconv.ParseUint(c.Param("request_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid request id")
+		return
+	}
+
+	result, err := h.taskService.DismissAssignment(c.Request.Context(), userID, requestID)
+	if errors.Is(err, repository.ErrForbidden) {
+		response.Forbidden(c, "forbidden")
+		return
+	}
+	if errors.Is(err, repository.ErrNotFound) {
+		response.NotFound(c, "assignment not found")
+		return
+	}
+	if err != nil {
+		response.InternalError(c, "dismiss assignment notification failed")
+		return
+	}
+
+	response.Success(c, "assignment notification dismissed", result)
 }
 
 // AddDependency 为任务添加前置依赖。

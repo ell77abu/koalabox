@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Lab4 API acceptance script for WSL/Linux.
-# Run scripts/lab4_prepare_api_data.sh first. This script intentionally mutates
+# Run scripts/prepare_api_data.sh first. This script intentionally mutates
 # the prepared resources; rerun the prepare script before another full pass.
 
 DATA_FILE="${DATA_FILE:-scripts/lab4_api_test_data.json}"
@@ -12,7 +12,7 @@ LIST_ONLY=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/lab4_run_api_tests.sh [options]
+Usage: scripts/run_api_tests.sh [options]
 
 Options:
   --lab LAB        Run all cases for one lab: lab1, lab2, lab3, lab4.
@@ -21,10 +21,10 @@ Options:
   -h, --help      Show this help.
 
 Examples:
-  scripts/lab4_run_api_tests.sh
-  scripts/lab4_run_api_tests.sh --lab lab4
-  scripts/lab4_run_api_tests.sh --case TC08
-  scripts/lab4_run_api_tests.sh --case TC08,TC14
+  scripts/run_api_tests.sh
+  scripts/run_api_tests.sh --lab lab4
+  scripts/run_api_tests.sh --case TC08
+  scripts/run_api_tests.sh --case TC08,TC14
 EOF
 }
 
@@ -99,6 +99,8 @@ TC11 lab4  readable task update logs
 TC12 lab4  no-op update does not write another log
 TC13 lab4  deleted task logs remain queryable
 TC14 lab4  log endpoint auth and permission rejection
+TC15 lab4  task trash listing and permission rejection
+TC16 lab4  assignment notification dismiss
 EOF
 }
 
@@ -178,7 +180,7 @@ require_cmd() {
 require_file() {
   if [[ ! -f "$1" ]]; then
     echo "Missing data file: $1"
-    echo "Run scripts/lab4_prepare_api_data.sh first."
+    echo "Run scripts/prepare_api_data.sh first."
     exit 1
   fi
 }
@@ -349,6 +351,8 @@ ROLLBACK_SUCC="$(jq -r '.tasks.rollbackSucc.id' "$DATA_FILE")"
 TEAM_ASSIGNED_TASK="$(jq -r '.teamTasks.assignedTask.id' "$DATA_FILE")"
 TEAM_LOG_TASK="$(jq -r '.teamTasks.logTask.id' "$DATA_FILE")"
 TEAM_LEAVE_TASK="$(jq -r '.teamTasks.leaveTask.id' "$DATA_FILE")"
+TEAM_DISMISS_TASK="$(jq -r '.teamTasks.dismissTask.id // empty' "$DATA_FILE")"
+DISMISS_ASSIGNMENT_REQUEST="$(jq -r '.assignmentRequests.dismissRequest.id // empty' "$DATA_FILE")"
 
 TOTAL=0
 PASSED=0
@@ -360,6 +364,13 @@ if [[ -n "$LAB_FILTER" ]]; then
 fi
 if [[ -n "$CASE_FILTER" ]]; then
   echo "Filter: case=${CASE_FILTER}"
+fi
+if should_run "TC16" "lab4"; then
+  if [[ -z "$TEAM_DISMISS_TASK" || -z "$DISMISS_ASSIGNMENT_REQUEST" ]]; then
+    echo "Data file does not contain TC16 assignment request data."
+    echo "Run scripts/prepare_api_data.sh again before running TC16 or the full Lab4 suite."
+    exit 2
+  fi
 fi
 
 # TC01 / TC02: auth regression.
@@ -451,6 +462,23 @@ fi
 if should_run "TC13" "lab4"; then
   run_case "TC13 delete task" "200" "DELETE" "$OWNER_COOKIE" "/tasks/${DELETE_TASK}" "" '.code == 0'
   run_case "TC13 deleted task logs remain queryable by owner" "200" "GET" "$OWNER_COOKIE" "/tasks/${DELETE_TASK}/logs" "" '.data.list | any(.action_type == "DELETE_TASK")'
+fi
+
+if should_run "TC15" "lab4"; then
+  TRASH_TITLE="lab4_${STAMP}_trash_case"
+  create_case_task "$TRASH_TITLE"
+  TRASH_TASK="$CASE_TASK_ID"
+  run_case "TC15 delete task into trash" "200" "DELETE" "$OWNER_COOKIE" "/tasks/${TRASH_TASK}" "" '.code == 0'
+  run_case "TC15 personal trash lists deleted task" "200" "GET" "$OWNER_COOKIE" "/tasks/trash?page=1&size=20" "" ".data.list | any(.id == ${TRASH_TASK} and .deleted_at != null)"
+  run_case "TC15 invalid trash team id rejected" "400" "GET" "$OWNER_COOKIE" "/tasks/trash?team_id=abc" "" '.code == 400'
+  run_case "TC15 outsider cannot list team trash" "403" "GET" "$OUTSIDER_COOKIE" "/tasks/trash?team_id=${TEAM_ID}" "" '.code == 403'
+fi
+
+if should_run "TC16" "lab4"; then
+  run_case "TC16 assignment request visible before dismiss" "200" "GET" "$MEMBER_COOKIE" "/assignment-requests" "" "([.data[] | select(.id == ${DISMISS_ASSIGNMENT_REQUEST} and .task_id == ${TEAM_DISMISS_TASK})] | length) == 1"
+  run_case "TC16 dismiss assignment notification" "200" "POST" "$MEMBER_COOKIE" "/assignment-requests/${DISMISS_ASSIGNMENT_REQUEST}/dismiss" "" ".data.request_id == ${DISMISS_ASSIGNMENT_REQUEST} and (.data.dismiss_at | length > 0)"
+  run_case "TC16 dismissed assignment hidden from pending list" "200" "GET" "$MEMBER_COOKIE" "/assignment-requests" "" "([.data[] | select(.id == ${DISMISS_ASSIGNMENT_REQUEST})] | length) == 0"
+  run_case "TC16 outsider cannot dismiss member assignment" "403|404" "POST" "$OUTSIDER_COOKIE" "/assignment-requests/${DISMISS_ASSIGNMENT_REQUEST}/dismiss" "" '.code == 403 or .code == 404'
 fi
 
 # TC10 is last because the member leaves the team and loses later permissions.

@@ -9,6 +9,7 @@ const JWT_SECRET = 'lab1_mock_secret_key';
 // ================== 内存数据库 ==================
 const users = new Map(); 
 const tasks = []; 
+const deletedTasks = [];
 const teams = new Map(); 
 const teamMembers = [];  
 const invitations = [];  
@@ -176,6 +177,41 @@ app.get('/api/v1/tasks', verifyToken, (req, res) => {
   return res.status(200).json({ code: 0, data: { list: filteredTasks.slice(start, start + size), total: filteredTasks.length }, page, size });
 });
 
+app.get('/api/v1/tasks/trash', verifyToken, (req, res) => {
+  const { username } = req.user;
+  const teamId = req.query.team_id ? parseInt(req.query.team_id) : null;
+  const page = parseInt(req.query.page) || 1;
+  const size = Math.min(parseInt(req.query.size) || 10, 100);
+
+  if (req.query.team_id && (!Number.isFinite(teamId) || teamId <= 0)) {
+    return res.status(400).json({ code: 400, message: 'invalid team_id' });
+  }
+
+  let filteredTasks = [];
+  if (teamId) {
+    if (!getUserRole(teamId, username)) {
+      return res.status(403).json({ code: 403, message: 'forbidden' });
+    }
+    filteredTasks = deletedTasks.filter(t => Number(t.team_id) === teamId);
+  } else {
+    filteredTasks = deletedTasks.filter(t => t.user_id === username && !t.team_id);
+  }
+
+  filteredTasks = filteredTasks.sort((a, b) => new Date(b.deleted_at).getTime() - new Date(a.deleted_at).getTime());
+  const start = (page - 1) * size;
+
+  return res.status(200).json({
+    code: 0,
+    message: 'query success',
+    data: {
+      list: filteredTasks.slice(start, start + size),
+      page,
+      size,
+      total: filteredTasks.length,
+    },
+  });
+});
+
 app.post('/api/v1/tasks', verifyToken, (req, res) => {
   const newTask = { 
     id: taskIdCounter++, 
@@ -222,11 +258,17 @@ app.delete('/api/v1/tasks/:id', verifyToken, (req, res) => {
   const index = tasks.findIndex(t => t.id === taskId);
   if (index > -1) {
     const task = tasks[index];
+    const deletedAt = new Date().toISOString();
     deletedTaskScopes.set(taskId, {
       user_id: task.user_id,
       team_id: task.team_id || null,
     });
     createTaskLog(task, req.user.username, 'DELETE_TASK', `删除了任务「${task.title}」`);
+    deletedTasks.unshift({
+      ...task,
+      deleted_at: deletedAt,
+      updated_at: deletedAt,
+    });
     tasks.splice(index, 1);
     // 👇 Lab3：级联删除相关的依赖关系 (模拟 ON DELETE CASCADE)
     for (let i = taskDependencies.length - 1; i >= 0; i--) {

@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Lab4 API test data preparation script for WSL/Linux.
 # It creates an isolated set of users, tasks and a team, then writes the
-# cookies and resource IDs consumed by lab4_run_api_tests.sh.
+# cookies and resource IDs consumed by scripts/run_api_tests.sh.
 
 BASE_URL="${BASE_URL:-http://127.0.0.1:8080/api/v1}"
 OUT_FILE="${OUT_FILE:-scripts/lab4_api_test_data.json}"
@@ -168,6 +168,21 @@ api_accept_invitation() {
   require_status "accept invitation ${invitation_id}" "200"
 }
 
+api_find_assignment_request() {
+  local member_cookie="$1"
+  local task_id="$2"
+  local request_id
+  api_request "GET" "$member_cookie" "/assignment-requests"
+  require_status "list assignment requests" "200"
+  request_id="$(printf '%s' "$RESPONSE_BODY" | jq -r --argjson task_id "$task_id" '.data[] | select(.task_id == $task_id) | .id' | head -n 1)"
+  if [[ -z "$request_id" || "$request_id" == "null" ]]; then
+    echo "No assignment request found for task ${task_id}" >&2
+    echo "$RESPONSE_BODY" >&2
+    exit 1
+  fi
+  printf '%s' "$request_id"
+}
+
 require_cmd curl
 require_cmd jq
 
@@ -202,6 +217,8 @@ ROLLBACK_SUCC="$(api_create_task "$OWNER_COOKIE" "lab4_${STAMP}_rollback_succ")"
 TEAM_ASSIGNED_TASK="$(api_create_task "$OWNER_COOKIE" "lab4_${STAMP}_team_assigned" "$TEAM_ID" "$MEMBER_ID")"
 TEAM_LOG_TASK="$(api_create_task "$OWNER_COOKIE" "lab4_${STAMP}_team_log" "$TEAM_ID")"
 TEAM_LEAVE_TASK="$(api_create_task "$OWNER_COOKIE" "lab4_${STAMP}_team_leave" "$TEAM_ID" "$MEMBER_ID")"
+TEAM_DISMISS_TASK="$(api_create_task "$OWNER_COOKIE" "lab4_${STAMP}_team_dismiss" "$TEAM_ID" "$MEMBER_ID")"
+DISMISS_ASSIGNMENT_REQUEST="$(api_find_assignment_request "$MEMBER_COOKIE" "$TEAM_DISMISS_TASK")"
 
 jq -n \
   --arg baseUrl "$BASE_URL" \
@@ -230,6 +247,8 @@ jq -n \
   --argjson teamAssignedTask "$TEAM_ASSIGNED_TASK" \
   --argjson teamLogTask "$TEAM_LOG_TASK" \
   --argjson teamLeaveTask "$TEAM_LEAVE_TASK" \
+  --argjson teamDismissTask "$TEAM_DISMISS_TASK" \
+  --argjson dismissAssignmentRequest "$DISMISS_ASSIGNMENT_REQUEST" \
   '{
     baseUrl: $baseUrl,
     password: $password,
@@ -254,7 +273,11 @@ jq -n \
     teamTasks: {
       assignedTask: {id: $teamAssignedTask},
       logTask: {id: $teamLogTask},
-      leaveTask: {id: $teamLeaveTask}
+      leaveTask: {id: $teamLeaveTask},
+      dismissTask: {id: $teamDismissTask}
+    },
+    assignmentRequests: {
+      dismissRequest: {id: $dismissAssignmentRequest, task_id: $teamDismissTask}
     }
   }' > "$OUT_FILE"
 
