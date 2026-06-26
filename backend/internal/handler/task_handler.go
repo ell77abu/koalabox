@@ -50,7 +50,15 @@ func (h *TaskHandler) List(c *gin.Context) {
 		teamID = &parsed
 	}
 
-	list, total, fixedPage, fixedSize, err := h.taskService.List(c.Request.Context(), userID, userLevel, page, size, teamID)
+	list, total, fixedPage, fixedSize, err := h.taskService.List(c.Request.Context(), userID, userLevel, service.TaskListQuery{
+		Page:   page,
+		Size:   size,
+		TeamID: teamID,
+		Scope:  c.DefaultQuery("scope", "all"),
+		Status: c.DefaultQuery("status", "all"),
+		Search: c.Query("search"),
+		Sort:   c.DefaultQuery("sort", "default"),
+	})
 	if errors.Is(err, repository.ErrForbidden) {
 		response.Forbidden(c, "forbidden")
 		return

@@ -14,6 +14,7 @@ import (
 
 type taskRepoMock struct {
 	createFn                       func(ctx context.Context, task *model.Task) error
+	listVisibleFn                  func(ctx context.Context, query repository.TaskListQuery) ([]model.Task, int64, error)
 	listByTeamIDFn                 func(ctx context.Context, teamID uint64, page, size int) ([]model.Task, int64, error)
 	listPersonalAndAssignedTeamFn  func(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error)
 	listPersonalTrashByUserIDFn    func(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error)
@@ -36,6 +37,12 @@ func (m *taskRepoMock) Create(ctx context.Context, task *model.Task) error {
 		panic("unexpected call to Create")
 	}
 	return m.createFn(ctx, task)
+}
+func (m *taskRepoMock) ListVisible(ctx context.Context, query repository.TaskListQuery) ([]model.Task, int64, error) {
+	if m.listVisibleFn == nil {
+		panic("unexpected call to ListVisible")
+	}
+	return m.listVisibleFn(ctx, query)
 }
 func (m *taskRepoMock) ListPersonalAndAssignedTeam(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error) {
 	if m.listPersonalAndAssignedTeamFn == nil {
@@ -205,6 +212,9 @@ func (m *teamRepoForTaskMock) Create(ctx context.Context, team *model.Team) erro
 func (m *teamRepoForTaskMock) ListByUserID(ctx context.Context, userID uint64, search string) ([]model.TeamWithRole, error) {
 	panic("unexpected call to ListByUserID")
 }
+func (m *teamRepoForTaskMock) ListByUserIDPage(ctx context.Context, userID uint64, search string, page, size int) ([]model.TeamWithRole, int64, error) {
+	panic("unexpected call to ListByUserIDPage")
+}
 func (m *teamRepoForTaskMock) GetByID(ctx context.Context, teamID uint64) (*model.Team, error) {
 	if m.getByIDFn == nil {
 		panic("unexpected call to GetByID")
@@ -366,7 +376,11 @@ func TestTaskServiceListRejectsNonMemberTeamView(t *testing.T) {
 	)
 
 	teamID := uint64(7)
-	_, _, _, _, err := svc.List(context.Background(), 3, 0, 1, 10, &teamID)
+	_, _, _, _, err := svc.List(context.Background(), 3, 0, TaskListQuery{
+		Page:   1,
+		Size:   10,
+		TeamID: &teamID,
+	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, repository.ErrForbidden)
 }
@@ -377,9 +391,14 @@ func TestTaskServiceListUsesTeamIDFilterWhenProvided(t *testing.T) {
 
 	svc := NewTaskService(
 		&taskRepoMock{
-			listByTeamIDFn: func(ctx context.Context, gotTeamID uint64, page, size int) ([]model.Task, int64, error) {
+			listVisibleFn: func(ctx context.Context, query repository.TaskListQuery) ([]model.Task, int64, error) {
 				called = true
-				assert.Equal(t, teamID, gotTeamID)
+				require.NotNil(t, query.TeamID)
+				assert.Equal(t, teamID, *query.TeamID)
+				assert.Equal(t, uint64(2), query.UserID)
+				assert.Equal(t, uint8(0), query.UserLevel)
+				assert.Equal(t, 1, query.Page)
+				assert.Equal(t, 10, query.Size)
 				return []model.Task{{ID: 101, TeamID: uint64Ptr(teamID)}}, 1, nil
 			},
 		},
@@ -398,7 +417,11 @@ func TestTaskServiceListUsesTeamIDFilterWhenProvided(t *testing.T) {
 		&taskAssignRepoStub{},
 	)
 
-	list, total, _, _, err := svc.List(context.Background(), 2, 0, 1, 10, uint64Ptr(teamID))
+	list, total, _, _, err := svc.List(context.Background(), 2, 0, TaskListQuery{
+		Page:   1,
+		Size:   10,
+		TeamID: uint64Ptr(teamID),
+	})
 	require.NoError(t, err)
 	require.True(t, called)
 	require.Len(t, list, 1)

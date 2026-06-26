@@ -57,6 +57,23 @@ func (h *TeamHandler) ListMine(c *gin.Context) {
 
 	search := strings.TrimSpace(c.Query("search"))
 
+	if c.Query("page") != "" || c.Query("size") != "" {
+		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+		size, _ := strconv.Atoi(c.DefaultQuery("size", "10"))
+		list, total, fixedPage, fixedSize, err := h.teamService.ListMinePage(c.Request.Context(), userID, service.TeamListQuery{
+			Page:   page,
+			Size:   size,
+			Search: search,
+		})
+		if err != nil {
+			response.InternalError(c, "query teams failed")
+			return
+		}
+
+		response.SuccessPage(c, "query success", list, fixedPage, fixedSize, total)
+		return
+	}
+
 	list, err := h.teamService.ListMine(c.Request.Context(), userID, search)
 	if err != nil {
 		response.InternalError(c, "query teams failed")

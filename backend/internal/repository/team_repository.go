@@ -15,6 +15,7 @@ import (
 type TeamRepository interface {
 	Create(ctx context.Context, team *model.Team) error
 	ListByUserID(ctx context.Context, userID uint64, search string) ([]model.TeamWithRole, error)
+	ListByUserIDPage(ctx context.Context, userID uint64, search string, page, size int) ([]model.TeamWithRole, int64, error)
 	GetByID(ctx context.Context, teamID uint64) (*model.Team, error)
 	GetByIDForMemberScope(ctx context.Context, teamID, userID uint64) (*model.Team, error)
 	GetByName(ctx context.Context, name string) (*model.Team, error)
@@ -78,6 +79,46 @@ func (r *teamRepository) ListByUserID(ctx context.Context, userID uint64, search
 		return nil, err
 	}
 	return list, nil
+}
+
+func (r *teamRepository) ListByUserIDPage(ctx context.Context, userID uint64, search string, page, size int) ([]model.TeamWithRole, int64, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if size <= 0 {
+		size = 10
+	}
+	if size > 100 {
+		size = 100
+	}
+	offset := (page - 1) * size
+
+	query := r.db.WithContext(ctx).
+		Table("teams").
+		Select("teams.id AS team_id, teams.name, tm.role").
+		Joins("JOIN team_members tm ON tm.team_id = teams.id AND tm.deleted_at IS NULL").
+		Where("teams.deleted_at IS NULL").
+		Where("tm.user_id = ?", userID)
+
+	if trimmedSearch := strings.TrimSpace(search); trimmedSearch != "" {
+		query = query.Where("teams.name ILIKE ?", "%"+trimmedSearch+"%")
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	list := make([]model.TeamWithRole, 0)
+	err := query.
+		Order("teams.created_at DESC").
+		Limit(size).
+		Offset(offset).
+		Find(&list).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	return list, total, nil
 }
 
 func (r *teamRepository) GetByID(ctx context.Context, teamID uint64) (*model.Team, error) {

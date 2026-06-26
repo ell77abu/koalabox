@@ -43,9 +43,9 @@
       <div class="list-section">
         <div class="list-header">
           <h2>任务列表</h2>
-          <p v-if="!loading && displayedTasks.length > 0" class="hint">
+          <p v-if="!loading && displayedTotal > 0" class="hint">
             <template v-if="isSearching">
-              搜索结果 {{ displayedTasks.length }} 项
+              搜索结果 {{ displayedTotal }} 项
             </template>
             <template v-else>
               共 {{ taskStore.total.value }} 个任务
@@ -65,7 +65,7 @@
         </div>
 
         <!-- 只有当账户里【彻底一个任务都没有】时，才显示全局大空状态 -->
-        <div v-else-if="taskStore.tasks.value.length === 0" class="empty-state">
+        <div v-else-if="!isSearching && filterOption === 'all' && displayedTotal === 0" class="empty-state">
           <p>暂无任务，创建一个新任务开始吧！</p>
         </div>
 
@@ -152,12 +152,12 @@
                     </transition>
                   </div>
                 </div>
-                <span class="task-group-count">{{ incompleteTasks.length }}</span>
+                <span class="task-group-count">{{ activeTotal }}</span>
               </div>
             </div>
 
             <!-- 情况1：当前分类/搜索下，一个任务都没 -->
-            <div v-if="displayedTasks.length === 0" class="sub-empty-state">
+            <div v-if="displayedTotal === 0" class="sub-empty-state">
               <p v-if="isSearching">未找到包含关键词的匹配任务。</p>
               <p v-else>当前分类下暂无任务。</p>
             </div>
@@ -275,7 +275,7 @@
                 <p>点击 {{ showCompletedHistory ? '收起' : '展开' }}</p>
               </div>
               <div class="history-toggle-meta">
-                <span class="task-group-count done">{{ completedTasks.length }}</span>
+                <span class="task-group-count done">{{ historyTotal }}</span>
               </div>
             </button>
 
@@ -464,7 +464,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue';
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue';
 import { useRouter, RouterLink } from 'vue-router';
 import { authStore } from '../stores/auth';
 import { taskStore } from '../stores/task';
@@ -565,15 +565,17 @@ const originalEditingDeadline = ref('');
 
 //  记录打开弹窗时的原始依赖，用于比对增删
 const editingDependencies = ref([]); 
+const dependencyCandidateTasks = ref([]);
 
 // 过滤出“自己的其他个人任务”作为可选依赖池
 const availablePersonalTasks = computed(() => {
-  return taskStore.tasks.value.filter(t => isPersonalTask(t) && t.id !== editingTask.id);
+  return dependencyCandidateTasks.value.filter(t => isPersonalTask(t) && t.id !== editingTask.id);
 });
 
 // 状态管理
 const findTaskTitleById = (id) => {
-  const task = taskStore.tasks.value.find((item) => Number(item.id) === Number(id));
+  const task = [...taskStore.tasks.value, ...dependencyCandidateTasks.value]
+    .find((item) => Number(item.id) === Number(id));
   return task?.title || '';
 };
 
@@ -683,79 +685,54 @@ const handleOutsideClick = (event) => {
   }
 };
 
-// 核心计算属性 (添加筛选管道)
-const displayedTasks = computed(() => {
-  let list = [...taskStore.tasks.value];
-
-  // 拦截层：按个人/团队筛选
-  if (filterOption.value === 'personal') {
-    list = list.filter(isPersonalTask); // 没有 team_id 的是个人任务
-  } else if (filterOption.value === 'team') {
-    list = list.filter(task => !isPersonalTask(task)); // 有 team_id 的是团队任务
-  }
-
-  // 拦截层：按关键词搜索
-  const keyword = searchQuery.value.trim().toLowerCase();
-  let filtered = keyword
-    ? list.filter((task) => String(task.title || '').toLowerCase().includes(keyword))
-    : list;
-
-  // 拦截层：排序逻辑
-  if (sortOption.value === 'deadline') {
-    return filtered.sort((a, b) => {
-      const aTime = a.deadline ? new Date(a.deadline).getTime() : Number.POSITIVE_INFINITY;
-      const bTime = b.deadline ? new Date(b.deadline).getTime() : Number.POSITIVE_INFINITY;
-      const aValid = Number.isFinite(aTime);
-      const bValid = Number.isFinite(bTime);
-      if (!aValid && !bValid) return 0;
-      if (!aValid) return 1;
-      if (!bValid) return -1;
-      return aTime - bTime;
-    });
-  }
-  if (sortOption.value === 'priority') {
-    return filtered.sort((a, b) => {
-      const priorityDiff = Number(b.priority || 0) - Number(a.priority || 0);
-      if (priorityDiff !== 0) return priorityDiff;
-      return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
-    });
-  }
-
-  return filtered;
-});
-
 const isSearching = computed(() => searchQuery.value.trim().length > 0);
 
-const incompleteTasks = computed(() =>
-  displayedTasks.value.filter((task) => task.status !== 'DONE')
-);
+const activeTaskList = ref([]);
+const completedTaskList = ref([]);
+const activeTotal = ref(0);
+const historyTotal = ref(0);
 
-const completedTasks = computed(() =>
-  displayedTasks.value.filter((task) => task.status === 'DONE')
-);
+const taskListScope = computed(() => {
+  if (filterOption.value === 'personal') return 'personal';
+  if (filterOption.value === 'team') return 'team';
+  return 'all';
+});
+
+const displayedTotal = computed(() => activeTotal.value + historyTotal.value);
+
+const incompleteTasks = computed(() => activeTaskList.value);
+const completedTasks = computed(() => completedTaskList.value);
 
 // 待办任务分页
 const activePage = ref(1);
 const activePageSize = ref(8); // 每页显示 8 个
-const paginatedActiveTasks = computed(() => {
-  const start = (activePage.value - 1) * activePageSize.value;
-  return incompleteTasks.value.slice(start, start + activePageSize.value);
-});
-const activeTotalPages = computed(() => Math.ceil(incompleteTasks.value.length / activePageSize.value) || 1);
+const paginatedActiveTasks = computed(() => incompleteTasks.value);
+const activeTotalPages = computed(() => Math.ceil(activeTotal.value / activePageSize.value) || 1);
 
 // 历史任务分页
 const historyPage = ref(1);
 const historyPageSize = ref(8); // 每页显示 8 个
-const paginatedHistoryTasks = computed(() => {
-  const start = (historyPage.value - 1) * historyPageSize.value;
-  return completedTasks.value.slice(start, start + historyPageSize.value);
-});
-const historyTotalPages = computed(() => Math.ceil(completedTasks.value.length / historyPageSize.value) || 1);
+const paginatedHistoryTasks = computed(() => completedTasks.value);
+const historyTotalPages = computed(() => Math.ceil(historyTotal.value / historyPageSize.value) || 1);
 
-// 监听搜索、过滤条件变化，自动回到第一页
-watch([searchQuery, filterOption, sortOption], () => {
+let suppressTaskPageWatch = false;
+
+const reloadTasksFromFirstPage = async () => {
+  suppressTaskPageWatch = true;
   activePage.value = 1;
   historyPage.value = 1;
+  await nextTick();
+  suppressTaskPageWatch = false;
+  await loadTasks();
+};
+
+// 监听搜索、过滤条件变化，自动回到第一页
+watch([searchQuery, filterOption, sortOption], reloadTasksFromFirstPage);
+
+watch([activePage, historyPage], () => {
+  if (!suppressTaskPageWatch) {
+    loadTasks();
+  }
 });
 
 // 监听自动退页 (如果删除了当前页最后一个任务，自动退回上一页)
@@ -773,26 +750,87 @@ const logout = async () => {
   await router.replace('/login');
 };
 
-// 加载任务列表 - 一次加载所有任务
+const buildTaskListParams = (status, page, size) => {
+  const keyword = searchQuery.value.trim();
+  return {
+    page,
+    size,
+    status,
+    scope: taskListScope.value,
+    sort: sortOption.value,
+    search: keyword || undefined,
+  };
+};
+
+const extractTaskPage = (response) => {
+  const pageData = response?.data?.data || {};
+  const list = Array.isArray(pageData.list) ? pageData.list : [];
+  const total = Number.isFinite(Number(pageData.total)) ? Number(pageData.total) : list.length;
+  const page = Number.isFinite(Number(pageData.page)) ? Number(pageData.page) : 1;
+  const size = Number.isFinite(Number(pageData.size)) ? Number(pageData.size) : 10;
+  return { list, total, page, size };
+};
+
+const clearTaskListState = () => {
+  activeTaskList.value = [];
+  completedTaskList.value = [];
+  activeTotal.value = 0;
+  historyTotal.value = 0;
+  taskStore.clearTasks();
+};
+
+const loadDependencyCandidates = async () => {
+  try {
+    const response = await getTasksApi({
+      page: 1,
+      size: 100,
+      scope: 'personal',
+      status: 'all',
+      sort: 'created_at',
+    });
+    if (response.data.code === 0) {
+      dependencyCandidateTasks.value = extractTaskPage(response).list;
+    }
+  } catch (error) {
+    console.error(getApiErrorMessage(error, '加载依赖候选任务失败'), error);
+  }
+};
+
+// 加载任务列表
 const loadTasks = async () => {
   loading.value = true;
   loadError.value = '';
   taskStore.setLoading(true);
   try {
-    // 一次加载所有任务，使用大的 pageSize
-    const response = await getTasksApi(1, 1000, sortOption.value);
-    if (response.data.code === 0) {
-      const pageData = response.data.data || {};
-      const list = Array.isArray(pageData.list) ? pageData.list : [];
-      taskStore.setTasks(list);
-      const total = Number.isFinite(pageData.total) ? pageData.total : list.length;
-      taskStore.setTotal(total);
+    const [activeResponse, historyResponse] = await Promise.all([
+      getTasksApi(buildTaskListParams('active', activePage.value, activePageSize.value)),
+      getTasksApi(buildTaskListParams('done', historyPage.value, historyPageSize.value)),
+    ]);
+
+    const failedResponse = [activeResponse, historyResponse].find((response) => response.data.code !== 0);
+    if (!failedResponse) {
+      const activePageData = extractTaskPage(activeResponse);
+      const historyPageData = extractTaskPage(historyResponse);
+
+      activeTaskList.value = activePageData.list;
+      completedTaskList.value = historyPageData.list;
+      activeTotal.value = activePageData.total;
+      historyTotal.value = historyPageData.total;
+      activePage.value = activePageData.page || activePage.value;
+      historyPage.value = historyPageData.page || historyPage.value;
+      activePageSize.value = activePageData.size || activePageSize.value;
+      historyPageSize.value = historyPageData.size || historyPageSize.value;
+
+      const mergedList = [...activePageData.list, ...historyPageData.list];
+      taskStore.setTasks(mergedList);
+      taskStore.setTotal(activePageData.total + historyPageData.total);
     } else {
-      loadError.value = getApiFailureMessage(response, '加载任务失败');
-      taskStore.clearTasks();
+      loadError.value = getApiFailureMessage(failedResponse, '加载任务失败');
+      clearTaskListState();
     }
   } catch (error) {
     loadError.value = getApiErrorMessage(error, '加载任务失败');
+    clearTaskListState();
     console.error(loadError.value, error);
   } finally {
     loading.value = false;
@@ -920,13 +958,20 @@ const triggerCelebration = (taskId) => {
 };
 
 const moveTaskToCompleted = (taskId) => {
-  taskStore.setTasks(
-    taskStore.tasks.value.map((item) =>
-      item.id === taskId
-        ? { ...item, status: 'DONE' }
-        : item
-    )
-  );
+  const movedTask = activeTaskList.value.find((item) => item.id === taskId);
+  activeTaskList.value = activeTaskList.value.filter((item) => item.id !== taskId);
+
+  if (movedTask) {
+    completedTaskList.value = [
+      { ...movedTask, status: 'DONE' },
+      ...completedTaskList.value.filter((item) => item.id !== taskId),
+    ].slice(0, historyPageSize.value);
+    activeTotal.value = Math.max(activeTotal.value - 1, 0);
+    historyTotal.value += 1;
+  }
+
+  taskStore.setTasks([...activeTaskList.value, ...completedTaskList.value]);
+  taskStore.setTotal(activeTotal.value + historyTotal.value);
 };
 
 const markTaskDone = async (task) => {
@@ -1037,6 +1082,7 @@ const startEdit = async (task) => {
   // 如果是个人任务，从后端拉取现有前置依赖用于回显
   if (isPersonalTask(task)) {
     try {
+      await loadDependencyCandidates();
       const res = await getTaskDependenciesApi(task.id);
       if (res.data && res.data.code === 0) {
         const preds = res.data.data.predecessors || [];
@@ -1138,10 +1184,6 @@ onMounted(() => {
   document.addEventListener('click', handleOutsideClick);
   fetchUserTeams(); //挂载时加载团队
   loadTasks();
-});
-
-watch(sortOption, async () => {
-  await loadTasks();
 });
 
 onBeforeUnmount(() => {

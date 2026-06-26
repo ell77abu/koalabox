@@ -36,6 +36,10 @@ func (m *mockTeamService) ListMine(ctx context.Context, userID uint64, search st
 	panic("not used")
 }
 
+func (m *mockTeamService) ListMinePage(ctx context.Context, userID uint64, query service.TeamListQuery) ([]model.TeamWithRole, int64, int, int, error) {
+	panic("not used")
+}
+
 func (m *mockTeamService) Update(ctx context.Context, operatorID, teamID uint64, req service.UpdateTeamRequest) error {
 	if m.updateFn == nil {
 		panic("updateFn not set")

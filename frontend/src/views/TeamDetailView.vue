@@ -100,7 +100,7 @@
             <button class="btn btn-small btn-primary" type="button" @click="loadTeamTasks">重试</button>
           </div>
         </div>
-        <div v-else-if="tasks.length === 0" class="empty-state">当前团队暂无任务。</div>
+        <div v-else-if="!isSearching && taskTotal === 0" class="empty-state">当前团队暂无任务。</div>
         <div v-else-if="displayedTeamTasks.length === 0" class="empty-state">
           {{ isSearching ? '未找到包含关键词的匹配任务。' : '当前暂无匹配任务。' }}
         </div>
@@ -146,7 +146,7 @@
           </div>
           </div>
           
-          <div v-if="totalPages > 1" class="pagination">
+          <div v-if="taskTotal > 0" class="pagination">
             <button class="btn btn-outline btn-small" :disabled="currentPage === 1" @click="currentPage--">上一页</button>
             <span class="page-info">第 {{ currentPage }} 页 / 共 {{ totalPages }} 页</span>
             <button class="btn btn-outline btn-small" :disabled="currentPage === totalPages" @click="currentPage++">下一页</button>
@@ -291,12 +291,12 @@
           <div class="dependency-section" style="margin-top: 8px;">
             <label style="font-size: 14px; color: #475569; font-weight: 600; display: block; margin-bottom: 5px;">📌 设置前置依赖 (仅限本团队任务)</label>
             <div style="display: flex; flex-direction: column; gap: 6px; max-height: 140px; overflow-y: auto; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc;">
-              <label v-for="t in tasks" :key="t.id" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #1e293b; cursor: pointer;">
+              <label v-for="t in dependencyCandidateTasks" :key="t.id" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #1e293b; cursor: pointer;">
                 <input type="checkbox" :value="t.id" v-model="newTask.predecessor_ids" style="accent-color: #3b82f6; width: 14px; height: 14px; cursor: pointer;" />
                 {{ t.title }}
                 <span class="status-badge" :class="`status-${t.status.toLowerCase()}`" style="transform: scale(0.8); transform-origin: left;">{{ statusLabel(t.status) }}</span>
               </label>
-              <span v-if="tasks.length === 0" style="font-size: 13px; color: #94a3b8;">团队暂无其他任务</span>
+              <span v-if="dependencyCandidateTasks.length === 0" style="font-size: 13px; color: #94a3b8;">团队暂无其他任务</span>
             </div>
           </div>
 
@@ -345,12 +345,12 @@
           <div v-if="myRole === 'Owner' || myRole === 'Admin'" class="dependency-section" style="margin-top: 8px;">
             <label style="font-size: 14px; color: #475569; font-weight: 600; display: block; margin-bottom: 5px;">📌 设置前置依赖 (仅限本团队任务)</label>
             <div style="display: flex; flex-direction: column; gap: 6px; max-height: 140px; overflow-y: auto; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc;">
-              <label v-for="t in tasks.filter(task => task.id !== editingTask.id)" :key="t.id" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #1e293b; cursor: pointer;">
+              <label v-for="t in availableTeamDependencyTasks" :key="t.id" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #1e293b; cursor: pointer;">
                 <input type="checkbox" :value="t.id" v-model="editingTask.predecessor_ids" style="accent-color: #3b82f6; width: 14px; height: 14px; cursor: pointer;" />
                 {{ t.title }}
                 <span class="status-badge" :class="`status-${t.status.toLowerCase()}`" style="transform: scale(0.8); transform-origin: left;">{{ statusLabel(t.status) }}</span>
               </label>
-              <span v-if="tasks.length <= 1" style="font-size: 13px; color: #94a3b8;">团队暂无可依赖的其他任务</span>
+              <span v-if="availableTeamDependencyTasks.length === 0" style="font-size: 13px; color: #94a3b8;">团队暂无可依赖的其他任务</span>
             </div>
           </div>
 
@@ -392,7 +392,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'; // 新增导入 watch
+import { ref, computed, nextTick, onMounted, watch } from 'vue'; // 新增导入 watch
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { authStore } from '../stores/auth'; 
 import { teamStore } from '../stores/team';
@@ -428,6 +428,8 @@ const canManageTeamTasks = computed(() => myRole.value === 'Owner' || myRole.val
 const canLeaveCurrentTeam = computed(() => myRole.value === 'Member' || myRole.value === 'Admin');
 
 const tasks = ref([]);
+const taskTotal = ref(0);
+const dependencyCandidateTasks = ref([]);
 const loadingTasks = ref(false);
 const taskLoadError = ref('');
 const searchQuery = ref('');
@@ -495,9 +497,14 @@ const canDeleteTeamTask = (task) => {
 };
 
 const findTaskTitleById = (id) => {
-  const task = tasks.value.find((item) => Number(item.id) === Number(id));
+  const task = [...tasks.value, ...dependencyCandidateTasks.value]
+    .find((item) => Number(item.id) === Number(id));
   return task?.title || '';
 };
+
+const availableTeamDependencyTasks = computed(() =>
+  dependencyCandidateTasks.value.filter((task) => Number(task.id) !== Number(editingTask.value.id))
+);
 
 const isSearching = computed(() => searchQuery.value.trim().length > 0);
 
@@ -523,27 +530,32 @@ const runConfirmAction = async () => {
 };
 
 // ================== 分页逻辑与过滤 ==================
-const displayedTeamTasks = computed(() => {
-  const keyword = searchQuery.value.trim().toLowerCase();
-  if (!keyword) return tasks.value;
-  return tasks.value.filter((task) =>
-    String(task.title || '').toLowerCase().includes(keyword)
-  );
-});
+const displayedTeamTasks = computed(() => tasks.value);
 
 const currentPage = ref(1);
 const pageSize = ref(8); // 每页显示 8 个任务
 
-const totalPages = computed(() => Math.ceil(displayedTeamTasks.value.length / pageSize.value) || 1);
+const totalPages = computed(() => Math.ceil(taskTotal.value / pageSize.value) || 1);
 
-const paginatedTeamTasks = computed(() => {
-  const start = (currentPage.value - 1) * pageSize.value;
-  return displayedTeamTasks.value.slice(start, start + pageSize.value);
-});
+const paginatedTeamTasks = computed(() => displayedTeamTasks.value);
+
+let suppressTeamPageWatch = false;
+
+const reloadTeamTasksFromFirstPage = async () => {
+  suppressTeamPageWatch = true;
+  currentPage.value = 1;
+  await nextTick();
+  suppressTeamPageWatch = false;
+  await loadTeamTasks();
+};
 
 // 搜索条件变化时重置页码
-watch(searchQuery, () => {
-  currentPage.value = 1;
+watch(searchQuery, reloadTeamTasksFromFirstPage);
+
+watch(currentPage, () => {
+  if (!suppressTeamPageWatch) {
+    loadTeamTasks();
+  }
 });
 
 // 自动退页（例如：删除了最后一页的最后一个任务时，自动退回前一页）
@@ -594,20 +606,58 @@ const loadTeams = async () => {
   }
 };
 
+const extractTaskPage = (response) => {
+  const pageData = response?.data?.data || {};
+  const list = Array.isArray(pageData.list) ? pageData.list : [];
+  const total = Number.isFinite(Number(pageData.total)) ? Number(pageData.total) : list.length;
+  const page = Number.isFinite(Number(pageData.page)) ? Number(pageData.page) : 1;
+  const size = Number.isFinite(Number(pageData.size)) ? Number(pageData.size) : 10;
+  return { list, total, page, size };
+};
+
+const loadTeamDependencyCandidates = async () => {
+  try {
+    const res = await getTeamTasksApi(teamId, {
+      page: 1,
+      size: 100,
+      status: 'all',
+      sort: 'priority',
+    });
+    if (res.data.code === 0) {
+      dependencyCandidateTasks.value = extractTaskPage(res).list;
+    }
+  } catch (error) {
+    console.error(getApiErrorMessage(error, '加载团队依赖候选任务失败'), error);
+  }
+};
+
 const loadTeamTasks = async () => {
   loadingTasks.value = true;
   taskLoadError.value = '';
   try {
-    const res = await getTeamTasksApi(teamId);
+    const keyword = searchQuery.value.trim();
+    const res = await getTeamTasksApi(teamId, {
+      page: currentPage.value,
+      size: pageSize.value,
+      search: keyword || undefined,
+      status: 'all',
+      sort: 'priority',
+    });
     if (res.data.code === 0) {
-      tasks.value = res.data.data.list || [];
+      const pageData = extractTaskPage(res);
+      tasks.value = pageData.list;
+      taskTotal.value = pageData.total;
+      currentPage.value = pageData.page || currentPage.value;
+      pageSize.value = pageData.size || pageSize.value;
     } else {
       tasks.value = [];
+      taskTotal.value = 0;
       taskLoadError.value = getApiFailureMessage(res, '加载团队任务失败');
     }
   } catch (error) {
     taskLoadError.value = getApiErrorMessage(error, '加载团队任务失败');
     tasks.value = [];
+    taskTotal.value = 0;
     console.error(taskLoadError.value, error);
   } 
   finally { loadingTasks.value = false; }
@@ -665,6 +715,7 @@ const handleCreateTask = async () => {
       showCreateTaskModal.value = false;
       newTask.value = { title: '', description: '', priority: '2', deadline: '', assignee_id: null, predecessor_ids: [] }; 
       await loadTeamTasks();
+      await loadTeamDependencyCandidates();
       if (dependencyErrors.length > 0) {
         showMessage(`任务已创建，但部分依赖设置失败：${dependencyErrors.join('；')}`, '提示');
       }
@@ -688,6 +739,7 @@ const startEdit = async (task) => {
   originalEditingDeadline.value = deadlineInput;
   editingDependencies.value = [];
   try {
+    await loadTeamDependencyCandidates();
     const res = await getTaskDependenciesApi(task.id);
     if (res.data && res.data.code === 0) {
       editingDependencies.value = (res.data.data.predecessors || []).map(p => p.id);
@@ -754,6 +806,7 @@ const handleUpdateTask = async () => {
       showEditTaskModal.value = false;
       originalEditingDeadline.value = '';
       await loadTeamTasks();
+      await loadTeamDependencyCandidates();
     } else showMessage(getApiFailureMessage(res, '更新团队任务失败', '更新失败'), '操作失败');
   } catch (error) {
     if (error.response?.status === 409) {
@@ -774,7 +827,10 @@ const handleDeleteTask = async (task) => {
     const taskId = task.id;
     try {
       const res = await deleteTaskApi(taskId);
-      if (res.data.code === 0) await loadTeamTasks();
+      if (res.data.code === 0) {
+        await loadTeamTasks();
+        await loadTeamDependencyCandidates();
+      }
       else showMessage(getApiFailureMessage(res, '删除团队任务失败', '删除失败'), '操作失败');
     } catch (error) { showMessage(getApiErrorMessage(error, '删除团队任务失败'), '操作失败'); }
   });
@@ -921,6 +977,7 @@ const toggleAdminRole = async (member) => {
 onMounted(() => {
   loadTeams();
   loadTeamTasks();
+  loadTeamDependencyCandidates();
   loadTeamMembers();
 });
 </script>

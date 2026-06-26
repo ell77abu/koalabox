@@ -40,10 +40,10 @@
           <h2>团队列表</h2>
           <p v-if="!loading" class="hint">
             <template v-if="isSearching">
-              搜索结果 {{ displayedTeams.length }} 项
+              搜索结果 {{ teamTotal }} 项
             </template>
             <template v-else>
-              共 {{ teamStore.teams.value.length }} 个团队
+              共 {{ teamTotal }} 个团队
             </template>
           </p>
         </div>
@@ -59,7 +59,7 @@
           </div>
         </div>
 
-        <div v-else-if="displayedTeams.length === 0" class="empty-state">
+        <div v-else-if="teamTotal === 0" class="empty-state">
           <p v-if="isSearching">未找到匹配的团队。</p>
           <p v-else>你还没有加入任何团队，快去创建一个吧！</p>
         </div>
@@ -98,7 +98,7 @@
               </div>
             </div>
 
-            <div v-if="totalPages > 1" class="pagination">
+            <div v-if="teamTotal > 0" class="pagination">
               <button class="btn btn-outline btn-small" :disabled="currentPage === 1" @click="currentPage--">上一页</button>
               <span class="page-info">第 {{ currentPage }} 页 / 共 {{ totalPages }} 页</span>
               <button class="btn btn-outline btn-small" :disabled="currentPage === totalPages" @click="currentPage++">下一页</button>
@@ -111,7 +111,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'; // 新增导入 watch
+import { ref, computed, nextTick, onMounted, watch } from 'vue'; // 新增导入 watch
 import { useRouter, RouterLink } from 'vue-router';
 import { teamStore } from '../stores/team';
 import { getTeamsApi } from '../services/team';
@@ -121,32 +121,38 @@ const router = useRouter();
 const loading = ref(false);
 const loadError = ref('');
 const searchQuery = ref('');
+const teamTotal = ref(0);
 
 const isSearching = computed(() => searchQuery.value.trim().length > 0);
 
-// 原始过滤后的团队列表
-const displayedTeams = computed(() => {
-  const list = teamStore.teams.value;
-  const keyword = searchQuery.value.trim().toLowerCase();
-  if (!keyword) return list;
-  return list.filter((team) => String(team.name || '').toLowerCase().includes(keyword));
-});
+const displayedTeams = computed(() => teamStore.teams.value);
 
 // ================== 分页逻辑 ==================
 const currentPage = ref(1);
 const pageSize = ref(8); // 每页显示 8 个团队
 
-const totalPages = computed(() => Math.ceil(displayedTeams.value.length / pageSize.value) || 1);
+const totalPages = computed(() => Math.ceil(teamTotal.value / pageSize.value) || 1);
 
 // 当前页显示的数据
-const paginatedTeams = computed(() => {
-  const start = (currentPage.value - 1) * pageSize.value;
-  return displayedTeams.value.slice(start, start + pageSize.value);
-});
+const paginatedTeams = computed(() => displayedTeams.value);
+
+let suppressTeamPageWatch = false;
+
+const reloadTeamsFromFirstPage = async () => {
+  suppressTeamPageWatch = true;
+  currentPage.value = 1;
+  await nextTick();
+  suppressTeamPageWatch = false;
+  await loadTeams();
+};
 
 // 搜索条件变化时重置页码
-watch(searchQuery, () => {
-  currentPage.value = 1;
+watch(searchQuery, reloadTeamsFromFirstPage);
+
+watch(currentPage, () => {
+  if (!suppressTeamPageWatch) {
+    loadTeams();
+  }
 });
 
 // 自动退页（例如：解散或退出了最后一页的最后一个团队时）
@@ -163,19 +169,39 @@ const roleBadgeClass = (role) => {
   return 'priority-1';
 };
 
+const extractTeamPage = (response) => {
+  const pageData = response?.data?.data || {};
+  const list = Array.isArray(pageData.list) ? pageData.list : [];
+  const total = Number.isFinite(Number(pageData.total)) ? Number(pageData.total) : list.length;
+  const page = Number.isFinite(Number(pageData.page)) ? Number(pageData.page) : 1;
+  const size = Number.isFinite(Number(pageData.size)) ? Number(pageData.size) : 10;
+  return { list, total, page, size };
+};
+
 const loadTeams = async () => {
   loading.value = true;
   loadError.value = '';
   try {
-    const res = await getTeamsApi();
+    const keyword = searchQuery.value.trim();
+    const res = await getTeamsApi({
+      page: currentPage.value,
+      size: pageSize.value,
+      search: keyword || undefined,
+    });
     if (res.data.code === 0) {
-      teamStore.setTeams(res.data.data.list || []);
+      const pageData = extractTeamPage(res);
+      teamStore.setTeams(pageData.list);
+      teamTotal.value = pageData.total;
+      currentPage.value = pageData.page || currentPage.value;
+      pageSize.value = pageData.size || pageSize.value;
     } else {
       teamStore.setTeams([]);
+      teamTotal.value = 0;
       loadError.value = getApiFailureMessage(res, '加载团队失败');
     }
   } catch (error) {
     teamStore.setTeams([]);
+    teamTotal.value = 0;
     loadError.value = getApiErrorMessage(error, '加载团队失败');
     console.error(loadError.value, error);
   } finally {
