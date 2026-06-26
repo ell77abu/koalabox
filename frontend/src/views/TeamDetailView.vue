@@ -146,7 +146,7 @@
           </div>
           </div>
           
-          <div v-if="totalPages > 1" class="pagination">
+          <div v-if="taskTotal > 0" class="pagination">
             <button class="btn btn-outline btn-small" :disabled="currentPage === 1" @click="currentPage--">上一页</button>
             <span class="page-info">第 {{ currentPage }} 页 / 共 {{ totalPages }} 页</span>
             <button class="btn btn-outline btn-small" :disabled="currentPage === totalPages" @click="currentPage++">下一页</button>
