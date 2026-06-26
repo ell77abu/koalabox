@@ -6,8 +6,19 @@ import { http } from './http';
  * @param {number} size - 每页数量
  * @returns {Promise}
  */
-export const getTasksApi = (page = 1, size = 10, sort = 'default') =>
-  http.get('/tasks', { params: { page, size, sort } });
+export const getTasksApi = (paramsOrPage = 1, size = 10, sort = 'default') => {
+  const params = typeof paramsOrPage === 'object'
+    ? { page: 1, size: 10, ...paramsOrPage }
+    : { page: paramsOrPage, size, sort };
+
+  Object.keys(params).forEach((key) => {
+    if (params[key] === null || params[key] === undefined || params[key] === '') {
+      delete params[key];
+    }
+  });
+
+  return http.get('/tasks', { params });
+};
 
 /**
  * 获取垃圾箱任务列表
