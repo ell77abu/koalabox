@@ -20,6 +20,7 @@ type teamRepoMock struct {
 	isMemberFn              func(ctx context.Context, teamID, userID uint64) (bool, error)
 	addMemberFn             func(ctx context.Context, member *model.TeamMember) error
 	listByUserIDFn          func(ctx context.Context, userID uint64, search string) ([]model.TeamWithRole, error)
+	listByUserIDPageFn      func(ctx context.Context, userID uint64, search string, page, size int) ([]model.TeamWithRole, int64, error)
 	updateNameFn            func(ctx context.Context, teamID uint64, name string) error
 	removeMemberFn          func(ctx context.Context, teamID, userID uint64) error
 	updateMemberRoleFn      func(ctx context.Context, teamID, userID uint64, role model.TeamRole) error
@@ -36,6 +37,13 @@ func (m *teamRepoMock) ListByUserID(ctx context.Context, userID uint64, search s
 		panic("unexpected call to ListByUserID")
 	}
 	return m.listByUserIDFn(ctx, userID, search)
+}
+
+func (m *teamRepoMock) ListByUserIDPage(ctx context.Context, userID uint64, search string, page, size int) ([]model.TeamWithRole, int64, error) {
+	if m.listByUserIDPageFn == nil {
+		panic("unexpected call to ListByUserIDPage")
+	}
+	return m.listByUserIDPageFn(ctx, userID, search, page, size)
 }
 
 func (m *teamRepoMock) GetByID(ctx context.Context, teamID uint64) (*model.Team, error) {

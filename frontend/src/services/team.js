@@ -2,7 +2,7 @@ import { http } from './http';
 
 export const createTeamApi = (payload) => http.post('/teams', payload);
 
-export const getTeamsApi = () => http.get('/teams');
+export const getTeamsApi = (params = undefined) => http.get('/teams', { params });
 
 export const getTeamMembersApi = (teamId) => http.get(`/teams/${teamId}/members`);
 

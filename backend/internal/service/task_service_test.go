@@ -212,6 +212,9 @@ func (m *teamRepoForTaskMock) Create(ctx context.Context, team *model.Team) erro
 func (m *teamRepoForTaskMock) ListByUserID(ctx context.Context, userID uint64, search string) ([]model.TeamWithRole, error) {
 	panic("unexpected call to ListByUserID")
 }
+func (m *teamRepoForTaskMock) ListByUserIDPage(ctx context.Context, userID uint64, search string, page, size int) ([]model.TeamWithRole, int64, error) {
+	panic("unexpected call to ListByUserIDPage")
+}
 func (m *teamRepoForTaskMock) GetByID(ctx context.Context, teamID uint64) (*model.Team, error) {
 	if m.getByIDFn == nil {
 		panic("unexpected call to GetByID")
