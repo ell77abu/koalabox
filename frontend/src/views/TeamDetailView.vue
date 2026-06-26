@@ -444,6 +444,7 @@ let confirmAction = null;
 
 const newTask = ref({ title: '', description: '', priority: '2', deadline: '', assignee_id: null, predecessor_ids: [] });
 const editingTask = ref({ id: null, title: '', description: '', status: 'TODO', priority: '2', deadline: '', assignee_id: null, predecessor_ids: [] });
+const originalEditingDeadline = ref('');
 const editingDependencies = ref([]); 
 
 const members = ref([]);
@@ -562,18 +563,18 @@ const parseDateInput = (value) => {
   if (!value) return null;
   const match = String(value).trim().replace(/\//g, '-').match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/);
   if (!match) return null;
-  return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), match[4] ? Number(match[4]) : 0, match[5] ? Number(match[5]) : 0)).toISOString();
+  return `${match[1]}-${match[2]}-${match[3]} ${match[4] || '00'}:${match[5] || '00'}:00`;
 };
 
 const formatDateForInput = (dateStr) => {
   if (!dateStr) return '';
   const date = new Date(dateStr);
   if (Number.isNaN(date.getTime())) return '';
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(date.getUTCDate()).padStart(2, '0');
-  const hour = String(date.getUTCHours()).padStart(2, '0');
-  const minute = String(date.getUTCMinutes()).padStart(2, '0');
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hour = String(date.getHours()).padStart(2, '0');
+  const minute = String(date.getMinutes()).padStart(2, '0');
   return `${year}-${month}-${day}T${hour}:${minute}`;
 };
 
@@ -678,11 +679,13 @@ const startEdit = async (task) => {
     return;
   }
 
+  const deadlineInput = task.deadline ? formatDateForInput(task.deadline) : '';
   editingTask.value = {
     id: task.id, title: task.title, description: task.description || '',
-    status: task.status, priority: String(task.priority), deadline: task.deadline ? formatDateForInput(task.deadline) : '',
+    status: task.status, priority: String(task.priority), deadline: deadlineInput,
     assignee_id: task.assignee_id || null, predecessor_ids: []
   };
+  originalEditingDeadline.value = deadlineInput;
   editingDependencies.value = [];
   try {
     const res = await getTaskDependenciesApi(task.id);
@@ -708,13 +711,19 @@ const handleUpdateTask = async () => {
 
   submittingTask.value = true;
   try {
-    const payload = !canManageTeamTasks.value
-      ? { status: editingTask.value.status }
-      : {
-          title: editingTask.value.title, description: editingTask.value.description || null,
-          status: editingTask.value.status, priority: Number(editingTask.value.priority),
-          deadline: parseDateInput(editingTask.value.deadline), assignee_id: editingTask.value.assignee_id || null
-        };
+    let payload;
+    if (!canManageTeamTasks.value) {
+      payload = { status: editingTask.value.status };
+    } else {
+      payload = {
+        title: editingTask.value.title, description: editingTask.value.description || null,
+        status: editingTask.value.status, priority: Number(editingTask.value.priority),
+        assignee_id: editingTask.value.assignee_id || null
+      };
+      if (editingTask.value.deadline !== originalEditingDeadline.value) {
+        payload.deadline = editingTask.value.deadline ? parseDateInput(editingTask.value.deadline) : null;
+      }
+    }
 
     const res = await updateTaskApi(editingTask.value.id, payload);
     if (res.data.code === 0) {
@@ -743,6 +752,7 @@ const handleUpdateTask = async () => {
         }
       }
       showEditTaskModal.value = false;
+      originalEditingDeadline.value = '';
       await loadTeamTasks();
     } else showMessage(getApiFailureMessage(res, '更新团队任务失败', '更新失败'), '操作失败');
   } catch (error) {
