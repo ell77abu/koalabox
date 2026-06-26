@@ -25,7 +25,7 @@ type taskLogServiceMock struct {
 	dismissAssignmentFn func(ctx context.Context, userID, requestID uint64) (*service.AssignmentDismissResult, error)
 }
 
-func (m *taskLogServiceMock) List(ctx context.Context, userID uint64, userLevel uint8, page, size int, teamID *uint64) ([]model.Task, int64, int, int, error) {
+func (m *taskLogServiceMock) List(ctx context.Context, userID uint64, userLevel uint8, query service.TaskListQuery) ([]model.Task, int64, int, int, error) {
 	panic("unexpected call to List")
 }
 

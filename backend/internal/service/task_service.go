@@ -100,6 +100,16 @@ type TaskActivityLogItem struct {
 	CreatedAt  string                   `json:"created_at"`
 }
 
+type TaskListQuery struct {
+	Page   int
+	Size   int
+	TeamID *uint64
+	Scope  string
+	Status string
+	Search string
+	Sort   string
+}
+
 type AssignmentDismissResult struct {
 	RequestID uint64    `json:"request_id"`
 	DismissAt time.Time `json:"dismiss_at"`
@@ -132,7 +142,7 @@ func (e *DoneSuccessorsError) Is(target error) bool {
 }
 
 type TaskService interface {
-	List(ctx context.Context, userID uint64, userLevel uint8, page, size int, teamID *uint64) ([]model.Task, int64, int, int, error)
+	List(ctx context.Context, userID uint64, userLevel uint8, query TaskListQuery) ([]model.Task, int64, int, int, error)
 	ListTrash(ctx context.Context, userID uint64, page, size int, teamID *uint64) ([]model.Task, int64, int, int, error)
 	Create(ctx context.Context, userID uint64, req CreateTaskRequest) (*model.Task, error)
 	Update(ctx context.Context, userID uint64, taskID uint64, req UpdateTaskRequest) (*model.Task, error)
@@ -170,44 +180,77 @@ func NewTaskService(taskRepo repository.TaskRepository, teamRepo repository.Team
 	}
 }
 
-func (s *taskService) List(ctx context.Context, userID uint64, userLevel uint8, page, size int, teamID *uint64) ([]model.Task, int64, int, int, error) {
-	if page <= 0 {
-		page = 1
-	}
-	if size <= 0 {
-		size = 10
-	}
-	if size > 100 {
-		size = 100
-	}
+func (s *taskService) List(ctx context.Context, userID uint64, userLevel uint8, query TaskListQuery) ([]model.Task, int64, int, int, error) {
+	query = normalizeTaskListQuery(query)
 
-	var (
-		list  []model.Task
-		total int64
-		err   error
-	)
-
-	if userLevel == 1 {
-		if teamID != nil {
-			list, total, err = s.taskRepo.ListByTeamID(ctx, *teamID, page, size)
-		} else {
-			list, total, err = s.taskRepo.ListAll(ctx, page, size)
-		}
-	} else if teamID != nil {
-		if err := s.requireExistingTeamMember(ctx, *teamID, userID); err != nil {
+	if userLevel != 1 && query.TeamID != nil {
+		if err := s.requireExistingTeamMember(ctx, *query.TeamID, userID); err != nil {
 			return nil, 0, 0, 0, err
 		}
-		list, total, err = s.taskRepo.ListByTeamID(ctx, *teamID, page, size)
-	} else {
-		list, total, err = s.taskRepo.ListPersonalAndAssignedTeam(ctx, userID, page, size)
 	}
+
+	list, total, err := s.taskRepo.ListVisible(ctx, repository.TaskListQuery{
+		UserID:    userID,
+		UserLevel: userLevel,
+		TeamID:    query.TeamID,
+		Scope:     query.Scope,
+		Status:    query.Status,
+		Search:    query.Search,
+		Sort:      query.Sort,
+		Page:      query.Page,
+		Size:      query.Size,
+	})
 	if err != nil {
 		return nil, 0, 0, 0, err
 	}
 	if list == nil {
 		list = make([]model.Task, 0)
 	}
-	return list, total, page, size, nil
+	return list, total, query.Page, query.Size, nil
+}
+
+func normalizeTaskListQuery(query TaskListQuery) TaskListQuery {
+	if query.Page <= 0 {
+		query.Page = 1
+	}
+	if query.Size <= 0 {
+		query.Size = 10
+	}
+	if query.Size > 100 {
+		query.Size = 100
+	}
+
+	switch strings.ToLower(strings.TrimSpace(query.Scope)) {
+	case "personal":
+		query.Scope = "personal"
+	case "team":
+		query.Scope = "team"
+	default:
+		query.Scope = "all"
+	}
+
+	switch strings.ToLower(strings.TrimSpace(query.Status)) {
+	case "active":
+		query.Status = "active"
+	case "done":
+		query.Status = "done"
+	default:
+		query.Status = "all"
+	}
+
+	switch strings.ToLower(strings.TrimSpace(query.Sort)) {
+	case "priority":
+		query.Sort = "priority"
+	case "deadline":
+		query.Sort = "deadline"
+	case "created_at":
+		query.Sort = "created_at"
+	default:
+		query.Sort = "default"
+	}
+
+	query.Search = strings.TrimSpace(query.Search)
+	return query
 }
 
 func (s *taskService) ListTrash(ctx context.Context, userID uint64, page, size int, teamID *uint64) ([]model.Task, int64, int, int, error) {
