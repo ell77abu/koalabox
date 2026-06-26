@@ -34,12 +34,18 @@ func GenerateToken(userID uint64, username string, level uint8, secret string, e
 }
 
 func ParseToken(tokenString, secret string) (*Claims, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return []byte(secret), nil
-	})
+	// 仅允许 HS256 签名算法，避免其它算法混用引发安全问题。
+	token, err := jwt.ParseWithClaims(
+		tokenString,
+		&Claims{},
+		func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+			return []byte(secret), nil
+		},
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+	)
 	if err != nil {
 		return nil, err
 	}

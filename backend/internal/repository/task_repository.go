@@ -14,16 +14,13 @@ import (
 
 type TaskRepository interface {
 	Create(ctx context.Context, task *model.Task) error
+	ListVisible(ctx context.Context, query TaskListQuery) ([]model.Task, int64, error)
 	ListPersonalAndAssignedTeam(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error)
 	ListByTeamID(ctx context.Context, teamID uint64, page, size int) ([]model.Task, int64, error)
 	ListByUserID(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error)
 	ListAll(ctx context.Context, page, size int) ([]model.Task, int64, error)
-	// 新增：支持排序的两个方法
-	ListByUserIDWithOrder(ctx context.Context, userID uint64, page, size int, orderBy string) ([]model.Task, int64, error)
-	ListAllWithOrder(ctx context.Context, page, size int, orderBy string) ([]model.Task, int64, error)
-	//新增：支持搜索
-	ListByUserIDWithSearch(ctx context.Context, userID uint64, page, size int, search, orderBy string) ([]model.Task, int64, error)
-	ListAllWithSearch(ctx context.Context, page, size int, search, orderBy string) ([]model.Task, int64, error)
+	ListPersonalTrashByUserID(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error)
+	ListTeamTrashByTeamID(ctx context.Context, teamID uint64, page, size int) ([]model.Task, int64, error)
 	GetByIDAndUserID(ctx context.Context, id, userID uint64) (*model.Task, error)
 	GetByIDForUserScope(ctx context.Context, id, userID uint64) (*model.Task, error)
 	GetByID(ctx context.Context, id uint64) (*model.Task, error)
@@ -49,6 +46,18 @@ type TaskRepository interface {
 	GetDependencyGraph(ctx context.Context, taskID uint64) ([]model.TaskDependencyNode, []model.TaskDependencyLink, error)
 }
 
+type TaskListQuery struct {
+	UserID    uint64
+	UserLevel uint8
+	TeamID    *uint64
+	Scope     string
+	Status    string
+	Search    string
+	Sort      string
+	Page      int
+	Size      int
+}
+
 type taskRepository struct {
 	db *gorm.DB
 }
@@ -63,6 +72,123 @@ func (r *taskRepository) GetDB() *gorm.DB {
 
 func (r *taskRepository) Create(ctx context.Context, task *model.Task) error {
 	return r.db.WithContext(ctx).Create(task).Error
+}
+
+func (r *taskRepository) ListVisible(ctx context.Context, query TaskListQuery) ([]model.Task, int64, error) {
+	if query.Page <= 0 {
+		query.Page = 1
+	}
+	if query.Size <= 0 {
+		query.Size = 10
+	}
+	if query.Size > 100 {
+		query.Size = 100
+	}
+	offset := (query.Page - 1) * query.Size
+
+	baseQuery := r.db.WithContext(ctx).
+		Table("tasks").
+		Where("tasks.deleted_at IS NULL")
+
+	baseQuery = applyTaskVisibility(baseQuery, query)
+	baseQuery = applyTaskStatusFilter(baseQuery, query.Status)
+
+	if keyword := strings.TrimSpace(query.Search); keyword != "" {
+		baseQuery = baseQuery.Where("tasks.title ILIKE ?", "%"+keyword+"%")
+	}
+
+	var total int64
+	if err := baseQuery.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	tasks := make([]model.Task, 0)
+	err := baseQuery.
+		Select("tasks.*").
+		Order(taskListOrderBy(query.Sort)).
+		Limit(query.Size).
+		Offset(offset).
+		Find(&tasks).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	return tasks, total, nil
+}
+
+func applyTaskVisibility(db *gorm.DB, query TaskListQuery) *gorm.DB {
+	if query.TeamID != nil {
+		return db.Where("tasks.team_id = ?", *query.TeamID)
+	}
+
+	scope := strings.ToLower(strings.TrimSpace(query.Scope))
+	if query.UserLevel == 1 {
+		switch scope {
+		case "personal":
+			return db.Where("tasks.team_id IS NULL")
+		case "team":
+			return db.Where("tasks.team_id IS NOT NULL")
+		default:
+			return db
+		}
+	}
+
+	switch scope {
+	case "personal":
+		return db.Where("tasks.team_id IS NULL AND tasks.user_id = ?", query.UserID)
+	case "team":
+		return db.Where(
+			`tasks.team_id IS NOT NULL AND tasks.assignee_id = ? AND EXISTS (
+				SELECT 1
+				FROM team_members tm
+				JOIN teams t ON t.id = tm.team_id AND t.deleted_at IS NULL
+				WHERE tm.team_id = tasks.team_id
+					AND tm.user_id = ?
+					AND tm.deleted_at IS NULL
+			)`,
+			query.UserID, query.UserID,
+		)
+	default:
+		return db.Where(
+			`(tasks.team_id IS NULL AND tasks.user_id = ?) OR
+			(tasks.team_id IS NOT NULL AND tasks.assignee_id = ? AND EXISTS (
+				SELECT 1
+				FROM team_members tm
+				JOIN teams t ON t.id = tm.team_id AND t.deleted_at IS NULL
+				WHERE tm.team_id = tasks.team_id
+					AND tm.user_id = ?
+					AND tm.deleted_at IS NULL
+			))`,
+			query.UserID, query.UserID, query.UserID,
+		)
+	}
+}
+
+func applyTaskStatusFilter(db *gorm.DB, status string) *gorm.DB {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "active":
+		return db.Where("tasks.status IN ?", []model.TaskStatus{
+			model.TaskStatusTODO,
+			model.TaskStatusDOING,
+			model.TaskStatusERROR,
+		})
+	case "done":
+		return db.Where("tasks.status = ?", model.TaskStatusDONE)
+	default:
+		return db
+	}
+}
+
+func taskListOrderBy(sort string) string {
+	switch strings.ToLower(strings.TrimSpace(sort)) {
+	case "priority":
+		return "tasks.priority DESC, tasks.created_at DESC"
+	case "deadline":
+		return "tasks.deadline ASC NULLS LAST, tasks.created_at DESC"
+	case "created_at", "default":
+		return "tasks.created_at DESC"
+	default:
+		return "tasks.created_at DESC"
+	}
 }
 
 func (r *taskRepository) ListPersonalAndAssignedTeam(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error) {
@@ -213,9 +339,7 @@ func (r *taskRepository) ListAll(ctx context.Context, page, size int) ([]model.T
 	return tasks, total, nil
 }
 
-// ==================== 新增支持排序的方法（核心） ====================
-
-func (r *taskRepository) ListByUserIDWithOrder(ctx context.Context, userID uint64, page, size int, orderBy string) ([]model.Task, int64, error) {
+func (r *taskRepository) ListPersonalTrashByUserID(ctx context.Context, userID uint64, page, size int) ([]model.Task, int64, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -225,36 +349,32 @@ func (r *taskRepository) ListByUserIDWithOrder(ctx context.Context, userID uint6
 	if size > 100 {
 		size = 100
 	}
-
 	offset := (page - 1) * size
-
-	// 安全校验排序字段，防止 SQL 注入
-	orderBy = sanitizeOrderBy(orderBy)
 
 	query := r.db.WithContext(ctx).
 		Model(&model.Task{}).
 		Where("user_id = ?", userID).
-		Where("deleted_at IS NULL")
+		Where("team_id IS NULL").
+		Where("deleted_at IS NOT NULL")
 
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	var tasks []model.Task
+	tasks := make([]model.Task, 0)
 	err := query.
-		Order(orderBy). // PostgreSQL 支持直接传入 "priority DESC"
+		Order("deleted_at DESC").
 		Limit(size).
 		Offset(offset).
 		Find(&tasks).Error
-
 	if err != nil {
 		return nil, 0, err
 	}
 	return tasks, total, nil
 }
 
-func (r *taskRepository) ListAllWithOrder(ctx context.Context, page, size int, orderBy string) ([]model.Task, int64, error) {
+func (r *taskRepository) ListTeamTrashByTeamID(ctx context.Context, teamID uint64, page, size int) ([]model.Task, int64, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -264,148 +384,28 @@ func (r *taskRepository) ListAllWithOrder(ctx context.Context, page, size int, o
 	if size > 100 {
 		size = 100
 	}
-
 	offset := (page - 1) * size
-
-	orderBy = sanitizeOrderBy(orderBy)
 
 	query := r.db.WithContext(ctx).
 		Model(&model.Task{}).
-		Where("deleted_at IS NULL")
+		Where("team_id = ?", teamID).
+		Where("deleted_at IS NOT NULL")
 
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	var tasks []model.Task
+	tasks := make([]model.Task, 0)
 	err := query.
-		Order(orderBy).
+		Order("deleted_at DESC").
 		Limit(size).
 		Offset(offset).
 		Find(&tasks).Error
-
 	if err != nil {
 		return nil, 0, err
 	}
 	return tasks, total, nil
-}
-
-// ==================== 工具函数：排序安全校验 ====================
-
-// 只允许指定的字段排序，防止 SQL 注入
-func sanitizeOrderBy(orderBy string) string {
-	// 默认排序
-	if orderBy == "" {
-		return "created_at DESC"
-	}
-
-	// 支持的排序字段 + 方向
-	allowed := map[string]bool{
-		"created_at DESC": true,
-		"created_at ASC":  true,
-		"deadline DESC":   true,
-		"deadline ASC":    true,
-		"priority DESC":   true,
-		"priority ASC":    true,
-	}
-
-	// 如果传入的就是完整 "字段 方向"，直接校验
-	if allowed[orderBy] {
-		return orderBy
-	}
-
-	// 支持前端只传字段名的情况（默认 DESC）
-	switch strings.ToLower(strings.TrimSpace(orderBy)) {
-	case "created_at":
-		return "created_at DESC"
-	case "deadline":
-		return "deadline DESC"
-	case "priority":
-		return "priority DESC"
-	default:
-		return "created_at DESC" // 默认
-	}
-}
-
-// ========== 新增：带搜索的查询方法 ==========
-
-func (r *taskRepository) ListByUserIDWithSearch(ctx context.Context, userID uint64, page, size int, search, orderBy string) ([]model.Task, int64, error) {
-	if page <= 0 {
-		page = 1
-	}
-	if size <= 0 {
-		size = 10
-	}
-	if size > 100 {
-		size = 100
-	}
-
-	offset := (page - 1) * size
-	orderBy = sanitizeOrderBy(orderBy)
-
-	query := r.db.WithContext(ctx).
-		Model(&model.Task{}).
-		Where("user_id = ?", userID).
-		Where("deleted_at IS NULL")
-
-	// 如果有搜索关键词，则对 title 和 description 进行模糊搜索
-	if search != "" {
-		likePattern := "%" + search + "%"
-		query = query.Where("title ILIKE ? OR description ILIKE ?", likePattern, likePattern)
-	}
-
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
-	var tasks []model.Task
-	err := query.
-		Order(orderBy).
-		Limit(size).
-		Offset(offset).
-		Find(&tasks).Error
-
-	return tasks, total, err
-}
-
-func (r *taskRepository) ListAllWithSearch(ctx context.Context, page, size int, search, orderBy string) ([]model.Task, int64, error) {
-	if page <= 0 {
-		page = 1
-	}
-	if size <= 0 {
-		size = 10
-	}
-	if size > 100 {
-		size = 100
-	}
-
-	offset := (page - 1) * size
-	orderBy = sanitizeOrderBy(orderBy)
-
-	query := r.db.WithContext(ctx).
-		Model(&model.Task{}).
-		Where("deleted_at IS NULL")
-
-	if search != "" {
-		likePattern := "%" + search + "%"
-		query = query.Where("title ILIKE ? OR description ILIKE ?", likePattern, likePattern)
-	}
-
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
-	var tasks []model.Task
-	err := query.
-		Order(orderBy).
-		Limit(size).
-		Offset(offset).
-		Find(&tasks).Error
-
-	return tasks, total, err
 }
 
 func (r *taskRepository) GetByIDAndUserID(ctx context.Context, id, userID uint64) (*model.Task, error) {

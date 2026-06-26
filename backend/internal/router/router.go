@@ -50,6 +50,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		taskGroup.Use(middleware.JWTAuth(cfg.JWT.Secret))
 		{
 			taskGroup.GET("", taskHandler.List)
+			taskGroup.GET("/trash", taskHandler.ListTrash)
 			taskGroup.POST("", taskHandler.Create)
 			taskGroup.PUT("/:id", taskHandler.Update)
 			taskGroup.PATCH("/:id", taskHandler.Update)
@@ -70,6 +71,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			assignmentGroup.GET("", taskHandler.ListPendingAssignments)
 			assignmentGroup.POST("/:request_id/accept", taskHandler.AcceptAssignment)
 			assignmentGroup.POST("/:request_id/decline", taskHandler.DeclineAssignment)
+			assignmentGroup.POST("/:request_id/dismiss", taskHandler.DismissAssignment)
 		}
 
 		teamGroup := apiV1.Group("/teams")

@@ -45,9 +45,16 @@ type TransferTeamRequest struct {
 	NewOwnerID uint64 `json:"new_owner_id"`
 }
 
+type TeamListQuery struct {
+	Page   int
+	Size   int
+	Search string
+}
+
 type TeamService interface {
 	Create(ctx context.Context, ownerID uint64, req CreateTeamRequest) (*model.Team, error)
 	ListMine(ctx context.Context, userID uint64, search string) ([]model.TeamWithRole, error)
+	ListMinePage(ctx context.Context, userID uint64, query TeamListQuery) ([]model.TeamWithRole, int64, int, int, error)
 	Update(ctx context.Context, operatorID, teamID uint64, req UpdateTeamRequest) error
 	AddMember(ctx context.Context, operatorID, teamID uint64, req AddTeamMemberRequest) (*model.TeamMember, error)
 	RemoveMember(ctx context.Context, operatorID, teamID, targetUserID uint64) error
@@ -133,6 +140,28 @@ func (s *teamService) ListMine(ctx context.Context, userID uint64, search string
 		list = make([]model.TeamWithRole, 0)
 	}
 	return list, nil
+}
+
+func (s *teamService) ListMinePage(ctx context.Context, userID uint64, query TeamListQuery) ([]model.TeamWithRole, int64, int, int, error) {
+	if query.Page <= 0 {
+		query.Page = 1
+	}
+	if query.Size <= 0 {
+		query.Size = 10
+	}
+	if query.Size > 100 {
+		query.Size = 100
+	}
+	query.Search = strings.TrimSpace(query.Search)
+
+	list, total, err := s.teamRepo.ListByUserIDPage(ctx, userID, query.Search, query.Page, query.Size)
+	if err != nil {
+		return nil, 0, 0, 0, err
+	}
+	if list == nil {
+		list = make([]model.TeamWithRole, 0)
+	}
+	return list, total, query.Page, query.Size, nil
 }
 
 func (s *teamService) Update(ctx context.Context, operatorID, teamID uint64, req UpdateTeamRequest) error {

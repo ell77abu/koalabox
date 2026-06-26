@@ -100,6 +100,21 @@ type TaskActivityLogItem struct {
 	CreatedAt  string                   `json:"created_at"`
 }
 
+type TaskListQuery struct {
+	Page   int
+	Size   int
+	TeamID *uint64
+	Scope  string
+	Status string
+	Search string
+	Sort   string
+}
+
+type AssignmentDismissResult struct {
+	RequestID uint64    `json:"request_id"`
+	DismissAt time.Time `json:"dismiss_at"`
+}
+
 type UnresolvedDependenciesError struct {
 	IDs          []uint64
 	Predecessors []model.TaskDependencyNode
@@ -127,13 +142,15 @@ func (e *DoneSuccessorsError) Is(target error) bool {
 }
 
 type TaskService interface {
-	List(ctx context.Context, userID uint64, userLevel uint8, page, size int, teamID *uint64) ([]model.Task, int64, int, int, error)
+	List(ctx context.Context, userID uint64, userLevel uint8, query TaskListQuery) ([]model.Task, int64, int, int, error)
+	ListTrash(ctx context.Context, userID uint64, page, size int, teamID *uint64) ([]model.Task, int64, int, int, error)
 	Create(ctx context.Context, userID uint64, req CreateTaskRequest) (*model.Task, error)
 	Update(ctx context.Context, userID uint64, taskID uint64, req UpdateTaskRequest) (*model.Task, error)
 	Delete(ctx context.Context, userID uint64, userLevel uint8, taskID uint64) error
 	ListPendingAssignments(ctx context.Context, userID uint64) ([]model.TaskAssignmentRequestDetail, error)
 	AcceptAssignment(ctx context.Context, userID, requestID uint64) error
 	DeclineAssignment(ctx context.Context, userID, requestID uint64) error
+	DismissAssignment(ctx context.Context, userID, requestID uint64) (*AssignmentDismissResult, error)
 	AddDependency(ctx context.Context, userID, taskID, predecessorID uint64) (*model.TaskDependency, error)
 	RemoveDependency(ctx context.Context, userID, taskID, predecessorID uint64) error
 	GetDependencies(ctx context.Context, userID, taskID uint64) (*TaskDependencies, error)
@@ -163,7 +180,80 @@ func NewTaskService(taskRepo repository.TaskRepository, teamRepo repository.Team
 	}
 }
 
-func (s *taskService) List(ctx context.Context, userID uint64, userLevel uint8, page, size int, teamID *uint64) ([]model.Task, int64, int, int, error) {
+func (s *taskService) List(ctx context.Context, userID uint64, userLevel uint8, query TaskListQuery) ([]model.Task, int64, int, int, error) {
+	query = normalizeTaskListQuery(query)
+
+	if userLevel != 1 && query.TeamID != nil {
+		if err := s.requireExistingTeamMember(ctx, *query.TeamID, userID); err != nil {
+			return nil, 0, 0, 0, err
+		}
+	}
+
+	list, total, err := s.taskRepo.ListVisible(ctx, repository.TaskListQuery{
+		UserID:    userID,
+		UserLevel: userLevel,
+		TeamID:    query.TeamID,
+		Scope:     query.Scope,
+		Status:    query.Status,
+		Search:    query.Search,
+		Sort:      query.Sort,
+		Page:      query.Page,
+		Size:      query.Size,
+	})
+	if err != nil {
+		return nil, 0, 0, 0, err
+	}
+	if list == nil {
+		list = make([]model.Task, 0)
+	}
+	return list, total, query.Page, query.Size, nil
+}
+
+func normalizeTaskListQuery(query TaskListQuery) TaskListQuery {
+	if query.Page <= 0 {
+		query.Page = 1
+	}
+	if query.Size <= 0 {
+		query.Size = 10
+	}
+	if query.Size > 100 {
+		query.Size = 100
+	}
+
+	switch strings.ToLower(strings.TrimSpace(query.Scope)) {
+	case "personal":
+		query.Scope = "personal"
+	case "team":
+		query.Scope = "team"
+	default:
+		query.Scope = "all"
+	}
+
+	switch strings.ToLower(strings.TrimSpace(query.Status)) {
+	case "active":
+		query.Status = "active"
+	case "done":
+		query.Status = "done"
+	default:
+		query.Status = "all"
+	}
+
+	switch strings.ToLower(strings.TrimSpace(query.Sort)) {
+	case "priority":
+		query.Sort = "priority"
+	case "deadline":
+		query.Sort = "deadline"
+	case "created_at":
+		query.Sort = "created_at"
+	default:
+		query.Sort = "default"
+	}
+
+	query.Search = strings.TrimSpace(query.Search)
+	return query
+}
+
+func (s *taskService) ListTrash(ctx context.Context, userID uint64, page, size int, teamID *uint64) ([]model.Task, int64, int, int, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -180,19 +270,13 @@ func (s *taskService) List(ctx context.Context, userID uint64, userLevel uint8, 
 		err   error
 	)
 
-	if userLevel == 1 {
-		if teamID != nil {
-			list, total, err = s.taskRepo.ListByTeamID(ctx, *teamID, page, size)
-		} else {
-			list, total, err = s.taskRepo.ListAll(ctx, page, size)
-		}
-	} else if teamID != nil {
+	if teamID != nil {
 		if err := s.requireExistingTeamMember(ctx, *teamID, userID); err != nil {
 			return nil, 0, 0, 0, err
 		}
-		list, total, err = s.taskRepo.ListByTeamID(ctx, *teamID, page, size)
+		list, total, err = s.taskRepo.ListTeamTrashByTeamID(ctx, *teamID, page, size)
 	} else {
-		list, total, err = s.taskRepo.ListPersonalAndAssignedTeam(ctx, userID, page, size)
+		list, total, err = s.taskRepo.ListPersonalTrashByUserID(ctx, userID, page, size)
 	}
 	if err != nil {
 		return nil, 0, 0, 0, err
@@ -504,6 +588,17 @@ func (s *taskService) DeclineAssignment(ctx context.Context, userID, requestID u
 	return s.assignRepo.UpdatePendingStatusForAssigneeScope(ctx, requestID, userID, model.InvitationStatusDeclined)
 }
 
+func (s *taskService) DismissAssignment(ctx context.Context, userID, requestID uint64) (*AssignmentDismissResult, error) {
+	dismissedAt, err := s.assignRepo.DismissForAssigneeScope(ctx, requestID, userID)
+	if err != nil {
+		return nil, err
+	}
+	return &AssignmentDismissResult{
+		RequestID: requestID,
+		DismissAt: *dismissedAt,
+	}, nil
+}
+
 func (s *taskService) AddDependency(ctx context.Context, userID, taskID, predecessorID uint64) (*model.TaskDependency, error) {
 	if taskID == 0 || predecessorID == 0 || taskID == predecessorID {
 		return nil, ErrInvalidTaskDependency
@@ -761,7 +856,7 @@ func (s *taskService) buildTaskUpdateContent(ctx context.Context, before, after 
 	if before.Priority != after.Priority {
 		changes = append(changes, fmt.Sprintf("将优先级从 %d 修改为 %d", before.Priority, after.Priority))
 	}
-	if !isSameTimePtr(before.Deadline, after.Deadline) {
+	if !isSameDeadlinePtr(before.Deadline, after.Deadline) {
 		changes = append(changes, fmt.Sprintf("将截止时间从 %s 修改为 %s", formatDeadline(before.Deadline), formatDeadline(after.Deadline)))
 	}
 	if !isSameUint64Ptr(before.AssigneeID, after.AssigneeID) {
@@ -821,6 +916,13 @@ func isSameTimePtr(left, right *time.Time) bool {
 		return left == right
 	}
 	return left.Equal(*right)
+}
+
+func isSameDeadlinePtr(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return formatDeadline(left) == formatDeadline(right)
 }
 
 func (s *taskService) ensureDependenciesCompleted(ctx context.Context, taskID uint64) error {

@@ -6,7 +6,7 @@ server:
 # 本地调试dsn(flyingcutter)：host=127.0.0.1 port=5432 user=postgres password=admin dbname=sec sslmode=disable TimeZone=Asia/Shanghai
 database:
   dsn: "host=127.0.0.1 port=5432 user=postgres password=admin dbname=sec sslmode=disable TimeZone=Asia/Shanghai"
-  max_idle_conns: 1000
+  max_idle_conns: 10
   max_open_conns: 50
   conn_max_lifetime_minutes: 60
 

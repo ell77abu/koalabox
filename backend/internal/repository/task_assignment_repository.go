@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
@@ -16,6 +17,7 @@ type TaskAssignmentRepository interface {
 	GetByIDForAssigneeScope(ctx context.Context, id, assigneeID uint64) (*model.TaskAssignmentRequest, error)
 	GetPendingByTaskAndAssignee(ctx context.Context, taskID, assigneeID uint64) (*model.TaskAssignmentRequest, error)
 	ListPendingByAssignee(ctx context.Context, assigneeID uint64) ([]model.TaskAssignmentRequestDetail, error)
+	DismissForAssigneeScope(ctx context.Context, id, assigneeID uint64) (*time.Time, error)
 	UpdateStatus(ctx context.Context, id uint64, status model.InvitationStatus) error
 	UpdatePendingStatusForAssigneeScope(ctx context.Context, id, assigneeID uint64, status model.InvitationStatus) error
 	AcceptPendingForAssigneeScope(ctx context.Context, id, assigneeID uint64) error
@@ -97,13 +99,14 @@ func (r *taskAssignmentRepository) ListPendingByAssignee(ctx context.Context, as
 	var list []model.TaskAssignmentRequestDetail
 	err := r.db.WithContext(ctx).
 		Table("task_assignment_requests tar").
-		Select("tar.id, tar.task_id, t.title AS task_title, tar.team_id, tm.name AS team_name, tar.requester_id, u.username AS requester_username, tar.status, tar.created_at").
+		Select("tar.id, tar.task_id, t.title AS task_title, tar.team_id, tm.name AS team_name, tar.requester_id, u.username AS requester_username, tar.assignee_id, tar.status, tar.created_at, tar.dismiss_at").
 		Joins("JOIN tasks t ON t.id = tar.task_id AND t.deleted_at IS NULL").
 		Joins("JOIN teams tm ON tm.id = tar.team_id AND tm.deleted_at IS NULL").
 		Joins("JOIN team_members mem ON mem.team_id = tar.team_id AND mem.user_id = tar.assignee_id AND mem.deleted_at IS NULL").
 		Joins("JOIN users u ON u.id = tar.requester_id AND u.deleted_at IS NULL").
 		Where("tar.assignee_id = ?", assigneeID).
 		Where("tar.status IN ?", []model.InvitationStatus{model.InvitationStatusPending, model.InvitationStatusAccepted}).
+		Where("tar.dismiss_at IS NULL").
 		Order("tar.created_at DESC").
 		Find(&list).Error
 	if err != nil {
@@ -113,6 +116,49 @@ func (r *taskAssignmentRepository) ListPendingByAssignee(ctx context.Context, as
 		list = make([]model.TaskAssignmentRequestDetail, 0)
 	}
 	return list, nil
+}
+
+func (r *taskAssignmentRepository) DismissForAssigneeScope(ctx context.Context, id, assigneeID uint64) (*time.Time, error) {
+	var dismissedAt time.Time
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var req model.TaskAssignmentRequest
+		err := tx.
+			Select("id", "assignee_id", "dismiss_at").
+			Where("id = ?", id).
+			First(&req).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if req.AssigneeID != assigneeID {
+			return ErrForbidden
+		}
+		if req.DismissAt != nil {
+			dismissedAt = *req.DismissAt
+			return nil
+		}
+
+		now := time.Now()
+		res := tx.Model(&model.TaskAssignmentRequest{}).
+			Where("id = ?", id).
+			Where("assignee_id = ?", assigneeID).
+			Where("dismiss_at IS NULL").
+			Update("dismiss_at", now)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		dismissedAt = now
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &dismissedAt, nil
 }
 
 func (r *taskAssignmentRepository) UpdateStatus(ctx context.Context, id uint64, status model.InvitationStatus) error {
