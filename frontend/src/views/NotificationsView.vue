@@ -5,7 +5,7 @@
         <div class="task-title-row">
           <div class="title-text">
             <h1>🔔 系统消息</h1>
-            <p class="hint">处理你的团队邀请与任务指派</p>
+            <p class="hint">处理团队邀请；任务指派进入本页后按“已读即接受”自动确认</p>
           </div>
         </div>
       </header>
@@ -14,7 +14,7 @@
         <p v-if="loadError" class="error-banner">{{ loadError }}</p>
         <div v-if="loading" class="loading-state">加载消息中...</div>
         <div v-else-if="notifications.length === 0" class="empty-state">
-          你目前没有任何待处理的消息
+          你目前没有任何系统消息
         </div>
 
         <div v-else class="task-list">
@@ -29,7 +29,7 @@
                   </span>
                 </template>
                 
-                <!-- 区分渲染：如果是任务指派 (纯提示) -->
+                <!-- 区分渲染：任务指派消息（进入消息中心后会按“已读即接受”规则自动转为 ACCEPTED） -->
                 <template v-else>
                   <h3>任务指派：{{ item.task_title || `Task #${item.task_id}` }}</h3>
                   <span class="status-badge status-accepted">系统通知</span>
@@ -48,7 +48,7 @@
               </p>
             </div>
 
-            <!-- 操作区：仅对团队邀请且状态为 PENDING 时展示按钮 (任务指派不展示按钮) -->
+            <!-- 操作区：团队邀请显示同意/拒绝；任务指派显示忽略按钮（dismiss，非物理删除） -->
             <div class="task-actions" v-if="item.type === 'INVITATION' && item.status === 'PENDING'">
               <button class="btn btn-small btn-complete" @click="handleAccept(item)" :disabled="processingId === item.id">
                 同意
@@ -58,8 +58,8 @@
               </button>
             </div>
             <div class="task-actions" v-else-if="item.type === 'ASSIGNMENT'">
-              <button class="btn btn-small btn-danger" @click="handleDeleteAssignment(item)" :disabled="processingId === item.id">
-                删除
+              <button class="btn btn-small btn-danger" @click="handleDismissAssignment(item)" :disabled="processingId === item.id">
+                忽略
               </button>
             </div>
           </div>
@@ -136,14 +136,14 @@ const loadNotifications = async () => {
       assignList = Array.isArray(resData) ? resData : (resData?.data || []);
       assignList = assignList.map(item => ({ ...item, type: 'ASSIGNMENT' }));
 
-      // 恢复静默已读：进入消息页后，将 PENDING 指派请求标记为 ACCEPTED
+      // 业务规则：前端读取到任务指派消息后，自动调用 accept 接口，将 PENDING 更新为 ACCEPTED
       const pendingAssignments = assignList.filter(a => a.status === 'PENDING');
       if (pendingAssignments.length > 0) {
         const readResults = await Promise.allSettled(pendingAssignments.map(a => acceptAssignmentApi(a.id)));
         readResults.forEach((result, index) => {
           if (result.status === 'rejected') {
             const assignment = pendingAssignments[index];
-            requestErrors.push(getApiErrorMessage(result.reason, `确认任务指派 #${assignment.task_id || assignment.id} 已读失败`));
+            requestErrors.push(getApiErrorMessage(result.reason, `任务指派 #${assignment.task_id || assignment.id} 自动接受失败`));
           }
         });
         assignList.forEach(a => { if (a.status === 'PENDING') a.status = 'ACCEPTED'; });
@@ -169,7 +169,8 @@ const canProcessInvitation = (item) => {
   return item?.type === 'INVITATION' && item.status === 'PENDING';
 };
 
-const handleDeleteAssignment = async (item) => {
+// 忽略任务指派消息：调用 dismiss 接口写入 dismiss_at，仅从当前用户消息列表隐藏
+const handleDismissAssignment = async (item) => {
   if (item?.type !== 'ASSIGNMENT') return;
 
   const id = item.id;
@@ -182,10 +183,10 @@ const handleDeleteAssignment = async (item) => {
         (entry) => !(entry.type === 'ASSIGNMENT' && entry.id === id)
       );
     } else {
-      showMessage(getApiFailureMessage(res, '删除任务分配消息失败', '操作失败，请重试'), '操作失败');
+      showMessage(getApiFailureMessage(res, '忽略任务指派消息失败', '操作失败，请重试'), '操作失败');
     }
   } catch (error) {
-    showMessage(getApiErrorMessage(error, '删除任务分配消息失败'), '操作失败');
+    showMessage(getApiErrorMessage(error, '忽略任务指派消息失败'), '操作失败');
   } finally {
     processingId.value = null;
   }

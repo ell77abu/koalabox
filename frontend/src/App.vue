@@ -61,7 +61,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { RouterView, RouterLink, useRoute } from 'vue-router';
 import { authStore } from './stores/auth';
-// 引入双重 API
+// 顶部角标同时统计团队邀请与任务指派两类消息
 import { getInvitationsApi, getAssignmentRequestsApi } from './services/team';
 import { getApiErrorMessage } from './utils/apiError';
 
@@ -75,7 +75,7 @@ const levelLabel = computed(() => (Number(authStore.level.value) === 1 ? '管理
 const theme = ref('light');
 const themeLabel = computed(() => (theme.value === 'light' ? '深色模式' : '浅色模式'));
 
-// 未处理消息总数量状态
+// 待处理（PENDING）消息数量，用于顶部红点角标
 const pendingCount = ref(0);
 
 const applyTheme = (value) => {
@@ -88,7 +88,7 @@ const toggleTheme = () => {
   applyTheme(theme.value);
 };
 
-// 雷达：并行拉取团队邀请与任务指派的数量并进行汇总计算
+// 并行拉取团队邀请与任务指派，仅统计 status=PENDING 的条目
 const checkPendingNotifications = async () => {
   if (!authStore.isLoggedIn.value) return;
   
@@ -132,11 +132,11 @@ onMounted(() => {
   }
   applyTheme(theme.value);
   
-  // 页面挂载时检查未读消息
+  // 页面挂载时刷新待处理消息角标
   checkPendingNotifications();
 });
 
-// 监听路由变化，实现每次导航后自动刷新红点数量
+// 路由变化后刷新角标（例如进入消息中心后，任务指派会被自动 accept，PENDING 数量应下降）
 watch(route, () => {
   checkPendingNotifications();
 });

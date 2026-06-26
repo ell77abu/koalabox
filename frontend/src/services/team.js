@@ -26,11 +26,14 @@ export const acceptInvitationApi = (invitationId) => http.post(`/teams/invitatio
 export const declineInvitationApi = (invitationId) => http.post(`/teams/invitations/${invitationId}/decline`);
 
 
-// 任务指派：只暴露获取接口，前端不做同意/拒绝操作
+// 任务指派消息接口：
+// - 获取任务指派消息；
+// - 按“已读即接受”规则将 PENDING 指派更新为 ACCEPTED；
+// - 支持删除（忽略）消息，后端写入 dismiss_at。
 export const getAssignmentRequestsApi = () => http.get('/assignment-requests', { params: { assignee_id: 'me' } });
-// 供 静默已读 API
+// 供消息中心自动“已读即接受”使用
 export const acceptAssignmentApi = (requestId) => http.post(`/assignment-requests/${requestId}/accept`);
-// 删除（忽略）任务分配消息，后端会写入 dismiss_at
+// 忽略任务指派消息：后端写入 dismiss_at，仅从消息列表隐藏，不改变任务分配业务状态
 export const dismissAssignmentApi = (requestId) => http.post(`/assignment-requests/${requestId}/dismiss`);
 
 // ==================== Lab3团队生命周期演化 ====================
