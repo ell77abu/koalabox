@@ -934,15 +934,7 @@ const markTaskDone = async (task) => {
 
   updatingId.value = task.id;
   try {
-    const payload = canEditTaskDetails(task)
-      ? {
-          title: task.title,
-          description: task.description || null,
-          status: 'DONE',
-          priority: parseInt(task.priority),
-          deadline: task.deadline || null,
-        }
-      : { status: 'DONE' };
+    const payload = { status: 'DONE' };
 
     const response = await updateTaskApi(task.id, payload);
     if (response.data.code === 0) {
