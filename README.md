@@ -94,20 +94,22 @@ go test ./...
 ### Lab4 API 验收脚本
 先启动 PostgreSQL 和 Go 后端，确认 `http://127.0.0.1:8080/api/v1/ping` 可访问，然后在项目根目录执行：
 ```bash
-bash scripts/lab4_prepare_api_data.sh
-bash scripts/lab4_run_api_tests.sh
+bash scripts/prepare_api_data.sh
+bash scripts/run_api_tests.sh
 ```
 脚本依赖 `curl` 和 `jq`，会自动创建隔离测试用户、团队和任务，并断言注册登录、个人任务 CRUD、团队权限、依赖规则、操作日志生成、日志倒序查询、删除后日志保留和无权限日志访问。通过标准是脚本末尾输出 `failed=0`。
+脚本同时覆盖任务回收站查询、回收站权限拦截，以及任务分配通知隐藏。
 
 默认不带参数时会执行全部用例；需要定位单项问题时可以筛选：
 ```bash
-bash scripts/lab4_run_api_tests.sh --list
-bash scripts/lab4_run_api_tests.sh --lab lab3
-bash scripts/lab4_run_api_tests.sh --case TC08
-bash scripts/lab4_run_api_tests.sh --case TC08,TC14
+bash scripts/run_api_tests.sh --list
+bash scripts/run_api_tests.sh --lab lab3
+bash scripts/run_api_tests.sh --case TC08
+bash scripts/run_api_tests.sh --case TC08,TC14
+bash scripts/run_api_tests.sh --case TC15,TC16
 ```
 
-如果要重复跑完整验收，请先重新执行 `lab4_prepare_api_data.sh`，因为 `lab4_run_api_tests.sh` 会修改状态、删除任务并让成员离队。
+如果要重复跑完整验收，请先重新执行 `prepare_api_data.sh`，因为 `run_api_tests.sh` 会修改状态、删除任务、隐藏分配通知并让成员离队。完整 API 与单元测试用例表见 `backend/docs/lab4-test-cases-and-usage.md`。
 
 ### 前端构建与截图
 在安装 Node.js 的环境中执行：

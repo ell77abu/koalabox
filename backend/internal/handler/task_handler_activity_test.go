@@ -328,3 +328,47 @@ func TestTaskHandlerDismissAssignmentForbidden(t *testing.T) {
 	assert.Equal(t, 403, resp.Code)
 	assert.Equal(t, "forbidden", resp.Message)
 }
+
+func TestTaskHandlerDismissAssignmentInvalidRequestID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewTaskHandler(&taskLogServiceMock{})
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Set(middleware.ContextUserIDKey, uint64(7))
+	c.Params = gin.Params{{Key: "request_id", Value: "bad-id"}}
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/assignment-requests/bad-id/dismiss", nil)
+
+	handler.DismissAssignment(c)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	var resp response.Common
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, 400, resp.Code)
+	assert.Equal(t, "invalid request id", resp.Message)
+}
+
+func TestTaskHandlerDismissAssignmentNotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewTaskHandler(&taskLogServiceMock{
+		dismissAssignmentFn: func(ctx context.Context, userID, requestID uint64) (*service.AssignmentDismissResult, error) {
+			assert.Equal(t, uint64(7), userID)
+			assert.Equal(t, uint64(21), requestID)
+			return nil, repository.ErrNotFound
+		},
+	})
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Set(middleware.ContextUserIDKey, uint64(7))
+	c.Params = gin.Params{{Key: "request_id", Value: "21"}}
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/assignment-requests/21/dismiss", nil)
+
+	handler.DismissAssignment(c)
+
+	require.Equal(t, http.StatusNotFound, w.Code)
+	var resp response.Common
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, 404, resp.Code)
+	assert.Equal(t, "assignment not found", resp.Message)
+}

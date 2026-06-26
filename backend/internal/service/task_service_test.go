@@ -288,7 +288,7 @@ func (s *taskUserRepoStub) UpdatePasswordByID(ctx context.Context, id uint64, pa
 type taskAssignRepoStub struct {
 	listPendingByAssigneeFn   func(ctx context.Context, assigneeID uint64) ([]model.TaskAssignmentRequestDetail, error)
 	dismissForAssigneeScopeFn func(ctx context.Context, id, assigneeID uint64) (*time.Time, error)
-	declinePendingByTaskIDFn func(ctx context.Context, taskID uint64) error
+	declinePendingByTaskIDFn  func(ctx context.Context, taskID uint64) error
 }
 
 func (s *taskAssignRepoStub) Create(ctx context.Context, req *model.TaskAssignmentRequest) error {
@@ -498,6 +498,26 @@ func TestTaskServiceDismissAssignmentReturnsTimestamp(t *testing.T) {
 	require.NotNil(t, result)
 	assert.Equal(t, uint64(21), result.RequestID)
 	assert.True(t, result.DismissAt.Equal(dismissedAt))
+}
+
+func TestTaskServiceDismissAssignmentPropagatesForbidden(t *testing.T) {
+	svc := NewTaskService(
+		&taskRepoMock{},
+		&teamRepoForTaskMock{},
+		&taskUserRepoStub{},
+		&taskAssignRepoStub{
+			dismissForAssigneeScopeFn: func(ctx context.Context, id, assigneeID uint64) (*time.Time, error) {
+				assert.Equal(t, uint64(21), id)
+				assert.Equal(t, uint64(7), assigneeID)
+				return nil, repository.ErrForbidden
+			},
+		},
+	)
+
+	result, err := svc.DismissAssignment(context.Background(), 7, 21)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, repository.ErrForbidden)
+	assert.Nil(t, result)
 }
 
 func TestTaskServiceUpdateRejectsMemberEditingNonStatusFields(t *testing.T) {
