@@ -561,6 +561,7 @@ const editingTask = reactive({
   team_id: null,
   predecessor_ids: [] // 用于绑定弹窗里的多选框（用于依赖设置）
 });
+const originalEditingDeadline = ref('');
 
 //  记录打开弹窗时的原始依赖，用于比对增删
 const editingDependencies = ref([]); 
@@ -846,15 +847,20 @@ const onUpdateTask = async () => {
   updatingId.value = editingTask.id;
   updateError.value = '';
   try {
-    const payload = canEditTaskDetails(editingTask)
-      ? {
-          title: editingTask.title,
-          description: editingTask.description || null,
-          status: editingTask.status,
-          priority: parseInt(editingTask.priority),
-          deadline: toBackendDeadline(editingTask.deadline),
-        }
-      : { status: editingTask.status };
+    let payload;
+    if (canEditTaskDetails(editingTask)) {
+      payload = {
+        title: editingTask.title,
+        description: editingTask.description || null,
+        status: editingTask.status,
+        priority: parseInt(editingTask.priority),
+      };
+      if (editingTask.deadline !== originalEditingDeadline.value) {
+        payload.deadline = editingTask.deadline ? toBackendDeadline(editingTask.deadline) : null;
+      }
+    } else {
+      payload = { status: editingTask.status };
+    }
 
     const response = await updateTaskApi(editingTask.id, payload);
     if (response.data.code === 0) {
@@ -1021,7 +1027,9 @@ const startEdit = async (task) => {
   editingTask.description = task.description || '';
   editingTask.status = task.status;
   editingTask.priority = String(task.priority);
-  editingTask.deadline = task.deadline ? formatDateForInput(task.deadline) : '';
+  const deadlineInput = task.deadline ? formatDateForInput(task.deadline) : '';
+  editingTask.deadline = deadlineInput;
+  originalEditingDeadline.value = deadlineInput;
   editingTask.team_id = isPersonalTask(task) ? null : task.team_id;
   editingTask.predecessor_ids = []; // 清空重置
   editingDependencies.value = [];   // 清空重置
@@ -1052,6 +1060,7 @@ const cancelEdit = () => {
   editingTask.deadline = '';
   editingTask.team_id = null;
   editingTask.predecessor_ids = [];
+  originalEditingDeadline.value = '';
   editingDependencies.value = [];
 };
 
@@ -1075,8 +1084,11 @@ const parseDateInput = (value) => {
 const toBackendDeadline = (value) => {
   const parts = parseDateInput(value);
   if (!parts) return null;
-  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, 0));
-  return date.toISOString();
+  const month = String(parts.month).padStart(2, '0');
+  const day = String(parts.day).padStart(2, '0');
+  const hour = String(parts.hour).padStart(2, '0');
+  const minute = String(parts.minute).padStart(2, '0');
+  return `${parts.year}-${month}-${day} ${hour}:${minute}:00`;
 };
 
 // 格式化日期显示为 YYYY/MM/DD
@@ -1097,11 +1109,11 @@ const formatDateForInput = (dateStr) => {
   if (!dateStr) return '';
   const date = new Date(dateStr);
   if (Number.isNaN(date.getTime())) return '';
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(date.getUTCDate()).padStart(2, '0');
-  const hour = String(date.getUTCHours()).padStart(2, '0');
-  const minute = String(date.getUTCMinutes()).padStart(2, '0');
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hour = String(date.getHours()).padStart(2, '0');
+  const minute = String(date.getMinutes()).padStart(2, '0');
   return `${year}-${month}-${day}T${hour}:${minute}`;
 };
 
